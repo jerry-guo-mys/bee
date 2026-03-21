@@ -128,6 +128,12 @@ backup_before_edit = true
 [web]
 port = 8080
 
+[critic]
+enabled = false
+evaluate_all_tools = false
+score_threshold = 0.45
+max_self_corrections = 2
+
 # 心跳机制（仅 bee-web：后台自主循环，思考现状 → 检查待办 → 反思）
 [heartbeat]
 enabled = false

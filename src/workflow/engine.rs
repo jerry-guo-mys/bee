@@ -2,13 +2,16 @@
 //!
 //! 核心执行引擎，管理工作流生命周期和任务调度
 
+#[cfg(feature = "gateway")]
 use std::collections::HashMap;
+#[cfg(feature = "gateway")]
 use tokio::sync::RwLock;
 
 #[cfg(feature = "gateway")]
 use crate::gateway::{BackgroundTask, TaskQueue};
 #[cfg(feature = "gateway")]
 use crate::workflow::graph::WorkflowGraph;
+#[cfg(feature = "gateway")]
 use crate::workflow::types::*;
 #[cfg(feature = "gateway")]
 use async_trait::async_trait;
@@ -27,6 +30,7 @@ pub trait WorkflowTaskExecutor: Send + Sync {
 pub struct WorkflowEngine {
     #[cfg(feature = "gateway")]
     task_queue: Arc<TaskQueue>,
+    #[cfg(feature = "gateway")]
     workflows: RwLock<HashMap<WorkflowId, Workflow>>,
     #[cfg(feature = "gateway")]
     executor: Arc<dyn WorkflowTaskExecutor>,

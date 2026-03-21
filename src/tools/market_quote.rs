@@ -4,8 +4,8 @@ use serde_json::Value;
 
 use crate::tools::output;
 use crate::tools::{
-    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
-    ToolScope, ToolUseCase,
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode,
+    ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
 pub struct MarketQuoteTool {
@@ -48,6 +48,17 @@ impl Tool for MarketQuoteTool {
             ToolUseCase::MarketQuote,
             ToolUseCase::TimeSensitiveCurrent,
         ])
+        .with_capability(
+            ToolCapabilityGroup::RealtimeData,
+            ToolCapabilitySubgroup::MarketQuote,
+        )
+        .with_costs(
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+            ToolCostClass::Medium,
+            ToolCostClass::Low,
+        )
+        .with_preferred_rank(1)
         .with_critic_mode(ToolCriticMode::Skip)
     }
 

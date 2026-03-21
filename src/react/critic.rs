@@ -22,11 +22,19 @@ use crate::tools::{ToolCriticMode, ToolMetadata, ToolOutputShape, ToolRisk};
 #[derive(Debug, Clone)]
 pub enum CriticResult {
     /// 通过
-    Approved,
+    Approved { score: f32 },
     /// 需要修正
-    Correction(String),
+    Review(CriticReview),
     /// 跳过评估（该工具不在评估列表中）
     Skipped,
+}
+
+#[derive(Debug, Clone)]
+pub struct CriticReview {
+    pub score: f32,
+    pub reason: String,
+    pub retry_recommended: bool,
+    pub blocking_risk: bool,
 }
 
 /// Critic：持有 LLM 与 prompt 模板，evaluate(goal, tool, observation) 返回 Approved / Correction / Skipped
@@ -37,6 +45,8 @@ pub struct Critic {
     evaluate_all_tools: bool,
     /// 仅评估的工具集合（evaluate_all_tools=false 时生效）
     evaluate_tools: HashSet<String>,
+    score_threshold: f32,
+    max_self_corrections: usize,
 }
 
 impl Critic {
@@ -47,6 +57,8 @@ impl Critic {
             prompt_template: config.prompt_template.clone(),
             evaluate_all_tools: config.evaluate_all_tools,
             evaluate_tools: config.evaluate_tools.iter().cloned().collect(),
+            score_threshold: config.score_threshold,
+            max_self_corrections: config.max_self_corrections,
         }
     }
 
@@ -57,6 +69,8 @@ impl Critic {
             prompt_template: prompt_template.into(),
             evaluate_all_tools: true,
             evaluate_tools: HashSet::new(),
+            score_threshold: 0.45,
+            max_self_corrections: 2,
         }
     }
 
@@ -71,6 +85,14 @@ impl Critic {
     pub fn with_evaluate_all(mut self) -> Self {
         self.evaluate_all_tools = true;
         self
+    }
+
+    pub fn score_threshold(&self) -> f32 {
+        self.score_threshold
+    }
+
+    pub fn max_self_corrections(&self) -> usize {
+        self.max_self_corrections
     }
 
     /// 检查是否应该评估此工具
@@ -153,13 +175,45 @@ impl Critic {
             .complete(&messages)
             .await
             .map_err(|e| e.to_string())?;
-        let response = response.trim().to_uppercase();
+        let trimmed = response.trim();
 
-        if response.starts_with("OK") || response.is_empty() {
-            Ok(CriticResult::Approved)
-        } else {
-            Ok(CriticResult::Correction(response))
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("OK") {
+            return Ok(CriticResult::Approved { score: 1.0 });
         }
+
+        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+            let score = value.get("score").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+            let reason = value
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let retry_recommended = value
+                .get("retry_recommended")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let blocking_risk = value
+                .get("blocking_risk")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if score >= self.score_threshold && !blocking_risk {
+                return Ok(CriticResult::Approved { score });
+            }
+            return Ok(CriticResult::Review(CriticReview {
+                score,
+                reason,
+                retry_recommended,
+                blocking_risk,
+            }));
+        }
+
+        Ok(CriticResult::Review(CriticReview {
+            score: 0.2,
+            reason: trimmed.to_string(),
+            retry_recommended: true,
+            blocking_risk: false,
+        }))
     }
 }
 
@@ -168,6 +222,30 @@ mod tests {
     use super::*;
     use crate::llm::MockLlmClient;
     use crate::tools::{ToolFreshness, ToolIntent, ToolScope};
+    use async_trait::async_trait;
+
+    struct StaticLlm(&'static str);
+
+    #[async_trait]
+    impl LlmClient for StaticLlm {
+        async fn complete(&self, _messages: &[Message]) -> Result<String, crate::llm::LlmError> {
+            Ok(self.0.to_string())
+        }
+
+        async fn complete_stream(
+            &self,
+            _messages: &[Message],
+        ) -> Result<
+            std::pin::Pin<
+                Box<dyn futures_util::Stream<Item = Result<String, crate::llm::LlmError>> + Send>,
+            >,
+            crate::llm::LlmError,
+        > {
+            Ok(Box::pin(futures_util::stream::iter(vec![Ok(self
+                .0
+                .to_string())])))
+        }
+    }
 
     #[test]
     fn test_should_evaluate_all() {
@@ -211,5 +289,26 @@ mod tests {
         .with_critic_mode(ToolCriticMode::Always);
 
         assert!(critic.should_evaluate_with_metadata("shell", Some(&metadata), "command output",));
+    }
+
+    #[test]
+    fn test_critic_parses_json_review() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let critic = Critic::new(
+                Arc::new(StaticLlm(
+                    r#"{"score":0.2,"reason":"stale result","retry_recommended":true,"blocking_risk":false}"#,
+                )),
+                "test",
+            );
+            let result = critic.evaluate("goal", "search", "obs").await.unwrap();
+            match result {
+                CriticResult::Review(review) => {
+                    assert_eq!(review.reason, "stale result");
+                    assert!(review.retry_recommended);
+                }
+                _ => panic!("expected review"),
+            }
+        });
     }
 }

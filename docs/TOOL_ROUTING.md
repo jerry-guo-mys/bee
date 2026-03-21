@@ -10,6 +10,17 @@
 
 ## 当前策略
 
+当前实现已经升级成四层：
+
+- 分流层：高确定性请求直接命中专用工具
+- 约束层：Metadata + capability/cost 排序收窄候选工具
+- 反馈层：Critic 打分而不是直接发号施令
+- 守卫层：Golden Dataset 固化预期路径
+
+详见：
+
+- [`TOOL_ROUTER_ARCHITECTURE.md`](/Users/g/Documents/GitHub/feature/org_20260321/docs/TOOL_ROUTER_ARCHITECTURE.md)
+
 ### 1. 先收窄候选工具，再让 Planner 选择
 
 运行时会先根据用户输入做一层硬路由：
@@ -41,8 +52,20 @@
 
 - tool schema
 - 路由过滤
+- capability 分组
+- 成本排序
 - 执行前 guardrail
 - 观测与审计
+
+新增 metadata 字段包括：
+
+- `capability_group`
+- `capability_subgroup`
+- `latency_class`
+- `token_cost_class`
+- `api_cost_class`
+- `overall_cost_class`
+- `preferred_rank`
 
 实现位置：
 
@@ -94,6 +117,8 @@ GitHub 仓库的 `repo/blob/tree` 检查只由 `github_repo_inspect` 负责。
 
 - `policy_rewrites`
 - `policy_blocks`
+- `direct_route_hits`
+- `route_drift_count`
 
 实现位置：
 

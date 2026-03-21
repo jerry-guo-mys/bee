@@ -9,8 +9,8 @@ use serde_json::{json, Value};
 use crate::llm::LlmClient;
 use crate::memory::Message;
 use crate::tools::{
-    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
-    ToolScope, ToolUseCase,
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode,
+    ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
 pub struct DeepSearchTool {
@@ -525,6 +525,17 @@ impl Tool for DeepSearchTool {
             ToolUseCase::ExternalGitHubRepo,
             ToolUseCase::TimeSensitiveCurrent,
         ])
+        .with_capability(
+            ToolCapabilityGroup::WebResearch,
+            ToolCapabilitySubgroup::WebFetch,
+        )
+        .with_costs(
+            ToolCostClass::High,
+            ToolCostClass::High,
+            ToolCostClass::Low,
+            ToolCostClass::High,
+        )
+        .with_preferred_rank(5)
         .with_critic_mode(ToolCriticMode::Conservative)
     }
 

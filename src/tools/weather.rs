@@ -4,8 +4,8 @@ use serde_json::Value;
 
 use crate::tools::output;
 use crate::tools::{
-    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
-    ToolScope, ToolUseCase,
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode,
+    ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
 pub struct WeatherTool {
@@ -161,6 +161,17 @@ impl Tool for WeatherTool {
             ToolUseCase::Weather,
             ToolUseCase::TimeSensitiveCurrent,
         ])
+        .with_capability(
+            ToolCapabilityGroup::RealtimeData,
+            ToolCapabilitySubgroup::Weather,
+        )
+        .with_costs(
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+        )
+        .with_preferred_rank(1)
         .with_critic_mode(ToolCriticMode::Skip)
     }
 

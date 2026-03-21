@@ -19,6 +19,7 @@ use crate::saas::{
 };
 use crate::skills::SkillSelector;
 use crate::tool_policy::refine_allowed_tools_for_input;
+use crate::tool_router::{deterministic_route, execute_direct_route};
 
 /// Runtime 配置
 #[derive(Debug, Clone)]
@@ -276,6 +277,32 @@ impl AgentRuntime {
             (None, Some(hint)) => Some(hint.to_string()),
             (None, None) => None,
         };
+
+        if let Some(route) =
+            deterministic_route(user_input, Some(policy_decision.allowed_tools.as_slice()))
+        {
+            let result = execute_direct_route(
+                &self.components.executor,
+                &mut context,
+                user_input,
+                &route,
+                Some(&event_tx),
+                cancel_token,
+            )
+            .await;
+            self.session_store.set_context(session_id, context).await;
+            if let Ok(ref direct_result) = result {
+                crate::observability::Metrics::global()
+                    .tools
+                    .record_direct_route_hit();
+                for msg in &direct_result.messages {
+                    self.session_store
+                        .add_message(session_id, msg.clone())
+                        .await;
+                }
+            }
+            return result.map(|r| r.response);
+        }
 
         let result = react_loop(
             &self.components.planner,

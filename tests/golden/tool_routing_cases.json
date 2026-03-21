@@ -1,0 +1,38 @@
+[
+  {
+    "name": "weather_direct_route",
+    "input": "吉隆坡明天天气",
+    "expected_query_kind": "Weather",
+    "expected_direct_tool": "weather",
+    "expected_allowed_tools": ["weather"],
+    "forbidden_tools": ["ls", "cat", "code_read", "shell"],
+    "should_use_memory": false
+  },
+  {
+    "name": "news_direct_route",
+    "input": "今天有什么新闻，推荐5条",
+    "expected_query_kind": "News",
+    "expected_direct_tool": "news",
+    "expected_allowed_tools": ["news"],
+    "forbidden_tools": ["ls", "cat", "code_read", "shell"],
+    "should_use_memory": false
+  },
+  {
+    "name": "github_repo_analysis",
+    "input": "分析 https://github.com/paperclipai/paperclip 的技术架构",
+    "expected_query_kind": "ExternalGitHubRepo",
+    "expected_direct_tool": null,
+    "expected_allowed_tools": ["github_repo_inspect"],
+    "forbidden_tools": ["ls", "cat", "code_read", "shell"],
+    "should_use_memory": true
+  },
+  {
+    "name": "direct_explanation",
+    "input": "这个产品是什么？",
+    "expected_query_kind": "DirectExplanation",
+    "expected_direct_tool": null,
+    "expected_allowed_tools": ["search"],
+    "forbidden_tools": ["ls", "cat", "code_read", "shell"],
+    "should_use_memory": true
+  }
+]

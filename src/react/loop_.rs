@@ -259,6 +259,7 @@ async fn react_loop_impl(
     let (init_prompt, init_completion, _) = planner.token_usage();
 
     let mut step = 0;
+    let mut critic_retry_budget = critic.map(|c| c.max_self_corrections()).unwrap_or(0);
     let mut last_llm_output = String::new();
 
     loop {
@@ -642,21 +643,41 @@ async fn react_loop_impl(
                             tool_metadata.as_ref(),
                             &observation,
                         ) {
-                            if let Ok(CriticResult::Correction(suggestion)) =
-                                c.evaluate(user_input, &tool_name, &observation).await
-                            {
-                                send_event(
-                                    &event_tx,
-                                    ReactEvent::Recovery {
-                                        action: "Critic".to_string(),
-                                        detail: suggestion.clone(),
-                                    },
-                                );
-                                context.append_critic_lesson(&suggestion);
-                                context.push_message(Message::user(format!(
-                                    "Critic 建议：{}",
-                                    suggestion
-                                )));
+                            match c.evaluate(user_input, &tool_name, &observation).await {
+                                Ok(CriticResult::Approved { score }) => {
+                                    tracing::debug!(tool = %tool_name, critic_score = score, "critic approved observation");
+                                }
+                                Ok(CriticResult::Review(review)) => {
+                                    let metrics = crate::observability::Metrics::global();
+                                    metrics.tools.record_route_drift();
+                                    if review.score < c.score_threshold()
+                                        && review.retry_recommended
+                                        && critic_retry_budget > 0
+                                    {
+                                        critic_retry_budget -= 1;
+                                        let suggestion = if review.reason.trim().is_empty() {
+                                            "Critic requested a more aligned next step".to_string()
+                                        } else {
+                                            review.reason.clone()
+                                        };
+                                        send_event(
+                                            &event_tx,
+                                            ReactEvent::Recovery {
+                                                action: "Critic".to_string(),
+                                                detail: suggestion.clone(),
+                                            },
+                                        );
+                                        context.append_critic_lesson(&suggestion);
+                                        context.push_message(Message::user(format!(
+                                            "Critic 建议：{}",
+                                            suggestion
+                                        )));
+                                    }
+                                }
+                                Ok(CriticResult::Skipped) => {}
+                                Err(err) => {
+                                    tracing::warn!(tool = %tool_name, error = %err, "critic evaluation failed");
+                                }
                             }
                         }
                     }

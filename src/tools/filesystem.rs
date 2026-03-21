@@ -11,8 +11,8 @@ use serde_json::Value;
 use crate::core::AgentError;
 use crate::tools::output;
 use crate::tools::{
-    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
-    ToolUseCase,
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode, ToolIntent,
+    ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
 /// 沙箱文件系统：绑定根目录，resolve 校验路径在根下，防止路径逃逸
@@ -134,6 +134,17 @@ impl Tool for CatTool {
                 ToolUseCase::ExternalGitHubRepo,
             ])
             .with_requires_explicit_user_request(true)
+            .with_capability(
+                ToolCapabilityGroup::LocalWorkspace,
+                ToolCapabilitySubgroup::FileRead,
+            )
+            .with_costs(
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+            )
+            .with_preferred_rank(2)
             .with_critic_mode(ToolCriticMode::Skip)
     }
 
@@ -187,6 +198,17 @@ impl Tool for LsTool {
                 ToolUseCase::ExternalGitHubRepo,
             ])
             .with_requires_explicit_user_request(true)
+            .with_capability(
+                ToolCapabilityGroup::LocalWorkspace,
+                ToolCapabilitySubgroup::DirectoryListing,
+            )
+            .with_costs(
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+            )
+            .with_preferred_rank(3)
             .with_critic_mode(ToolCriticMode::Skip)
     }
 

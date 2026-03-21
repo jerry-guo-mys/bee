@@ -9,8 +9,8 @@ use serde_json::Value;
 
 use crate::tools::output;
 use crate::tools::{
-    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
-    ToolUseCase,
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode, ToolIntent,
+    ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
 /// 代码读取工具
@@ -164,6 +164,17 @@ impl Tool for CodeReadTool {
                 ToolUseCase::ExternalGitHubRepo,
             ])
             .with_requires_explicit_user_request(true)
+            .with_capability(
+                ToolCapabilityGroup::LocalWorkspace,
+                ToolCapabilitySubgroup::CodeRead,
+            )
+            .with_costs(
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+            )
+            .with_preferred_rank(2)
             .with_critic_mode(ToolCriticMode::Skip)
     }
 

@@ -6,8 +6,8 @@ use serde_json::{json, Value};
 
 use crate::tools::output;
 use crate::tools::{
-    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
-    ToolScope, ToolUseCase,
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode,
+    ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
 pub struct GitHubRepoInspectTool {
@@ -364,6 +364,17 @@ impl Tool for GitHubRepoInspectTool {
         .with_freshness(ToolFreshness::BestEffort)
         .with_preferred_use_cases(vec![ToolUseCase::ExternalGitHubRepo])
         .with_disallowed_use_cases(vec![ToolUseCase::TimeSensitiveCurrent])
+        .with_capability(
+            ToolCapabilityGroup::RepositoryAnalysis,
+            ToolCapabilitySubgroup::GitHubRepo,
+        )
+        .with_costs(
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+        )
+        .with_preferred_rank(1)
         .with_critic_mode(ToolCriticMode::Conservative)
     }
 

@@ -125,6 +125,12 @@ pub struct CriticSection {
     /// 仅评估的工具列表（为空时评估所有，evaluate_all_tools=false 时生效）
     #[serde(default)]
     pub evaluate_tools: Vec<String>,
+    /// 低于该分数时才触发自我纠偏
+    #[serde(default = "default_critic_score_threshold")]
+    pub score_threshold: f32,
+    /// 单次 ReAct 最多允许 Critic 触发多少次纠偏
+    #[serde(default = "default_critic_max_self_corrections")]
+    pub max_self_corrections: usize,
 }
 
 fn default_critic_enabled() -> bool {
@@ -138,11 +144,24 @@ Goal: {goal}
 Tool used: {tool}
 Observation: {observation}
 
-If the result looks correct and helpful for achieving the goal, respond with "OK".
-If there's an issue or better approach, briefly explain the problem.
+Respond with JSON only:
+{"score": 0.0, "reason": "", "retry_recommended": false, "blocking_risk": false}
 
-Response:"#
+Rules:
+- score must be between 0.0 and 1.0
+- use higher scores when the result is already sufficient for answering the user
+- set retry_recommended=true only when another step is genuinely needed
+- set blocking_risk=true only for serious mismatch, unsafe action, or clearly stale/irrelevant evidence
+- keep reason brief"#
         .to_string()
+}
+
+fn default_critic_score_threshold() -> f32 {
+    0.45
+}
+
+fn default_critic_max_self_corrections() -> usize {
+    2
 }
 
 impl Default for CriticSection {
@@ -154,6 +173,8 @@ impl Default for CriticSection {
             prompt_template: default_critic_prompt(),
             evaluate_all_tools: false,
             evaluate_tools: vec![],
+            score_threshold: default_critic_score_threshold(),
+            max_self_corrections: default_critic_max_self_corrections(),
         }
     }
 }

@@ -14,8 +14,8 @@ use serde_json::Value;
 
 use crate::tools::output;
 use crate::tools::{
-    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
-    ToolScope, ToolUseCase,
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode,
+    ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
 /// Search 工具：抓取 URL 内容，仅允许白名单域名；超时与最大字符数由配置决定
@@ -451,6 +451,17 @@ impl Tool for SearchTool {
                 ToolUseCase::DirectExplanation,
                 ToolUseCase::TimeSensitiveCurrent,
             ])
+            .with_capability(
+                ToolCapabilityGroup::WebResearch,
+                ToolCapabilitySubgroup::WebFetch,
+            )
+            .with_costs(
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+            )
+            .with_preferred_rank(3)
             .with_critic_mode(ToolCriticMode::Conservative)
     }
 

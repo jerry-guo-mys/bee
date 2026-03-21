@@ -19,6 +19,7 @@ use crate::memory::{
 use crate::react::{react_loop, ContextManager, Planner, ReactEvent};
 use crate::skills::SkillSelector;
 use crate::tool_policy::refine_allowed_tools_for_input;
+use crate::tool_router::{deterministic_route, execute_direct_route};
 use tokio::sync::mpsc;
 
 /// 创建 Agent 组件：使用统一的 AgentBuilder（解决问题 1.1）
@@ -245,6 +246,22 @@ pub async fn process_message(
     allowed_tools: Option<&[String]>,
 ) -> Result<String, AgentError> {
     let cancel_token = tokio_util::sync::CancellationToken::new();
+    let direct_route = deterministic_route(user_input, allowed_tools);
+    if let Some(route) = direct_route.as_ref() {
+        let result = execute_direct_route(
+            &components.executor,
+            context,
+            user_input,
+            route,
+            None,
+            cancel_token.clone(),
+        )
+        .await?;
+        crate::observability::Metrics::global()
+            .tools
+            .record_direct_route_hit();
+        return Ok(result.response);
+    }
     let policy_decision = allowed_tools.map(|tools| {
         let metadata = components.executor.tool_metadata_for_names(tools);
         refine_allowed_tools_for_input(user_input, &metadata)
@@ -315,6 +332,22 @@ pub async fn process_message_stream_with_cancel(
     cancel_token: tokio_util::sync::CancellationToken,
 ) -> Result<String, AgentError> {
     let planner = planner_override.unwrap_or(&components.planner);
+    let direct_route = deterministic_route(user_input, allowed_tools);
+    if let Some(route) = direct_route.as_ref() {
+        let result = execute_direct_route(
+            &components.executor,
+            context,
+            user_input,
+            route,
+            Some(&event_tx),
+            cancel_token,
+        )
+        .await?;
+        crate::observability::Metrics::global()
+            .tools
+            .record_direct_route_hit();
+        return Ok(result.response);
+    }
     let policy_decision = allowed_tools.map(|tools| {
         let metadata = components.executor.tool_metadata_for_names(tools);
         refine_allowed_tools_for_input(user_input, &metadata)

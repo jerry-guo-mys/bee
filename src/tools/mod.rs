@@ -56,8 +56,8 @@ pub use github_repo_inspect::GitHubRepoInspectTool;
 pub use knowledge_graph::KnowledgeGraphBuilder;
 pub use market_quote::MarketQuoteTool;
 pub use metadata::{
-    ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
-    ToolUseCase,
+    ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode, ToolFreshness,
+    ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 pub use news::NewsTool;
 pub use plugin::PluginTool;

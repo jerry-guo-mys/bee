@@ -29,6 +29,7 @@ pub mod saas;
 pub mod service_contracts;
 pub mod skills;
 pub mod tool_policy;
+pub mod tool_router;
 pub mod tools;
 pub mod ui;
 pub mod workflow;

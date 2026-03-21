@@ -5,8 +5,8 @@ use serde_json::Value;
 
 use crate::tools::output;
 use crate::tools::{
-    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
-    ToolScope, ToolUseCase,
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode,
+    ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
 pub struct SportsScoreTool {
@@ -60,6 +60,17 @@ impl Tool for SportsScoreTool {
             ToolUseCase::SportsScore,
             ToolUseCase::TimeSensitiveCurrent,
         ])
+        .with_capability(
+            ToolCapabilityGroup::RealtimeData,
+            ToolCapabilitySubgroup::SportsScore,
+        )
+        .with_costs(
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+        )
+        .with_preferred_rank(1)
         .with_critic_mode(ToolCriticMode::Skip)
     }
 

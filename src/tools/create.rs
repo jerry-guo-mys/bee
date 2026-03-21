@@ -48,10 +48,6 @@ impl CreateTool {
         self.workspace.join("groups.json")
     }
 
-    fn sessions_dir(&self) -> std::path::PathBuf {
-        self.workspace.join("sessions")
-    }
-
     fn load_agents(&self) -> Vec<DynamicAgent> {
         let data = match std::fs::read_to_string(self.agents_path()) {
             Ok(d) => d,

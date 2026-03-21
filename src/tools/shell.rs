@@ -11,8 +11,8 @@ use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use crate::tools::{
-    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
-    ToolUseCase,
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode, ToolIntent,
+    ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
 /// 禁止的命令/子串（即使白名单中有同名，也不允许带这些参数）
@@ -95,6 +95,17 @@ impl Tool for ShellTool {
             ToolUseCase::ExternalGitHubRepo,
         ])
         .with_requires_explicit_user_request(true)
+        .with_capability(
+            ToolCapabilityGroup::SystemExecution,
+            ToolCapabilitySubgroup::CommandExecution,
+        )
+        .with_costs(
+            ToolCostClass::Medium,
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+            ToolCostClass::Medium,
+        )
+        .with_preferred_rank(10)
         .with_critic_mode(ToolCriticMode::Always)
     }
 

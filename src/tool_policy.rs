@@ -4,7 +4,9 @@ use chrono::Local;
 use regex::Regex;
 use serde_json::Value;
 
-use crate::tools::{ToolFreshness, ToolMetadata, ToolScope, ToolUseCase};
+use crate::tools::{
+    ToolCapabilityGroup, ToolCostClass, ToolFreshness, ToolMetadata, ToolScope, ToolUseCase,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueryKind {
@@ -324,6 +326,52 @@ fn metadata_supports_query(metadata: &ToolMetadata, kind: QueryKind) -> bool {
     }
 }
 
+fn preferred_capability_group(kind: QueryKind) -> Option<ToolCapabilityGroup> {
+    match kind {
+        QueryKind::Weather
+        | QueryKind::News
+        | QueryKind::ExchangeRate
+        | QueryKind::MarketQuote
+        | QueryKind::SportsScore
+        | QueryKind::TimeSensitiveCurrent => Some(ToolCapabilityGroup::RealtimeData),
+        QueryKind::ExternalGitHubRepo => Some(ToolCapabilityGroup::RepositoryAnalysis),
+        QueryKind::DirectExplanation => Some(ToolCapabilityGroup::DirectAnswer),
+        QueryKind::General => None,
+    }
+}
+
+fn cost_score(cost: ToolCostClass) -> u16 {
+    match cost {
+        ToolCostClass::Low => 0,
+        ToolCostClass::Medium => 10,
+        ToolCostClass::High => 20,
+    }
+}
+
+fn metadata_rank_score(kind: QueryKind, metadata: &ToolMetadata) -> u16 {
+    let mut score = metadata.preferred_rank as u16;
+    if preferred_capability_group(kind).is_some_and(|group| metadata.capability_group == group) {
+        score = score.saturating_sub(20);
+    }
+    if matches!(
+        kind,
+        QueryKind::Weather
+            | QueryKind::News
+            | QueryKind::ExchangeRate
+            | QueryKind::MarketQuote
+            | QueryKind::SportsScore
+            | QueryKind::TimeSensitiveCurrent
+    ) && metadata.freshness == ToolFreshness::Live
+    {
+        score = score.saturating_sub(10);
+    }
+    score
+        + cost_score(metadata.overall_cost_class)
+        + cost_score(metadata.latency_class)
+        + cost_score(metadata.token_cost_class)
+        + cost_score(metadata.api_cost_class)
+}
+
 fn parse_first_number(text: &str) -> Option<usize> {
     let re = Regex::new(r"(\d{1,2})").ok()?;
     re.captures(text)
@@ -581,10 +629,10 @@ pub fn refine_allowed_tools_for_input(
             .collect()
     };
 
-    let filtered: Vec<String> = allowed_metadata
+    let filtered: Vec<(String, ToolMetadata)> = allowed_metadata
         .iter()
         .filter(|(_, metadata)| metadata_supports_query(metadata, kind))
-        .map(|(name, _)| name.clone())
+        .map(|(name, metadata)| (name.clone(), metadata.clone()))
         .collect();
 
     let allowed_tools = if !exact_matches.is_empty() {
@@ -595,7 +643,9 @@ pub fn refine_allowed_tools_for_input(
             .map(|(name, _)| name.clone())
             .collect()
     } else {
-        filtered
+        let mut ranked = filtered;
+        ranked.sort_by_key(|(_, metadata)| metadata_rank_score(kind, metadata));
+        ranked.into_iter().take(5).map(|(name, _)| name).collect()
     };
 
     ToolPolicyDecision {

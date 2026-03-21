@@ -4,8 +4,8 @@ use serde_json::Value;
 
 use crate::tools::output;
 use crate::tools::{
-    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
-    ToolScope, ToolUseCase,
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode,
+    ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
 pub struct NewsTool {
@@ -113,6 +113,17 @@ impl Tool for NewsTool {
         .with_output_shape(ToolOutputShape::StructuredJson)
         .with_freshness(ToolFreshness::Live)
         .with_preferred_use_cases(vec![ToolUseCase::News, ToolUseCase::TimeSensitiveCurrent])
+        .with_capability(
+            ToolCapabilityGroup::RealtimeData,
+            ToolCapabilitySubgroup::News,
+        )
+        .with_costs(
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+            ToolCostClass::Low,
+        )
+        .with_preferred_rank(1)
         .with_critic_mode(ToolCriticMode::Skip)
     }
 
