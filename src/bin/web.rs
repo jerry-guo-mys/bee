@@ -40,12 +40,13 @@ use bytes::Bytes;
 use futures_util::stream::{self, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use bee::agent::{
     consolidate_memory_with_llm, create_agent_components,
     create_context_with_long_term_for_assistant, create_vector_long_term_for_assistant,
-    process_message, process_message_stream,
+    process_message, process_message_stream, process_message_stream_with_cancel,
 };
 use bee::config::{load_config, AppConfig};
 use bee::core::AgentComponents;
@@ -64,6 +65,7 @@ use bee::saas::{
     SaasTemplateRepository, TeamTemplateInstantiationRequest, ToolPolicyInput, ToolPolicyScope,
 };
 use bee::skills::{Skill, SkillLoader};
+use bee::tool_routing::refine_allowed_tools_for_input;
 use bee::tools::{tool_call_schema_json, CreateTool, DynamicAgent};
 
 use assistant_catalog::{
@@ -82,8 +84,7 @@ use task_service::{
 };
 use workflow_product_service::{
     build_task_board, list_workflow_templates, start_workflow_run, TaskBoardColumn,
-    WorkflowRunResult as ProductWorkflowRunResult, WorkflowStartRequest,
-    WorkflowTemplateSummary,
+    WorkflowRunResult as ProductWorkflowRunResult, WorkflowStartRequest, WorkflowTemplateSummary,
 };
 
 const DEFAULT_MAX_TURNS: usize = 20;
@@ -179,6 +180,8 @@ struct AppState {
     groups_path: PathBuf,
     /// 拓扑事件广播（SSE /api/events）
     event_bus: broadcast::Sender<String>,
+    /// 正在运行的流式会话取消令牌（session_key -> token）
+    active_cancellations: Arc<RwLock<HashMap<String, CancellationToken>>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -408,6 +411,16 @@ struct ConsolidateResponse {
 
 #[derive(Debug, Deserialize)]
 struct ClearSessionRequest {
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    assistant_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct CancelSessionRequest {
     #[serde(default)]
     session_id: Option<String>,
     #[serde(default)]
@@ -754,7 +767,10 @@ fn audit_knowledge_access(
             tenant_id: tenant_id.clone(),
             organization_id: organization_id.clone(),
             team_id: scope.team_id.clone(),
-            user_id: scope.user_id.clone().or_else(|| Some(session_id.to_string())),
+            user_id: scope
+                .user_id
+                .clone()
+                .or_else(|| Some(session_id.to_string())),
         },
         "knowledge_base.access",
         "assistant_session",
@@ -788,7 +804,10 @@ fn audit_tool_failure(
             tenant_id,
             organization_id,
             team_id: scope.team_id.clone(),
-            user_id: scope.user_id.clone().or_else(|| Some(session_id.to_string())),
+            user_id: scope
+                .user_id
+                .clone()
+                .or_else(|| Some(session_id.to_string())),
         },
         "tool.failure",
         "tool_execution",
@@ -1019,6 +1038,7 @@ async fn main() -> anyhow::Result<()> {
         groups,
         groups_path,
         event_bus,
+        active_cancellations: Arc::new(RwLock::new(HashMap::new())),
     });
 
     let app = Router::new()
@@ -1032,6 +1052,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/history", get(api_history))
         .route("/api/sessions", get(api_sessions_list))
         .route("/api/session/clear", post(api_session_clear))
+        .route("/api/session/cancel", post(api_session_cancel))
         .route("/api/compact", post(api_compact))
         .route("/api/session/rename", post(api_session_rename))
         .route("/api/assistants", get(api_assistants_list))
@@ -1377,6 +1398,29 @@ async fn api_session_clear(
     Ok(StatusCode::OK)
 }
 
+/// POST /api/session/cancel：取消指定会话当前正在运行的流式请求
+async fn api_session_cancel(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CancelSessionRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let session_id = match req.session_id.filter(|s| !s.is_empty()) {
+        Some(s) => s,
+        None => return Ok(StatusCode::OK),
+    };
+    let assistant_id = req.assistant_id.as_deref().unwrap_or("default");
+    let scope = req.scope.to_scope(&session_id, assistant_id);
+    let key = session_key(&session_id, assistant_id, Some(&scope));
+
+    let token = {
+        let active = state.active_cancellations.read().await;
+        active.get(&key).cloned()
+    };
+    if let Some(token) = token {
+        token.cancel();
+    }
+    Ok(StatusCode::OK)
+}
+
 /// GET /api/sessions：列出所有会话（从磁盘读取），按更新时间倒序。每个 (session_id, assistant_id) 为独立会话
 async fn api_sessions_list(
     State(state): State<Arc<AppState>>,
@@ -1690,9 +1734,11 @@ async fn api_agent_templates_list(
         .unwrap_or_else(|| "tenant-default".to_string());
     require_management_access(
         &state.workspace,
-        &query
-            .scope
-            .to_access_context(tenant_id.clone(), query.scope.management_organization_id(), None),
+        &query.scope.to_access_context(
+            tenant_id.clone(),
+            query.scope.management_organization_id(),
+            None,
+        ),
         AccessRequirement::OrgAdmin,
     )?;
     let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
@@ -1785,7 +1831,11 @@ async fn api_team_agent_instances_bootstrap(
             team_id,
             created_count: result.created_count,
             existing_count: result.existing_count,
-            instance_ids: result.instances.into_iter().map(|instance| instance.id).collect(),
+            instance_ids: result
+                .instances
+                .into_iter()
+                .map(|instance| instance.id)
+                .collect(),
         }),
     ))
 }
@@ -1803,7 +1853,10 @@ async fn api_task_board(
         .organization_id
         .clone()
         .or_else(|| query.scope.management_organization_id());
-    let team_id = query.team_id.clone().or_else(|| query.scope.team_id.clone());
+    let team_id = query
+        .team_id
+        .clone()
+        .or_else(|| query.scope.team_id.clone());
     require_management_access(
         &state.workspace,
         &query
@@ -1932,9 +1985,9 @@ async fn api_tasks_list(
                 .is_none_or(|tenant_id| task.tenant_id.as_deref() == Some(tenant_id))
         })
         .filter(|task| {
-            org_filter
-                .as_deref()
-                .is_none_or(|organization_id| task.organization_id.as_deref() == Some(organization_id))
+            org_filter.as_deref().is_none_or(|organization_id| {
+                task.organization_id.as_deref() == Some(organization_id)
+            })
         })
         .filter(|task| {
             team_filter
@@ -1996,7 +2049,9 @@ async fn api_tasks_create(
         &req,
         assignee_ids,
         group_id.clone(),
-        req.tenant_id.clone().or_else(|| Some("tenant-default".to_string())),
+        req.tenant_id
+            .clone()
+            .or_else(|| Some("tenant-default".to_string())),
         req.organization_id
             .clone()
             .or_else(|| Some("org-default".to_string())),
@@ -2208,7 +2263,8 @@ async fn api_audit_logs_list(
         &state.workspace,
         &query.scope.to_access_context(
             tenant_id.clone(),
-            query.organization_id
+            query
+                .organization_id
                 .clone()
                 .or_else(|| query.scope.management_organization_id()),
             None,
@@ -2433,7 +2489,12 @@ async fn api_assistant_knowledge_bases_put(
             tenant_id: "tenant-default".to_string(),
             name: entry.name.clone(),
             description: Some(entry.description.clone()),
-            prompt: Some(entry.prompt_text.clone().unwrap_or_else(|| entry.prompt.clone())),
+            prompt: Some(
+                entry
+                    .prompt_text
+                    .clone()
+                    .unwrap_or_else(|| entry.prompt.clone()),
+            ),
             tool_ids: entry.skills.clone().unwrap_or_default(),
             model_id: None,
             knowledge_base_ids: Vec::new(),
@@ -3130,7 +3191,10 @@ async fn api_chat_stream(
     let (event_tx, event_rx) = mpsc::unbounded_channel::<ReactEvent>();
     let (context_tx, context_rx) = tokio::sync::oneshot::channel();
 
-    let allowed_for_spawn = resolve_allowed_tools_for_scope(&state, &assistant_id, &scope).await;
+    let allowed_for_spawn = refine_allowed_tools_for_input(
+        &message,
+        &resolve_allowed_tools_for_scope(&state, &assistant_id, &scope).await,
+    );
     let components = state.components.read().await.clone();
     let session_id_clone = session_id.clone();
     let assistant_id_clone = assistant_id.clone();
@@ -3139,6 +3203,13 @@ async fn api_chat_stream(
     let scope_for_stream = scope.clone();
     let state_spawn = Arc::clone(&state);
     let model_configs = state.model_configs.clone();
+    let cancel_token = CancellationToken::new();
+    {
+        let mut active = state.active_cancellations.write().await;
+        if let Some(existing) = active.insert(session_key_clone.clone(), cancel_token.clone()) {
+            existing.cancel();
+        }
+    }
     tokio::spawn(async move {
         let mut ctx = context;
         let prompt_ref = system_prompt_override.as_deref();
@@ -3155,7 +3226,7 @@ async fn api_chat_stream(
         };
         let planner_ref = planner_override.as_deref();
         let allowed = Some(allowed_for_spawn.as_slice());
-        let _ = process_message_stream(
+        let _ = process_message_stream_with_cancel(
             components.as_ref(),
             &mut ctx,
             &message,
@@ -3164,6 +3235,7 @@ async fn api_chat_stream(
             planner_ref,
             allowed,
             Some(assistant_id_clone.as_str()),
+            cancel_token,
         )
         .await;
         // 无论流是否被客户端断开（超时/刷新），都持久化当前会话（含用户刚发的提问），刷新后历史不丢
@@ -3177,6 +3249,11 @@ async fn api_chat_stream(
         );
         let mut sessions = state_spawn.sessions.write().await;
         sessions.insert(session_key_clone.clone(), ctx);
+        state_spawn
+            .active_cancellations
+            .write()
+            .await
+            .remove(&session_key_clone);
         let _ = context_tx.send(());
     });
 
@@ -3211,58 +3288,10 @@ async fn api_chat_stream(
             Some(first_line),
         ),
         move |(state_reinsert, session_id_reinsert, context_rx, mut event_rx, first_line_opt)| {
-        let scope_for_stream = scope_for_stream.clone();
-        async move {
-            if let Some(line) = first_line_opt {
-                return Ok(Some((
-                    Bytes::from(line),
-                    (
-                        state_reinsert,
-                        session_id_reinsert,
-                        context_rx,
-                        event_rx,
-                        None,
-                    ),
-                )));
-            }
-            match event_rx.recv().await {
-                Some(ev) => {
-                    // 自我改进：工具失败 → ERRORS.md；Critic 纠正 → LEARNINGS.md (correction)
-                    match &ev {
-                        ReactEvent::ToolFailure { tool, reason } => {
-                            learnings_record_error(&state_reinsert.workspace, tool, reason);
-                            audit_tool_failure(
-                                &state_reinsert,
-                                &scope_for_stream,
-                                &session_id_reinsert,
-                                tool,
-                                reason,
-                            );
-                        }
-                        ReactEvent::Recovery { action, detail } if action == "Critic" => {
-                            learnings_record_learning(
-                                &state_reinsert.workspace,
-                                "correction",
-                                detail,
-                                None,
-                            );
-                        }
-                        ReactEvent::Observation { tool, preview } if tool == "create" => {
-                            if let Some(agent) = parse_create_observation(preview) {
-                                emit_event(
-                                    &state_reinsert.event_bus,
-                                    WorkspaceEvent::AgentCreated {
-                                        id: agent.id,
-                                        role: agent.role,
-                                        parent_id: agent.parent_id,
-                                    },
-                                );
-                            }
-                        }
-                        _ => {}
-                    }
-                    let line = format!("{}\n", serde_json::to_string(&ev).unwrap());
-                    Ok(Some((
+            let scope_for_stream = scope_for_stream.clone();
+            async move {
+                if let Some(line) = first_line_opt {
+                    return Ok(Some((
                         Bytes::from(line),
                         (
                             state_reinsert,
@@ -3271,14 +3300,62 @@ async fn api_chat_stream(
                             event_rx,
                             None,
                         ),
-                    )))
+                    )));
                 }
-                None => {
-                    let _ = context_rx.await;
-                    Ok(None)
+                match event_rx.recv().await {
+                    Some(ev) => {
+                        // 自我改进：工具失败 → ERRORS.md；Critic 纠正 → LEARNINGS.md (correction)
+                        match &ev {
+                            ReactEvent::ToolFailure { tool, reason } => {
+                                learnings_record_error(&state_reinsert.workspace, tool, reason);
+                                audit_tool_failure(
+                                    &state_reinsert,
+                                    &scope_for_stream,
+                                    &session_id_reinsert,
+                                    tool,
+                                    reason,
+                                );
+                            }
+                            ReactEvent::Recovery { action, detail } if action == "Critic" => {
+                                learnings_record_learning(
+                                    &state_reinsert.workspace,
+                                    "correction",
+                                    detail,
+                                    None,
+                                );
+                            }
+                            ReactEvent::Observation { tool, preview } if tool == "create" => {
+                                if let Some(agent) = parse_create_observation(preview) {
+                                    emit_event(
+                                        &state_reinsert.event_bus,
+                                        WorkspaceEvent::AgentCreated {
+                                            id: agent.id,
+                                            role: agent.role,
+                                            parent_id: agent.parent_id,
+                                        },
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                        let line = format!("{}\n", serde_json::to_string(&ev).unwrap());
+                        Ok(Some((
+                            Bytes::from(line),
+                            (
+                                state_reinsert,
+                                session_id_reinsert,
+                                context_rx,
+                                event_rx,
+                                None,
+                            ),
+                        )))
+                    }
+                    None => {
+                        let _ = context_rx.await;
+                        Ok(None)
+                    }
                 }
             }
-        }
         },
     );
 

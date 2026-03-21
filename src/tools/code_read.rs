@@ -13,6 +13,8 @@ use crate::tools::Tool;
 pub struct CodeReadTool {
     /// 允许的根目录（通常是项目根目录）
     allowed_root: PathBuf,
+    /// 回退根目录（通常是当前仓库根）
+    fallback_root: Option<PathBuf>,
     /// 最大读取行数
     max_lines: usize,
     /// 单行最大字符数
@@ -21,8 +23,16 @@ pub struct CodeReadTool {
 
 impl CodeReadTool {
     pub fn new(allowed_root: impl AsRef<Path>) -> Self {
+        let root = allowed_root.as_ref().to_path_buf();
+        let allowed_root = root.canonicalize().unwrap_or(root);
+        let fallback_root = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| cwd.canonicalize().ok().or(Some(cwd)))
+            .filter(|cwd| cwd != &allowed_root);
+
         Self {
-            allowed_root: allowed_root.as_ref().to_path_buf(),
+            allowed_root,
+            fallback_root,
             max_lines: 2000,
             max_line_length: 2000,
         }
@@ -35,40 +45,38 @@ impl CodeReadTool {
     }
 
     /// 验证路径是否在允许范围内
-    fn validate_path(&self, file_path: &str) -> Result<PathBuf, String> {
-        let path = Path::new(file_path);
+    fn validate_under_root(root: &Path, file_path: &str) -> Result<PathBuf, String> {
+        let trimmed = file_path.trim_start_matches("./");
+        let candidate = root.join(trimmed);
+        let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let canonical_path = candidate
+            .canonicalize()
+            .map_err(|_| format!("File not found: {}", candidate.display()))?;
 
-        // 解析为绝对路径
-        let absolute_path = if path.is_absolute() {
-            path.to_path_buf()
+        if canonical_path.starts_with(&canonical_root) {
+            Ok(canonical_path)
         } else {
-            self.allowed_root.join(path)
-        };
-
-        // 规范化路径
-        let canonical_path = match absolute_path.canonicalize() {
-            Ok(p) => p,
-            Err(_) => {
-                // 文件可能不存在，使用绝对路径继续
-                absolute_path
-            }
-        };
-
-        // 安全检查：确保在允许目录内
-        let allowed_canonical = match self.allowed_root.canonicalize() {
-            Ok(p) => p,
-            Err(_) => self.allowed_root.clone(),
-        };
-
-        if !canonical_path.starts_with(&allowed_canonical) {
-            return Err(format!(
+            Err(format!(
                 "Access denied: path '{}' is outside allowed root '{}'",
                 file_path,
-                self.allowed_root.display()
-            ));
+                root.display()
+            ))
         }
+    }
 
-        Ok(canonical_path)
+    /// 验证路径是否在允许范围内，允许回退到当前仓库根
+    fn validate_path(&self, file_path: &str) -> Result<PathBuf, String> {
+        match Self::validate_under_root(&self.allowed_root, file_path) {
+            Ok(path) => Ok(path),
+            Err(err) if err.starts_with("File not found:") => {
+                if let Some(fallback_root) = &self.fallback_root {
+                    Self::validate_under_root(fallback_root, file_path)
+                } else {
+                    Err(err)
+                }
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// 读取文件内容（带行号）

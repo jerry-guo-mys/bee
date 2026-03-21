@@ -5,7 +5,8 @@
 
 use std::time::{Duration, Instant};
 
-use tokio::time::timeout;
+use tokio::time::timeout as tokio_timeout;
+use tokio_util::sync::CancellationToken;
 
 use crate::core::AgentError;
 use crate::observability::Metrics;
@@ -14,14 +15,14 @@ use crate::tools::ToolRegistry;
 /// 工具执行器：对每次调用施加超时，并将结果映射为 AgentError
 pub struct ToolExecutor {
     registry: ToolRegistry,
-    timeout: Duration,
+    default_timeout: Duration,
 }
 
 impl ToolExecutor {
     pub fn new(registry: ToolRegistry, timeout_secs: u64) -> Self {
         Self {
             registry,
-            timeout: Duration::from_secs(timeout_secs),
+            default_timeout: Duration::from_secs(timeout_secs),
         }
     }
 
@@ -31,11 +32,33 @@ impl ToolExecutor {
         tool_name: &str,
         args: serde_json::Value,
     ) -> Result<String, AgentError> {
+        self.execute_cancellable(tool_name, args, CancellationToken::new())
+            .await
+    }
+
+    pub async fn execute_cancellable(
+        &self,
+        tool_name: &str,
+        args: serde_json::Value,
+        cancel_token: CancellationToken,
+    ) -> Result<String, AgentError> {
         let start = Instant::now();
         let args_preview = args_preview(&args);
         let metrics = Metrics::global();
+        let tool_timeout = self
+            .registry
+            .get(tool_name)
+            .and_then(|tool| tool.timeout_secs())
+            .map(Duration::from_secs)
+            .unwrap_or(self.default_timeout);
 
-        let result = timeout(self.timeout, self.registry.execute(tool_name, args)).await;
+        let result = tokio::select! {
+            _ = cancel_token.cancelled() => return Err(AgentError::Cancelled),
+            result = tokio_timeout(
+                tool_timeout,
+                self.registry.execute_cancellable(tool_name, args, cancel_token.clone())
+            ) => result,
+        };
 
         let (ok, outcome, success): (bool, &str, bool) = match &result {
             Ok(Ok(_)) => (true, "ok", true),
@@ -65,6 +88,10 @@ impl ToolExecutor {
             "tool_execution"
         );
 
+        if cancel_token.is_cancelled() {
+            return Err(AgentError::Cancelled);
+        }
+
         match result {
             Ok(Ok(content)) => Ok(content),
             Ok(Err(e)) => Err(AgentError::ToolExecutionFailed(e)),
@@ -92,5 +119,87 @@ fn args_preview(args: &serde_json::Value) -> String {
         format!("{}...", s.chars().take(200).collect::<String>())
     } else {
         s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use serde_json::json;
+
+    use super::*;
+    use crate::tools::{Tool, ToolRegistry};
+
+    struct SlowTool {
+        timeout_secs: Option<u64>,
+        sleep_ms: u64,
+    }
+
+    #[async_trait]
+    impl Tool for SlowTool {
+        fn name(&self) -> &str {
+            "slow"
+        }
+
+        fn description(&self) -> &str {
+            "slow tool"
+        }
+
+        fn timeout_secs(&self) -> Option<u64> {
+            self.timeout_secs
+        }
+
+        async fn execute(&self, _args: serde_json::Value) -> Result<String, String> {
+            tokio::time::sleep(Duration::from_millis(self.sleep_ms)).await;
+            Ok("ok".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_executor_uses_tool_specific_timeout_override() {
+        let mut registry = ToolRegistry::new();
+        registry.register(SlowTool {
+            timeout_secs: Some(1),
+            sleep_ms: 150,
+        });
+
+        let executor = ToolExecutor::new(registry, 0);
+        let result = executor.execute("slow", json!({})).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_executor_uses_default_timeout_when_tool_has_no_override() {
+        let mut registry = ToolRegistry::new();
+        registry.register(SlowTool {
+            timeout_secs: None,
+            sleep_ms: 150,
+        });
+
+        let executor = ToolExecutor::new(registry, 0);
+        let result = executor.execute("slow", json!({})).await;
+
+        assert!(matches!(result, Err(AgentError::ToolTimeout(name)) if name == "slow"));
+    }
+
+    #[tokio::test]
+    async fn test_executor_respects_cancellation() {
+        let mut registry = ToolRegistry::new();
+        registry.register(SlowTool {
+            timeout_secs: Some(5),
+            sleep_ms: 500,
+        });
+
+        let executor = ToolExecutor::new(registry, 5);
+        let cancel_token = CancellationToken::new();
+        cancel_token.cancel();
+        let result = executor
+            .execute_cancellable("slow", json!({}), cancel_token)
+            .await;
+
+        assert!(matches!(result, Err(AgentError::Cancelled)));
     }
 }

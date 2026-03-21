@@ -153,7 +153,7 @@
     .dark .step-item { background: rgba(255,255,255,0.05); }
     .step-item .step-title { font-weight: 600; color: #374151; margin-bottom: 4px; }
     .dark .step-item .step-title { color: #e5e7eb; }
-    .step-item .step-detail { font-size: 0.75rem; opacity: 0.9; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+    .step-item .step-detail { font-size: 0.75rem; opacity: 0.9; line-height: 1.5; white-space: pre-wrap; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .step-item.step-understand { border-color: #6366f1; }
     .step-item.step-decompose { border-color: #8b5cf6; }
     .step-item.step-tool { border-color: #f59e0b; }
@@ -1141,6 +1141,7 @@
     let selectedAssistant = localStorage.getItem('bee_assistant') || 'auto';
     let selectedModel = localStorage.getItem('bee_model') || 'default';
     let isGenerating = false;
+    let currentStreamController = null;
     let sessionTokensAccum = 0;
     let currentScope = getStoredScope();
 
@@ -1443,10 +1444,41 @@
       });
     }
 
+    async function cancelCurrentGeneration() {
+      if (!isGenerating) return;
+
+      try {
+        const body = currentGroupId
+          ? { session_id: currentGroupId, assistant_id: selectedAssistant || 'default', ...buildScopePayload() }
+          : {
+              session_id: currentSessionId,
+              assistant_id: selectedAssistant || 'default',
+              ...buildScopePayload({ agent_instance_id: selectedAssistant || 'default' }),
+            };
+
+        if (body.session_id) {
+          await fetch('/api/session/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+        }
+      } catch (e) {
+        console.error('Failed to cancel session:', e);
+      }
+
+      currentStreamController?.abort();
+      typewriterControls?.hide();
+    }
+
     async function sendMessage() {
       const textarea = document.getElementById('message-input');
       const message = textarea.value.trim();
-      if (!message || isGenerating) return;
+      if (isGenerating) {
+        await cancelCurrentGeneration();
+        return;
+      }
+      if (!message) return;
       
       showChatInterface();
       
@@ -1477,6 +1509,8 @@
       isGenerating = true;
       updateSendButtonState();
       typewriterControls?.show();
+      const streamController = new AbortController();
+      currentStreamController = streamController;
       
       try {
         const body = { message, model_id: selectedModel, ...buildScopePayload() };
@@ -1491,7 +1525,8 @@
         const response = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
+          body: JSON.stringify(body),
+          signal: streamController.signal
         });
         
         const reader = response.body.getReader();
@@ -1519,6 +1554,9 @@
                       <span class="label"><span class="material-icons-outlined text-sm">psychology</span><span class="thinking-label">展示步骤</span></span>
                       <span class="arrow">›</span>
                     </div>
+                    <button type="button" class="thinking-copy-btn p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors" title="复制全部步骤">
+                      <span class="material-icons-outlined text-sm">content_copy</span>
+                    </button>
                     <span class="duration text-xs text-text-sub-light dark:text-text-sub-dark">0s</span>
                   </div>
                 </div>
@@ -1539,6 +1577,7 @@
         const thinkingSteps = msgEl?.querySelector('.thinking-steps');
         let stepsContent = msgEl?.querySelector('.steps-content');
         const thinkingBar = msgEl?.querySelector('.thinking-bar');
+        const thinkingCopyBtn = msgEl?.querySelector('.thinking-copy-btn');
         const durationEl = msgEl?.querySelector('.duration');
         let responseStarted = false;
         let typewriter = null;
@@ -1578,12 +1617,58 @@
           stepsContent?.classList?.toggle('hidden');
           updateThinkingLabel();
         });
-        const addStep = (type, title, detail) => {
+        const buildStepsText = () => {
+          if (!stepsContent) return '';
+          return Array.from(stepsContent.querySelectorAll('.step-item'))
+            .map((step, index) => {
+              const title = step.dataset.title || `步骤 ${index + 1}`;
+              const detail = step.dataset.detail || '';
+              return detail ? `${title}\n${detail}` : title;
+            })
+            .join('\n\n');
+        };
+        thinkingCopyBtn?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const fullText = buildStepsText();
+          if (!fullText) {
+            showToast('暂无可复制的步骤', 'error');
+            return;
+          }
+          try {
+            await navigator.clipboard.writeText(fullText);
+            showToast('已复制全部步骤', 'success');
+          } catch (_) {
+            showToast('复制失败', 'error');
+          }
+        });
+        const findExistingStep = (stepKey) => {
+          if (!stepsContent || !stepKey) return null;
+          return stepsContent.querySelector(`.step-item[data-step-key="${stepKey}"]`);
+        };
+        const trimStepCount = (maxSteps = 6) => {
           if (!stepsContent) return;
-          const step = document.createElement('div');
-          step.className = `step-item ${type}`;
+          while (stepsContent.children.length > maxSteps) {
+            stepsContent.removeChild(stepsContent.firstChild);
+          }
+        };
+        const upsertStep = (stepKey, type, title, detail) => {
+          if (!stepsContent) return;
+          let step = findExistingStep(stepKey);
+          if (!step) {
+            step = document.createElement('div');
+            step.className = `step-item ${type}`;
+            step.dataset.stepKey = stepKey || '';
+            stepsContent.appendChild(step);
+          } else {
+            step.className = `step-item ${type}`;
+          }
+          step.dataset.title = title || '';
+          step.dataset.detail = detail || '';
           step.innerHTML = detail ? `<div class="step-title">${escapeHtml(title)}</div><div class="step-detail">${escapeHtml(detail)}</div>` : `<div class="step-title">${escapeHtml(title)}</div>`;
-          stepsContent.appendChild(step);
+          if (step !== stepsContent.lastElementChild) {
+            stepsContent.appendChild(step);
+          }
+          trimStepCount();
           updateDuration();
           scrollToBottom();
         };
@@ -1647,32 +1732,32 @@
                 typewriter?.appendText(event.content || '');
               } else if (event.type === 'thinking' && !isGroupMode) {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
-                addStep('step-understand', '1. 理解问题', '正在分析用户问题…');
+                upsertStep('understand', 'step-understand', '1. 理解问题', '正在分析用户问题…');
               } else if (event.type === 'thinking_content') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
                 const text = (event.text || '').trim();
-                addStep('step-decompose', '2. 拆解与规划', text ? text.substring(0, 300) + (text.length > 300 ? '…' : '') : '规划中…');
+                upsertStep('decompose', 'step-decompose', '2. 拆解与规划', text ? text.substring(0, 220) + (text.length > 220 ? '…' : '') : '规划中…');
               } else if (event.type === 'memory_recovery') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
                 const preview = (event.preview || '').trim();
-                addStep('step-memory', '4. 组织上下文 · 使用长期记忆', preview ? preview.substring(0, 200) + (preview.length > 200 ? '…' : '') : '检索相关记忆');
+                upsertStep('memory-recovery', 'step-memory', '3. 组织上下文', preview ? preview.substring(0, 140) + (preview.length > 140 ? '…' : '') : '检索相关记忆');
               } else if (event.type === 'tool_call') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
-                addStep('step-tool tool-call', '3. 选择并调用工具', event.tool || '');
+                upsertStep(`tool-call-${event.tool || 'unknown'}`, 'step-tool tool-call', '4. 调用工具', event.tool || '');
               } else if (event.type === 'observation') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
                 const prev = (event.preview || '').substring(0, 150);
-                addStep('observation', '观察工具返回', event.tool ? `${event.tool}: ${prev}${(event.preview || '').length > 150 ? '…' : ''}` : prev || '');
+                upsertStep(`tool-result-${event.tool || 'unknown'}`, 'observation', '5. 工具结果', event.tool ? `${event.tool}: ${prev}${(event.preview || '').length > 150 ? '…' : ''}` : prev || '');
               } else if (event.type === 'tool_failure') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
-                addStep('recovery', '工具失败', `${event.tool || ''}: ${event.reason || ''}`);
+                upsertStep('recovery', 'recovery', '工具失败', `${event.tool || ''}: ${event.reason || ''}`);
               } else if (event.type === 'recovery') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
-                addStep('recovery', '错误恢复', event.detail || event.action || '');
+                upsertStep('recovery', 'recovery', '错误恢复', event.detail || event.action || '');
               } else if (event.type === 'memory_consolidation') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
                 const prev = (event.preview || '').trim().substring(0, 150);
-                addStep('step-consolidate', '5. 整理到长期记忆', prev ? prev + ((event.preview || '').length > 150 ? '…' : '') : '写入长期记忆');
+                upsertStep('memory-consolidation', 'step-consolidate', '6. 长期记忆', prev ? prev + ((event.preview || '').length > 150 ? '…' : '') : '写入长期记忆');
               } else if (event.type === 'token_usage') {
                 const delta = event.total_tokens || 0;
                 sessionTokensAccum += delta;
@@ -1695,11 +1780,16 @@
         }
         
       } catch (e) {
-        showToast('Failed to send message', 'error');
+        if (e.name !== 'AbortError') {
+          showToast('Failed to send message', 'error');
+        }
         document.getElementById(loadingId)?.remove();
         typewriterControls?.hide();
       } finally {
         isGenerating = false;
+        if (currentStreamController === streamController) {
+          currentStreamController = null;
+        }
         updateSendButtonState();
       }
     }

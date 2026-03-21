@@ -425,6 +425,8 @@ pub struct ToolsSection {
     pub shell: ShellSection,
     #[serde(default)]
     pub search: SearchSection,
+    #[serde(default)]
+    pub deep_research: DeepResearchSection,
     /// 技能插件：从配置注册，每项对应一个「程序 + 参数模板」工具（白皮书：Agent 动态注册新工具）
     #[serde(default)]
     pub plugins: Vec<PluginEntry>,
@@ -450,6 +452,55 @@ pub struct PluginEntry {
 
 fn default_tool_timeout_secs() -> u64 {
     30
+}
+
+/// [tools.deep_research] 段：深度研究工具的专属配置
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeepResearchSection {
+    #[serde(default = "default_deep_research_timeout_secs")]
+    pub timeout_secs: u64,
+    #[serde(default = "default_deep_research_max_rounds")]
+    pub max_rounds: usize,
+    #[serde(default = "default_deep_research_max_results_per_round")]
+    pub max_results_per_round: usize,
+    #[serde(default = "default_deep_research_trusted_domains")]
+    pub trusted_domains: Vec<String>,
+}
+
+impl Default for DeepResearchSection {
+    fn default() -> Self {
+        Self {
+            timeout_secs: default_deep_research_timeout_secs(),
+            max_rounds: default_deep_research_max_rounds(),
+            max_results_per_round: default_deep_research_max_results_per_round(),
+            trusted_domains: default_deep_research_trusted_domains(),
+        }
+    }
+}
+
+fn default_deep_research_timeout_secs() -> u64 {
+    180
+}
+
+fn default_deep_research_max_rounds() -> usize {
+    5
+}
+
+fn default_deep_research_max_results_per_round() -> usize {
+    3
+}
+
+fn default_deep_research_trusted_domains() -> Vec<String> {
+    vec![
+        "wikipedia.org".into(),
+        "arxiv.org".into(),
+        "pubmed.gov".into(),
+        "scholar.google.com".into(),
+        "github.com".into(),
+        "stackoverflow.com".into(),
+        "docs.rs".into(),
+        "developer.mozilla.org".into(),
+    ]
 }
 
 /// [tools.shell] 段：允许执行的命令名（仅首词，如 ls、grep、cargo）

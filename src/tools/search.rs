@@ -20,6 +20,21 @@ pub struct SearchTool {
     max_result_chars: usize,
 }
 
+fn domain_matches_pattern(domain: &str, pattern: &str) -> bool {
+    let domain = domain.to_lowercase();
+    let pattern = pattern.trim().to_lowercase();
+
+    if pattern.is_empty() {
+        return false;
+    }
+
+    if let Some(suffix) = pattern.strip_prefix("*.") {
+        return domain == suffix || domain.ends_with(&format!(".{suffix}"));
+    }
+
+    domain == pattern || domain.ends_with(&format!(".{pattern}"))
+}
+
 /// 简易去除 HTML 标签（html2text 失败时的回退）
 fn strip_html_tags(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
@@ -72,6 +87,27 @@ fn extract_domain(url: &str) -> Option<String> {
     Some(host.to_lowercase())
 }
 
+fn is_github_repo_url(url: &str) -> bool {
+    let Some(url) = url
+        .trim()
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.trim().strip_prefix("http://github.com/"))
+    else {
+        return false;
+    };
+    let mut parts = url.split('/').filter(|part| !part.is_empty());
+    let Some(owner) = parts.next().map(str::trim) else {
+        return false;
+    };
+    let Some(repo) = parts.next().map(str::trim) else {
+        return false;
+    };
+    if owner.is_empty() || repo.is_empty() {
+        return false;
+    }
+    true
+}
+
 impl SearchTool {
     pub fn new(allowed_domains: Vec<String>, timeout_secs: u64, max_result_chars: usize) -> Self {
         let allowed_domains = allowed_domains
@@ -106,7 +142,11 @@ impl SearchTool {
 
     fn is_allowed(&self, url: &str) -> Result<(), String> {
         let domain = extract_domain(url).ok_or_else(|| "Invalid or missing URL".to_string())?;
-        if self.allowed_domains.contains(&domain) {
+        if self
+            .allowed_domains
+            .iter()
+            .any(|pattern| domain_matches_pattern(&domain, pattern))
+        {
             return Ok(());
         }
         Err(format!("Domain not in allowlist: {}", domain))
@@ -122,6 +162,12 @@ impl SearchTool {
 
     async fn fetch(&self, url: &str) -> Result<String, String> {
         self.is_allowed(url)?;
+        if is_github_repo_url(url) {
+            return Err(
+                "GitHub repository URLs should use github_repo_inspect, not search".to_string(),
+            );
+        }
+
         let resp = self
             .client
             .get(url)
@@ -161,7 +207,7 @@ impl Tool for SearchTool {
     }
 
     fn description(&self) -> &str {
-        "Fetch URL content (domain allowlist: Wikipedia, Baidu, JD, Zhihu, GitHub, StackOverflow, docs.rs, MDN, arxiv, etc). Args: {\"url\": \"https://...\"}."
+        "Fetch URL content and extract readable text from general web pages on the allowlist. Use github_repo_inspect for GitHub repository, blob, or tree URLs. Args: {\"url\": \"https://...\"}."
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {

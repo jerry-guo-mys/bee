@@ -110,6 +110,13 @@ impl IntentRecognizer {
     fn fast_match(&self, input: &str) -> Option<Intent> {
         let input_lower = input.to_lowercase();
         let input_trimmed = input.trim();
+        let github_url = extract_url(input).filter(|url| is_github_repo_url(url));
+
+        if github_url.is_some() && is_github_architecture_query(&input_lower) {
+            return Some(Intent::Search {
+                query: input_trimmed.to_string(),
+            });
+        }
 
         if input_lower.starts_with("搜索")
             || input_lower.starts_with("search")
@@ -132,7 +139,7 @@ impl IntentRecognizer {
             || input_lower.contains("http://")
             || input_lower.contains("https://")
         {
-            let url = extract_url(input);
+            let url = github_url.or_else(|| extract_url(input));
             return Some(Intent::Browse { url });
         }
 
@@ -271,6 +278,10 @@ Output ONLY one of these intent types (no explanation):
 - browse: Visiting a webpage
 - unclear: Cannot determine intent
 
+Classification hints:
+- If the user is asking about the technical architecture, stack, system design, components, or implementation details of an external GitHub repository or GitHub URL, classify it as search or browse, not file_read or code_review.
+- If the request mentions remote files like package.json, Cargo.toml, README.md, docs, or architecture files on GitHub, that is still a remote repository query, not a local file read.
+
 Output format: just the intent type, nothing else."#;
 
         let messages = vec![
@@ -352,7 +363,17 @@ Output format: just the intent type, nothing else."#;
                 CodeAction::Explain => vec!["code_read".to_string()],
                 CodeAction::Test => vec!["test_run".to_string(), "test_check".to_string()],
             },
-            Intent::Search { .. } => vec!["search".to_string(), "deep_search".to_string()],
+            Intent::Search { query } => {
+                if query_has_external_github_scope(query) {
+                    vec![
+                        "github_repo_inspect".to_string(),
+                        "search".to_string(),
+                        "deep_search".to_string(),
+                    ]
+                } else {
+                    vec!["search".to_string(), "deep_search".to_string()]
+                }
+            }
             Intent::FileOperation { action, .. } => match action {
                 FileAction::Read => vec!["cat".to_string(), "code_read".to_string()],
                 FileAction::Write => vec!["code_write".to_string()],
@@ -364,7 +385,13 @@ Output format: just the intent type, nothing else."#;
             Intent::UseSkill { .. } => vec![],
             Intent::Memory { .. } => vec![],
             Intent::Task { .. } => vec![],
-            Intent::Browse { .. } => vec!["browser".to_string()],
+            Intent::Browse { url } => {
+                if url.as_deref().is_some_and(is_github_repo_url) {
+                    vec!["github_repo_inspect".to_string(), "search".to_string()]
+                } else {
+                    vec!["browser".to_string()]
+                }
+            }
             Intent::Unclear => vec![],
         }
     }
@@ -392,6 +419,47 @@ fn extract_url(text: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn is_github_repo_url(url: &str) -> bool {
+    let trimmed = url.trim_end_matches('/');
+    let Some(stripped) = trimmed
+        .strip_prefix("https://github.com/")
+        .or_else(|| trimmed.strip_prefix("http://github.com/"))
+    else {
+        return false;
+    };
+    let segments: Vec<&str> = stripped.split('/').collect();
+    segments.len() >= 2 && !segments[0].is_empty() && !segments[1].is_empty()
+}
+
+fn is_github_architecture_query(input_lower: &str) -> bool {
+    [
+        "架构",
+        "技术架构",
+        "系统设计",
+        "实现原理",
+        "技术栈",
+        "architecture",
+        "system design",
+        "technical architecture",
+        "tech stack",
+        "backend",
+        "frontend",
+        "database",
+        "orchestration",
+        "package.json",
+        "cargo.toml",
+        "readme",
+    ]
+    .iter()
+    .any(|keyword| input_lower.contains(keyword))
+}
+
+fn query_has_external_github_scope(query: &str) -> bool {
+    let lower = query.to_lowercase();
+    lower.contains("github.com/")
+        || (lower.contains("github") && is_github_architecture_query(&lower))
 }
 
 #[cfg(test)]
@@ -429,5 +497,33 @@ mod tests {
 
         let intent = recognizer.fast_match("运行 cargo test");
         assert!(matches!(intent, Some(Intent::Shell { command: Some(_) })));
+    }
+
+    #[test]
+    fn test_fast_match_github_architecture_as_search() {
+        let recognizer = IntentRecognizer {
+            llm: Arc::new(crate::llm::MockLlmClient),
+            enable_fast_match: true,
+        };
+
+        let intent = recognizer
+            .fast_match("分析 https://github.com/paperclipai/paperclip 的技术架构和 package.json");
+        assert!(matches!(intent, Some(Intent::Search { .. })));
+    }
+
+    #[test]
+    fn test_suggest_tools_prefers_github_repo_inspect() {
+        let recognizer = IntentRecognizer {
+            llm: Arc::new(crate::llm::MockLlmClient),
+            enable_fast_match: true,
+        };
+
+        let tools = recognizer.suggest_tools(&Intent::Search {
+            query: "https://github.com/paperclipai/paperclip 技术架构".to_string(),
+        });
+        assert_eq!(
+            tools.first().map(String::as_str),
+            Some("github_repo_inspect")
+        );
     }
 }

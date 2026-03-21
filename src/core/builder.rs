@@ -14,8 +14,9 @@ use crate::skills::{SkillCache, SkillLoader};
 use crate::tools::BrowserTool;
 use crate::tools::{
     CatTool, CodeEditTool, CodeGrepTool, CodeReadTool, CodeWriteTool, DeepSearchTool, EchoTool,
-    GitCommitTool, KnowledgeGraphBuilder, LsTool, PluginTool, ReportGeneratorTool, SearchTool,
-    ShellTool, SourceValidatorTool, TestCheckTool, TestRunTool, ToolExecutor, ToolRegistry,
+    GitCommitTool, GitHubRepoInspectTool, KnowledgeGraphBuilder, LsTool, PluginTool,
+    ReportGeneratorTool, SearchTool, ShellTool, SourceValidatorTool, TestCheckTool, TestRunTool,
+    ToolExecutor, ToolRegistry,
 };
 #[cfg(feature = "web")]
 use crate::tools::{CreateGroupTool, CreateTool, ListAgentsTool, SendTool};
@@ -58,7 +59,7 @@ impl AgentBuilder {
         .into_iter()
         .find_map(|p| std::fs::read_to_string(p).ok())
         .unwrap_or_else(|| {
-            "You are Bee, a helpful AI assistant with access to various tools.".to_string()
+            "You are Bee, a helpful AI assistant with access to various tools. If the user asks for an open-source address, repository link, GitHub URL, download page, homepage, or similar locator-style information, answer directly when possible or ask a short clarification question; do not call a tool first unless a tool is truly necessary to discover or verify the link. If the user asks a direct explanation question such as what a product or service is, what it does, or what its core functions are, answer directly from the conversation and available context unless the user explicitly asks for verification or browsing. For external GitHub repository architecture or stack questions, prefer github_repo_inspect, and after it returns structured fields like repo_summary, detected_stack, top_level_directories, key_files_found, or file_snippets, answer directly instead of inspecting the local workspace.".to_string()
         });
         self
     }
@@ -93,6 +94,9 @@ impl AgentBuilder {
             self.config.tools.search.timeout_secs,
             self.config.tools.search.max_result_chars,
         ));
+        tools.register(GitHubRepoInspectTool::new(
+            self.config.tools.search.max_result_chars,
+        ));
 
         #[cfg(feature = "browser")]
         tools.register(BrowserTool::new(
@@ -115,7 +119,13 @@ impl AgentBuilder {
         tools.register(TestRunTool::new(&self.workspace));
         tools.register(TestCheckTool::new(&self.workspace));
         tools.register(GitCommitTool::new(&self.workspace));
-        tools.register(DeepSearchTool::new(llm.clone()));
+        tools.register(DeepSearchTool::new(
+            llm.clone(),
+            self.config.tools.deep_research.max_rounds,
+            self.config.tools.deep_research.max_results_per_round,
+            self.config.tools.deep_research.timeout_secs,
+            self.config.tools.deep_research.trusted_domains.clone(),
+        ));
         tools.register(SourceValidatorTool::new(
             self.config.tools.search.allowed_domains.clone(),
         ));

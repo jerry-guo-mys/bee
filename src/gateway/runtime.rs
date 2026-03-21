@@ -14,8 +14,11 @@ use crate::agent::{create_agent_components, create_context_with_long_term_for_as
 use crate::config::AppConfig;
 use crate::core::{AgentComponents, AgentError};
 use crate::react::{react_loop, ReactEvent};
-use crate::saas::{default_low_risk_tools, resolve_effective_tool_allowlist, SaasSqliteStore, ToolPolicyScope};
+use crate::saas::{
+    default_low_risk_tools, resolve_effective_tool_allowlist, SaasSqliteStore, ToolPolicyScope,
+};
 use crate::skills::SkillSelector;
+use crate::tool_routing::{refine_allowed_tools_for_input, system_hint_for_input};
 
 /// Runtime 配置
 #[derive(Debug, Clone)]
@@ -226,7 +229,9 @@ impl AgentRuntime {
             .get_scope(session_id)
             .await
             .unwrap_or_default();
-        let allowed_tools = resolve_allowed_tools_for_scope(&self.components, &self.config.workspace, &scope);
+        let allowed_tools =
+            resolve_allowed_tools_for_scope(&self.components, &self.config.workspace, &scope);
+        let allowed_tools = refine_allowed_tools_for_input(user_input, &allowed_tools);
 
         let mut context = self
             .session_store
@@ -260,6 +265,12 @@ impl AgentRuntime {
             }
         } else {
             None
+        };
+        let system_prompt = match (system_prompt, system_hint_for_input(user_input)) {
+            (Some(base), Some(hint)) => Some(format!("{base}\n\n{hint}")),
+            (Some(base), None) => Some(base),
+            (None, Some(hint)) => Some(hint),
+            (None, None) => None,
         };
 
         let result = react_loop(

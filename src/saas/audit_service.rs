@@ -78,7 +78,10 @@ pub fn list_audit_logs(
              ORDER BY created_at DESC
              LIMIT ?3",
         )?;
-        let rows = stmt.query_map(params![tenant_id, organization_id, limit], map_audit_log_row)?;
+        let rows = stmt.query_map(
+            params![tenant_id, organization_id, limit],
+            map_audit_log_row,
+        )?;
         for row in rows {
             logs.push(row?);
         }

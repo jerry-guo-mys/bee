@@ -3,8 +3,8 @@
 //! 用于承载多租户产品化后的主数据模型与仓储边界。
 //! 当前阶段先定义领域对象和 repository trait，后续再接 sqlite / API / 服务实现。
 
-pub mod auth_service;
 pub mod audit_service;
+pub mod auth_service;
 pub mod bootstrap;
 pub mod bootstrap_service;
 pub mod migration;
@@ -17,9 +17,11 @@ pub mod template_catalog;
 pub mod template_instantiation_service;
 pub mod tool_policy_service;
 
+pub use audit_service::{
+    append_audit_log, detail_json as audit_detail_json, list_audit_logs, AuditActor, AuditLogInput,
+};
 pub use auth_service::{ensure_access, AccessContext, AccessRequirement};
 pub use bootstrap::{bootstrap_workspace_saas, SaasBootstrapResult};
-pub use audit_service::{append_audit_log, detail_json as audit_detail_json, list_audit_logs, AuditActor, AuditLogInput};
 pub use bootstrap_service::{
     build_bootstrap_plan, persist_bootstrap_plan, templates_for_industry, AgentTemplateSeed,
     IndustryTemplate, OrganizationBootstrapPlan, OrganizationBootstrapRequest,

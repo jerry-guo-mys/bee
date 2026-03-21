@@ -61,7 +61,10 @@ fn list_user_roles(
              WHERE tenant_id = ?1 AND organization_id = ?2 AND user_id = ?3",
         )?;
         let rows = stmt.query_map(params![tenant_id, organization_id, user_id], |row| {
-            Ok((parse_role(&row.get::<_, String>(0)?), row.get::<_, Option<String>>(1)?))
+            Ok((
+                parse_role(&row.get::<_, String>(0)?),
+                row.get::<_, Option<String>>(1)?,
+            ))
         })?;
         for row in rows {
             roles.push(row?);
@@ -73,7 +76,10 @@ fn list_user_roles(
              WHERE tenant_id = ?1 AND user_id = ?2",
         )?;
         let rows = stmt.query_map(params![tenant_id, user_id], |row| {
-            Ok((parse_role(&row.get::<_, String>(0)?), row.get::<_, Option<String>>(1)?))
+            Ok((
+                parse_role(&row.get::<_, String>(0)?),
+                row.get::<_, Option<String>>(1)?,
+            ))
         })?;
         for row in rows {
             roles.push(row?);
@@ -86,10 +92,16 @@ fn strongest_role(
     roles: &[(MembershipRole, Option<String>)],
     requested_team_id: Option<&str>,
 ) -> Option<MembershipRole> {
-    if roles.iter().any(|(role, _)| matches!(role, MembershipRole::PlatformAdmin)) {
+    if roles
+        .iter()
+        .any(|(role, _)| matches!(role, MembershipRole::PlatformAdmin))
+    {
         return Some(MembershipRole::PlatformAdmin);
     }
-    if roles.iter().any(|(role, _)| matches!(role, MembershipRole::OrgAdmin)) {
+    if roles
+        .iter()
+        .any(|(role, _)| matches!(role, MembershipRole::OrgAdmin))
+    {
         return Some(MembershipRole::OrgAdmin);
     }
     if let Some(team_id) = requested_team_id {
@@ -100,7 +112,10 @@ fn strongest_role(
             return Some(MembershipRole::TeamAdmin);
         }
     }
-    if roles.iter().any(|(role, _)| matches!(role, MembershipRole::Member)) {
+    if roles
+        .iter()
+        .any(|(role, _)| matches!(role, MembershipRole::Member))
+    {
         return Some(MembershipRole::Member);
     }
     None

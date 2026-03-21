@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::process::Command;
+use tokio_util::sync::CancellationToken;
 
 use crate::tools::Tool;
 
@@ -44,7 +45,20 @@ impl Tool for TestCheckTool {
 {"features": "web", "all_targets": true}"#
     }
 
+    fn timeout_secs(&self) -> Option<u64> {
+        Some(self.timeout_secs)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
+        self.execute_with_cancel(args, CancellationToken::new())
+            .await
+    }
+
+    async fn execute_with_cancel(
+        &self,
+        args: Value,
+        cancel_token: CancellationToken,
+    ) -> Result<String, String> {
         let features = args.get("features").and_then(|v| v.as_str());
         let all_targets = args
             .get("all_targets")
@@ -64,14 +78,19 @@ impl Tool for TestCheckTool {
                 cmd.arg("--features").arg(feat);
             }
         }
+        cmd.kill_on_drop(true);
 
-        let output = tokio::time::timeout(
-            tokio::time::Duration::from_secs(self.timeout_secs),
-            cmd.output(),
-        )
-        .await
-        .map_err(|_| "Check timed out")?
-        .map_err(|e| format!("Failed to run check: {}", e))?;
+        let output = tokio::select! {
+            _ = cancel_token.cancelled() => {
+                return Err("Cancelled by user".to_string());
+            }
+            result = tokio::time::timeout(
+                tokio::time::Duration::from_secs(self.timeout_secs),
+                cmd.output(),
+            ) => result
+                .map_err(|_| "Check timed out")?
+                .map_err(|e| format!("Failed to run check: {}", e))?,
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);

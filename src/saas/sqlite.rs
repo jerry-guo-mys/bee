@@ -279,9 +279,7 @@ fn ensure_column(
         }
     }
 
-    let alter = format!(
-        "ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
-    );
+    let alter = format!("ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}");
     conn.execute(&alter, [])?;
     Ok(())
 }

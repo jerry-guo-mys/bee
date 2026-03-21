@@ -8,6 +8,7 @@ use tokio::sync::broadcast;
 use crate::core::{AgentError, RecoveryAction, RecoveryEngine, TaskScheduler};
 use crate::memory::Message;
 use crate::react::{parse_llm_output, ContextManager, Critic, CriticResult, Planner, ReactEvent};
+use crate::tool_routing::rewrite_tool_call;
 use crate::tools::ToolExecutor;
 
 /// 单次对话内最大 ReAct 步数，防止死循环
@@ -329,7 +330,10 @@ async fn react_loop_impl(
             preferences_block
         );
         send_event(&event_tx, ReactEvent::Thinking);
-        let output = match planner.plan_with_system(&messages, &system).await {
+        let output = match tokio::select! {
+            _ = cancel_token.cancelled() => Err(AgentError::Cancelled),
+            result = planner.plan_with_system(&messages, &system) => result,
+        } {
             Ok(o) => o,
             Err(e) => {
                 let mut hist = context.conversation.messages().to_vec();
@@ -486,11 +490,13 @@ async fn react_loop_impl(
                 });
             }
             Ok(crate::react::planner::PlannerOutput::ToolCall(tc)) => {
+                let (tool_name, tool_args) = rewrite_tool_call(&tc.tool, &tc.args)
+                    .unwrap_or_else(|| (tc.tool.clone(), tc.args.clone()));
                 send_event(
                     &event_tx,
                     ReactEvent::ToolCall {
-                        tool: tc.tool.clone(),
-                        args: tc.args.clone(),
+                        tool: tool_name.clone(),
+                        args: tool_args.clone(),
                     },
                 );
                 let valid_names: &[String] = match allowed_tools {
@@ -498,9 +504,9 @@ async fn react_loop_impl(
                     _ => &[], // 空 slice 表示用 executor 全部工具
                 };
                 let is_allowed = if valid_names.is_empty() {
-                    executor.tool_names().iter().any(|n| n == &tc.tool)
+                    executor.tool_names().iter().any(|n| n == &tool_name)
                 } else {
-                    valid_names.iter().any(|n| n == &tc.tool)
+                    valid_names.iter().any(|n| n == &tool_name)
                 };
                 if !is_allowed {
                     let ref_names: Vec<String> = if valid_names.is_empty() {
@@ -511,11 +517,11 @@ async fn react_loop_impl(
                     send_event(
                         &event_tx,
                         ReactEvent::Error {
-                            text: format!("工具 {} 不在该智能体技能范围内", tc.tool),
+                            text: format!("工具 {} 不在该智能体技能范围内", tool_name),
                         },
                     );
-                    context.append_hallucination_lesson(&tc.tool, &ref_names);
-                    return Err(AgentError::HallucinatedTool(tc.tool.clone()));
+                    context.append_hallucination_lesson(&tool_name, &ref_names);
+                    return Err(AgentError::HallucinatedTool(tool_name));
                 }
                 // 工具并发限制：从 TaskScheduler 获取许可后再执行
                 let _permit = if let Some(sched) = task_scheduler {
@@ -523,22 +529,24 @@ async fn react_loop_impl(
                 } else {
                     None
                 };
-                let result = executor.execute(&tc.tool, tc.args).await;
+                let result = executor
+                    .execute_cancellable(&tool_name, tool_args, cancel_token.child_token())
+                    .await;
                 let observation = match result {
                     Ok(r) => {
                         if context.record_tool_success {
-                            context.append_procedural_record(&tc.tool, true, "ok");
+                            context.append_procedural_record(&tool_name, true, "ok");
                         }
                         r
                     }
                     Err(e) => {
-                        let failure_msg = format!("{}: {}", tc.tool, e);
+                        let failure_msg = format!("{}: {}", tool_name, e);
                         context.working.add_failure(failure_msg.clone());
-                        context.append_procedural_record(&tc.tool, false, &e.to_string());
+                        context.append_procedural_record(&tool_name, false, &e.to_string());
                         send_event(
                             &event_tx,
                             ReactEvent::ToolFailure {
-                                tool: tc.tool.clone(),
+                                tool: tool_name.clone(),
                                 reason: e.to_string(),
                             },
                         );
@@ -553,7 +561,7 @@ async fn react_loop_impl(
                     send_event(
                         &event_tx,
                         ReactEvent::Observation {
-                            tool: tc.tool.clone(),
+                            tool: tool_name.clone(),
                             preview: preview + "...",
                         },
                     );
@@ -561,14 +569,14 @@ async fn react_loop_impl(
                     send_event(
                         &event_tx,
                         ReactEvent::Observation {
-                            tool: tc.tool.clone(),
+                            tool: tool_name.clone(),
                             preview,
                         },
                     );
                 }
                 context
                     .working
-                    .add_attempt(format!("{} -> {}", tc.tool, observation));
+                    .add_attempt(format!("{} -> {}", tool_name, observation));
                 // 可选 Critic：校验工具结果是否符合目标；若 observation 已明确表示工具失败，则跳过 Critic，避免重复的“修正建议”
                 let obs_upper = observation.to_uppercase();
                 let is_tool_failure = obs_upper.contains("FAILED")
@@ -578,7 +586,7 @@ async fn react_loop_impl(
                 if !is_tool_failure {
                     if let Some(c) = critic {
                         if let Ok(CriticResult::Correction(suggestion)) =
-                            c.evaluate(user_input, &tc.tool, &observation).await
+                            c.evaluate(user_input, &tool_name, &observation).await
                         {
                             send_event(
                                 &event_tx,
@@ -598,12 +606,17 @@ async fn react_loop_impl(
                 // 将工具调用与结果写回对话，供下一轮 Plan 使用
                 context.push_message(Message::assistant(format!(
                     "Tool call: {} | Result: {}",
-                    tc.tool, observation
+                    tool_name, observation
                 )));
                 context.push_message(Message::user(format!(
                     "Observation from {}: {}",
-                    tc.tool, observation
+                    tool_name, observation
                 )));
+                if tool_name == "github_repo_inspect" {
+                    context.push_message(Message::user(
+                        "If the github_repo_inspect result includes fields such as repo_summary, detected_stack, top_level_directories, key_files_found, or file_snippets, use that information to answer the user directly. Do not inspect the local workspace with ls/cat/code_read unless the user explicitly asks about local files or the GitHub result is clearly missing a specific required file.".to_string(),
+                    ));
+                }
             }
             Err(e) => {
                 // 解析失败（如 JSON 错误），交给 Recovery 决定是否 RetryWithPrompt

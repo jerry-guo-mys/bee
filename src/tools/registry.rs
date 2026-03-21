@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 
 /// 工具 trait：名称、描述（供 LLM 理解）、参数 schema、异步执行（args 为 JSON）
 /// 解决问题 6.2：添加 parameters_schema 方法
@@ -18,6 +19,11 @@ pub trait Tool: Send + Sync {
 
     /// 工具描述（供 LLM 理解功能）
     fn description(&self) -> &str;
+
+    /// 可选的工具级超时覆盖（秒）；未设置时由 ToolExecutor 使用全局默认值
+    fn timeout_secs(&self) -> Option<u64> {
+        None
+    }
 
     /// 参数 JSON Schema（供 LLM 生成正确的参数格式）
     /// 默认返回空对象，表示无参数或参数格式不限
@@ -31,6 +37,15 @@ pub trait Tool: Send + Sync {
 
     /// 执行工具
     async fn execute(&self, args: Value) -> Result<String, String>;
+
+    /// 执行工具（支持取消）；默认回退到普通执行
+    async fn execute_with_cancel(
+        &self,
+        args: Value,
+        _cancel_token: CancellationToken,
+    ) -> Result<String, String> {
+        self.execute(args).await
+    }
 }
 
 /// 工具注册表：按名称存储 Arc<dyn Tool>，支持 register / get / execute / tool_names
@@ -59,6 +74,19 @@ impl ToolRegistry {
             .get(name)
             .ok_or_else(|| format!("Unknown tool: {name}"))?;
         tool.execute(args).await
+    }
+
+    pub async fn execute_cancellable(
+        &self,
+        name: &str,
+        args: Value,
+        cancel_token: CancellationToken,
+    ) -> Result<String, String> {
+        let tool = self
+            .tools
+            .get(name)
+            .ok_or_else(|| format!("Unknown tool: {name}"))?;
+        tool.execute_with_cancel(args, cancel_token).await
     }
 
     pub fn tool_names(&self) -> Vec<String> {

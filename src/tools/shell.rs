@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::process::Command;
+use tokio_util::sync::CancellationToken;
 
 use crate::tools::Tool;
 
@@ -77,6 +78,10 @@ impl Tool for ShellTool {
         "Run a whitelisted shell command. Allowed commands: ls, grep, cat, head, tail, wc, find, cargo, rustc (configurable)."
     }
 
+    fn timeout_secs(&self) -> Option<u64> {
+        Some(self.timeout_secs)
+    }
+
     fn parameters_schema(&self) -> Value {
         serde_json::json!({
             "type": "object",
@@ -91,6 +96,15 @@ impl Tool for ShellTool {
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {
+        self.execute_with_cancel(args, CancellationToken::new())
+            .await
+    }
+
+    async fn execute_with_cancel(
+        &self,
+        args: Value,
+        cancel_token: CancellationToken,
+    ) -> Result<String, String> {
         let command = args
             .get("command")
             .and_then(|v| v.as_str())
@@ -110,13 +124,19 @@ impl Tool for ShellTool {
             c
         };
 
-        let output = tokio::time::timeout(
-            std::time::Duration::from_secs(self.timeout_secs),
-            cmd.output(),
-        )
-        .await
-        .map_err(|_| format!("Command timed out after {}s", self.timeout_secs))?
-        .map_err(|e| format!("Execution failed: {}", e))?;
+        cmd.kill_on_drop(true);
+
+        let output = tokio::select! {
+            _ = cancel_token.cancelled() => {
+                return Err("Cancelled by user".to_string());
+            }
+            result = tokio::time::timeout(
+                std::time::Duration::from_secs(self.timeout_secs),
+                cmd.output(),
+            ) => result
+                .map_err(|_| format!("Command timed out after {}s", self.timeout_secs))?
+                .map_err(|e| format!("Execution failed: {}", e))?,
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();

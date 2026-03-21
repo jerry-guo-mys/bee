@@ -18,6 +18,7 @@ use crate::memory::{
 };
 use crate::react::{react_loop, ContextManager, Planner, ReactEvent};
 use crate::skills::SkillSelector;
+use crate::tool_routing::{refine_allowed_tools_for_input, system_hint_for_input};
 use tokio::sync::mpsc;
 
 /// 创建 Agent 组件：使用统一的 AgentBuilder（解决问题 1.1）
@@ -244,6 +245,9 @@ pub async fn process_message(
     allowed_tools: Option<&[String]>,
 ) -> Result<String, AgentError> {
     let cancel_token = tokio_util::sync::CancellationToken::new();
+    let refined_tools =
+        allowed_tools.map(|tools| refine_allowed_tools_for_input(user_input, tools));
+    let system_hint = system_hint_for_input(user_input);
     let result = react_loop(
         &components.planner,
         &components.executor,
@@ -255,8 +259,8 @@ pub async fn process_message(
         cancel_token,
         components.critic.as_ref(),
         Some(&components.task_scheduler),
-        None,
-        allowed_tools,
+        system_hint.as_deref(),
+        refined_tools.as_deref(),
     )
     .await?;
     Ok(result.response)
@@ -278,8 +282,42 @@ pub async fn process_message_stream(
     allowed_tools: Option<&[String]>,
     assistant_id: Option<&str>,
 ) -> Result<String, AgentError> {
-    let cancel_token = tokio_util::sync::CancellationToken::new();
+    process_message_stream_with_cancel(
+        components,
+        context,
+        user_input,
+        event_tx,
+        system_prompt_override,
+        planner_override,
+        allowed_tools,
+        assistant_id,
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+}
+
+/// 流式处理单条用户消息（支持外部取消 token）
+#[allow(unused_variables)]
+pub async fn process_message_stream_with_cancel(
+    components: &AgentComponents,
+    context: &mut ContextManager,
+    user_input: &str,
+    event_tx: mpsc::UnboundedSender<ReactEvent>,
+    system_prompt_override: Option<&str>,
+    planner_override: Option<&Planner>,
+    allowed_tools: Option<&[String]>,
+    assistant_id: Option<&str>,
+    cancel_token: tokio_util::sync::CancellationToken,
+) -> Result<String, AgentError> {
     let planner = planner_override.unwrap_or(&components.planner);
+    let refined_tools =
+        allowed_tools.map(|tools| refine_allowed_tools_for_input(user_input, tools));
+    let combined_system_prompt = match (system_prompt_override, system_hint_for_input(user_input)) {
+        (Some(base), Some(hint)) => Some(format!("{base}\n\n{hint}")),
+        (Some(base), None) => Some(base.to_string()),
+        (None, Some(hint)) => Some(hint),
+        (None, None) => None,
+    };
 
     let result = {
         #[cfg(feature = "web")]
@@ -298,8 +336,8 @@ pub async fn process_message_stream(
                             cancel_token,
                             components.critic.as_ref(),
                             Some(&components.task_scheduler),
-                            system_prompt_override,
-                            allowed_tools,
+                            combined_system_prompt.as_deref(),
+                            refined_tools.as_deref(),
                         )
                         .await
                     })
@@ -316,8 +354,8 @@ pub async fn process_message_stream(
                     cancel_token,
                     components.critic.as_ref(),
                     Some(&components.task_scheduler),
-                    system_prompt_override,
-                    allowed_tools,
+                    combined_system_prompt.as_deref(),
+                    refined_tools.as_deref(),
                 )
                 .await
             }
@@ -335,8 +373,8 @@ pub async fn process_message_stream(
                 cancel_token,
                 components.critic.as_ref(),
                 Some(&components.task_scheduler),
-                system_prompt_override,
-                allowed_tools,
+                combined_system_prompt.as_deref(),
+                refined_tools.as_deref(),
             )
             .await
         }

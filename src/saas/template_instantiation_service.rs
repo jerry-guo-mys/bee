@@ -52,9 +52,13 @@ pub fn instantiate_team_templates(
     let mut existing_count = 0;
     let mut instances = Vec::new();
     for template in selected {
-        if let Some(existing) =
-            load_existing_instance(store, &req.tenant_id, &req.organization_id, &team.id, &template.id)?
-        {
+        if let Some(existing) = load_existing_instance(
+            store,
+            &req.tenant_id,
+            &req.organization_id,
+            &team.id,
+            &template.id,
+        )? {
             existing_count += 1;
             instances.push(existing);
             continue;
@@ -148,28 +152,32 @@ fn load_existing_instance(
          WHERE tenant_id = ?1 AND organization_id = ?2 AND team_id = ?3 AND template_id = ?4
          LIMIT 1",
     )?;
-    stmt.query_row(params![tenant_id, organization_id, team_id, template_id], |row| {
-        let tool_ids_override_json: String = row.get(8)?;
-        let knowledge_base_ids_override_json: Option<String> = row.get(10)?;
-        Ok(AgentInstance {
-            id: row.get(0)?,
-            tenant_id: row.get(1)?,
-            organization_id: row.get(2)?,
-            team_id: row.get(3)?,
-            template_id: row.get(4)?,
-            name: row.get(5)?,
-            status: deserialize_agent_status(&row.get::<_, String>(6)?),
-            prompt_override: row.get(7)?,
-            tool_ids_override: serde_json::from_str(&tool_ids_override_json).unwrap_or_default(),
-            model_id_override: row.get(9)?,
-            knowledge_base_ids_override: knowledge_base_ids_override_json
-                .as_deref()
-                .and_then(|value| serde_json::from_str(value).ok())
-                .unwrap_or_default(),
-            created_at: row.get(11)?,
-            updated_at: row.get(12)?,
-        })
-    })
+    stmt.query_row(
+        params![tenant_id, organization_id, team_id, template_id],
+        |row| {
+            let tool_ids_override_json: String = row.get(8)?;
+            let knowledge_base_ids_override_json: Option<String> = row.get(10)?;
+            Ok(AgentInstance {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                organization_id: row.get(2)?,
+                team_id: row.get(3)?,
+                template_id: row.get(4)?,
+                name: row.get(5)?,
+                status: deserialize_agent_status(&row.get::<_, String>(6)?),
+                prompt_override: row.get(7)?,
+                tool_ids_override: serde_json::from_str(&tool_ids_override_json)
+                    .unwrap_or_default(),
+                model_id_override: row.get(9)?,
+                knowledge_base_ids_override: knowledge_base_ids_override_json
+                    .as_deref()
+                    .and_then(|value| serde_json::from_str(value).ok())
+                    .unwrap_or_default(),
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+            })
+        },
+    )
     .optional()
     .context("load existing team agent instance")
 }
@@ -253,7 +261,10 @@ mod tests {
         assert_eq!(first.created_count, 1);
         assert_eq!(first.existing_count, 0);
         assert_eq!(first.instances.len(), 1);
-        assert_eq!(first.instances[0].prompt_override.as_deref(), Some("prompt"));
+        assert_eq!(
+            first.instances[0].prompt_override.as_deref(),
+            Some("prompt")
+        );
         assert_eq!(
             first.instances[0].tool_ids_override,
             vec!["search".to_string(), "cat".to_string()]

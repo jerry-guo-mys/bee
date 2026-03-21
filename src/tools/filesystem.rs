@@ -15,30 +15,52 @@ use crate::tools::Tool;
 #[derive(Debug, Clone)]
 pub struct SafeFs {
     root_dir: PathBuf,
+    fallback_root: Option<PathBuf>,
 }
 
 impl SafeFs {
     pub fn new(root_dir: impl AsRef<Path>) -> Self {
         let root = root_dir.as_ref().to_path_buf();
         let root_dir = root.canonicalize().unwrap_or(root);
-        Self { root_dir }
+        let fallback_root = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| cwd.canonicalize().ok().or(Some(cwd)))
+            .filter(|cwd| cwd != &root_dir);
+        Self {
+            root_dir,
+            fallback_root,
+        }
+    }
+
+    fn resolve_under_root(root: &Path, path: &str) -> Result<PathBuf, AgentError> {
+        let full = root.join(path);
+        let canonical = full
+            .canonicalize()
+            .map_err(|_| AgentError::ToolExecutionFailed(format!("Path not found: {}", path)))?;
+        let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        if canonical.starts_with(root_canon) {
+            Ok(canonical)
+        } else {
+            Err(AgentError::PathEscape(path.to_string()))
+        }
     }
 
     /// 检查路径是否在沙箱内
     pub fn resolve(&self, path: &str) -> Result<PathBuf, AgentError> {
         let path = path.trim_start_matches("./");
-        let full = self.root_dir.join(path);
-        let canonical = full
-            .canonicalize()
-            .map_err(|_| AgentError::ToolExecutionFailed(format!("Path not found: {}", path)))?;
-        let root_canon = self
-            .root_dir
-            .canonicalize()
-            .unwrap_or_else(|_| self.root_dir.clone());
-        if canonical.starts_with(root_canon) {
-            Ok(canonical)
-        } else {
-            Err(AgentError::PathEscape(path.to_string())) // 如 ../../etc/passwd
+        match Self::resolve_under_root(&self.root_dir, path) {
+            Ok(resolved) => Ok(resolved),
+            Err(AgentError::ToolExecutionFailed(_)) => {
+                if let Some(fallback_root) = &self.fallback_root {
+                    Self::resolve_under_root(fallback_root, path)
+                } else {
+                    Err(AgentError::ToolExecutionFailed(format!(
+                        "Path not found: {}",
+                        path
+                    )))
+                }
+            }
+            Err(err) => Err(err),
         }
     }
 
