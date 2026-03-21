@@ -1,77 +1,44 @@
 # Agent Guidelines for Bee
 
-This file provides guidance for AI coding agents working in this repository.
-
-## Project Overview
-
-Bee is a Rust personal AI agent system with ReAct architecture, supporting TUI (default), Web, and WhatsApp interfaces.
+Guidelines for AI coding agents working in this Rust personal AI agent system.
 
 ## Build Commands
 
 ```bash
-# Run TUI (default binary)
-cargo run
-
-# Run specific binary
+cargo run                          # Run TUI (default)
 cargo run --bin bee-web --features web
-cargo run --bin bee-whatsapp --features whatsapp
-cargo run --bin bee-evolution
-
-# Build for release
-cargo run --release
+cargo run --bin bee-evolution      # Evolution testing
 cargo build --release
-
-# Check only (fast)
-cargo check
+cargo check                        # Fast type check
 ```
 
 ## Test Commands
 
 ```bash
-# Run all tests
-cargo test
-
-# Run specific test by name
-cargo test test_name
-
-# Run tests matching pattern
-cargo test prefix_
-
-# Run tests in specific module
-cargo test module_name::
-
-# Run with output
-cargo test -- --nocapture
-
-# Run single test with output
-cargo test test_name -- --nocapture
+cargo test                         # Run all tests
+cargo test test_name               # Run single test by name
+cargo test test_name -- --nocapture  # Run with output
+cargo test module_name::           # Run by module pattern
+cargo test -- --ignored            # Run ignored tests
 ```
 
-## Lint/Format Commands
+## Lint/Format
 
 ```bash
-# Run clippy
-cargo clippy
-cargo clippy -- -D warnings  # fail on warnings
-
-# Format code
-cargo fmt
-
-# Check formatting
-cargo fmt -- --check
+cargo clippy                       # Run linter
+cargo clippy -- -D warnings        # Fail on warnings
+cargo fmt                          # Format code
+cargo fmt -- --check               # Check formatting (CI)
 ```
 
-## Code Style Guidelines
+## Code Style
 
-### Imports (use statements)
-
-Order: std → external crates → internal modules (separated by blank line)
-
+### Imports (grouped with blank lines)
 ```rust
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use anyhow::Context;
 
 use crate::config::AppConfig;
@@ -79,48 +46,37 @@ use crate::core::AgentError;
 ```
 
 ### Naming Conventions
+- **Types/Structs/Enums/Traits**: `PascalCase` (`AgentError`, `ToolExecutor`)
+- **Functions/Methods/Variables**: `snake_case` (`create_agent`, `ctx_manager`)
+- **Constants**: `SCREAMING_SNAKE_CASE` (`MAX_RETRIES`)
+- **Modules**: `snake_case` (`memory`, `code_edit`)
+- **Test functions**: `test_` prefix (`test_parse_input`)
 
-- **Types/Structs/Enums/Traits**: `PascalCase` (e.g., `AgentError`, `ToolExecutor`)
-- **Functions/Methods/Variables**: `snake_case` (e.g., `create_agent`, `tool_name`)
-- **Constants**: `SCREAMING_SNAKE_CASE` (e.g., `DEEPSEEK_BASE_URL`)
-- **Modules**: `snake_case` (e.g., `memory`, `code_edit`)
-- **Test functions**: `snake_case` prefixed with `test_` (e.g., `test_exact_match`)
-
-### Documentation
-
-- Use `//!` for module-level documentation (in Chinese for this project)
-- Use `///` for item-level documentation
-- Document public APIs thoroughly
+### Formatting
+- Max line length: ~100 chars (rustfmt default)
+- Trailing commas in multi-line structs/enums
+- Chain methods on separate lines when long
 
 ### Error Handling
-
-- Use `thiserror` for custom error enums
-- Use `anyhow` for application-level error handling
-- Define specific error types in `core/error.rs`
+- Use `thiserror` for error enums in `core/error.rs`
+- Use `anyhow` for application errors
+- Prefer `?` over `.unwrap()` in production code
 
 ```rust
 #[derive(Error, Debug)]
 pub enum AgentError {
     #[error("Tool execution failed: {0}")]
     ToolExecutionFailed(String),
-    #[error("Path escape attempt: {0}")]
-    PathEscape(String),
 }
 ```
 
 ### Async Patterns
-
-- Use `tokio` for async runtime
-- `#[tokio::main]` for main functions
-- Use `async-trait` for trait-based async methods
-- Prefer `tokio::sync` primitives (mpsc, broadcast, watch, RwLock)
+- Use `tokio` runtime with `#[tokio::main]`
+- Use `async-trait` for async traits
+- Use `tokio::sync` primitives (mpsc, broadcast, CancellationToken)
 
 ### Testing
-
-- Tests are inline in `#[cfg(test)]` modules at file bottom
-- No separate `tests/` directory for integration tests
-- Use `super::*` to import parent module
-- For async tests, create a runtime explicitly:
+Tests are inline in `#[cfg(test)]` modules. Use `tokio::runtime` for async:
 
 ```rust
 #[cfg(test)]
@@ -137,47 +93,54 @@ mod tests {
 }
 ```
 
-### Features
+### Documentation
+- Use `//!` for module-level docs (Chinese preferred)
+- Use `///` for item-level docs
+- Document public APIs thoroughly
 
-The project uses Cargo features:
-- `web` - Web server binary
+### Logging
+Use `tracing` crate:
+```rust
+tracing::info!("Processing: {}", value);
+tracing::warn!("Condition met: {:?}", condition);
+tracing::error!("Error: {:?}", err);
+```
+
+## Project Structure
+```
+src/
+├── main.rs          # TUI entry point
+├── lib.rs           # Library exports
+├── bin/             # Additional binaries (web, whatsapp, etc.)
+├── core/            # Orchestrator, state, recovery, error
+├── llm/             # LLM clients (OpenAI, DeepSeek, Mock)
+├── memory/          # Short/long-term memory, persistence
+├── react/           # Planner, Critic, ReAct loop
+├── tools/           # Tool implementations & executor
+├── skills/          # Skills system
+├── ui/              # Ratatui TUI components
+└── config/          # Configuration loading
+```
+
+## Cargo Features
+- `web` - Web server with streaming
 - `whatsapp` - WhatsApp integration
-- `browser` - Browser automation
+- `lark` - Lark integration  
+- `gateway` - WebSocket gateway
+- `browser` - Headless Chrome control
+- `async-sqlite` - Async SQLite (sqlx)
 
-Use feature gates when needed:
 ```rust
 #[cfg(feature = "browser")]
 use crate::tools::BrowserTool;
 ```
 
-### Logging
-
-Use `tracing` for logging:
-```rust
-tracing::info!("Message: {}", value);
-tracing::warn!("Warning condition");
-tracing::error!("Error occurred: {:?}", err);
-```
-
-## File Organization
-
-- `src/main.rs` - TUI entry point
-- `src/lib.rs` - Library exports
-- `src/bin/` - Additional binaries
-- `src/core/` - Orchestrator, state, recovery
-- `src/llm/` - LLM clients (DeepSeek, OpenAI, Mock)
-- `src/memory/` - Short/mid/long-term memory
-- `src/react/` - Planner, Critic, ReAct loop
-- `src/tools/` - Tool implementations
-- `src/ui/` - TUI components
-- `config/` - Configuration files
-
 ## Key Dependencies
-
 - `tokio` - Async runtime
 - `anyhow`/`thiserror` - Error handling
-- `serde` - Serialization
-- `async-openai` - OpenAI API
+- `serde`/`serde_json` - Serialization
+- `async-openai` - OpenAI API client
 - `ratatui`/`crossterm` - TUI
-- `axum` - Web server (optional)
-- `rusqlite` - SQLite persistence
+- `axum`/`tower` - Web server
+- `rusqlite`/`sqlx` - SQLite persistence
+- `tracing` - Logging
