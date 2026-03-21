@@ -572,6 +572,34 @@
             </div>
           </div>
         </div>
+
+        <div class="settings-view-section">
+          <h3 class="settings-view-title">组织初始化</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mb-3">快速创建一个公司、默认团队和对应的 Agent 实例。</p>
+          <div class="settings-view-card">
+            <div class="p-5 space-y-4">
+              <div>
+                <label for="settings-view-org-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">公司名称</label>
+                <input id="settings-view-org-name" type="text" placeholder="例如：Acme Software" class="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+              </div>
+              <div>
+                <label for="settings-view-org-industry" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">行业模板</label>
+                <select id="settings-view-org-industry" class="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+                  <option value="general">通用公司</option>
+                  <option value="sales_service">销售与客服</option>
+                  <option value="marketing_studio">市场内容工作室</option>
+                  <option value="recruiting_agency">招聘服务团队</option>
+                  <option value="software_delivery">软件交付团队</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-3">
+                <button id="settings-view-org-bootstrap" class="px-4 py-2 text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors">初始化组织</button>
+                <span class="text-xs text-gray-400">会写入 `.bee/saas.db`</span>
+              </div>
+              <div id="settings-view-org-result" class="hidden rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"></div>
+            </div>
+          </div>
+        </div>
         
         <!-- Skills Management -->
         <div class="settings-view-section">
@@ -1976,6 +2004,20 @@
           modelSelect.appendChild(opt);
         });
       }
+
+      const organizationNameInput = document.getElementById('settings-view-org-name');
+      if (organizationNameInput) {
+        organizationNameInput.value = localStorage.getItem('bee_org_name') || '';
+      }
+      const organizationIndustrySelect = document.getElementById('settings-view-org-industry');
+      if (organizationIndustrySelect) {
+        organizationIndustrySelect.value = localStorage.getItem('bee_org_industry') || 'general';
+      }
+      const organizationResult = document.getElementById('settings-view-org-result');
+      if (organizationResult) {
+        organizationResult.classList.add('hidden');
+        organizationResult.textContent = '';
+      }
       
       // Load skills
       renderSettingsViewSkills();
@@ -2100,6 +2142,14 @@
       const opt = e.target.options[e.target.selectedIndex];
       document.getElementById('selected-model').textContent = opt.textContent;
     });
+
+    document.getElementById('settings-view-org-name')?.addEventListener('input', (e) => {
+      localStorage.setItem('bee_org_name', e.target.value);
+    });
+
+    document.getElementById('settings-view-org-industry')?.addEventListener('change', (e) => {
+      localStorage.setItem('bee_org_industry', e.target.value);
+    });
     
     document.getElementById('settings-view-models-all')?.addEventListener('click', () => {
       document.querySelectorAll('#settings-view-models-list .settings-model-checkbox').forEach(cb => {
@@ -2121,6 +2171,54 @@
       await loadSkills();
       renderSettingsViewSkills();
       showToast('技能已刷新', 'success');
+    });
+
+    document.getElementById('settings-view-org-bootstrap')?.addEventListener('click', async () => {
+      const nameInput = document.getElementById('settings-view-org-name');
+      const industrySelect = document.getElementById('settings-view-org-industry');
+      const resultBox = document.getElementById('settings-view-org-result');
+      const button = document.getElementById('settings-view-org-bootstrap');
+      const organizationName = (nameInput?.value || '').trim();
+      const industry = industrySelect?.value || 'general';
+
+      if (!organizationName) {
+        showToast('请输入公司名称', 'error');
+        nameInput?.focus();
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = '初始化中...';
+      if (resultBox) {
+        resultBox.classList.add('hidden');
+        resultBox.textContent = '';
+      }
+
+      try {
+        const response = await fetch('/api/organizations/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            organization_name: organizationName,
+            industry,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.message || data?.error || '初始化失败');
+        }
+
+        if (resultBox) {
+          resultBox.textContent = `已创建 ${organizationName}，生成 ${data.team_count} 个团队、${data.agent_instance_count} 个 Agent，workspace=${data.workspace_id}。团队：${(data.team_names || []).join('、')}`;
+          resultBox.classList.remove('hidden');
+        }
+        showToast('组织初始化完成', 'success');
+      } catch (e) {
+        showToast('初始化失败: ' + (e.message || 'unknown'), 'error');
+      } finally {
+        button.disabled = false;
+        button.textContent = '初始化组织';
+      }
     });
 
     document.getElementById('settings-view-skills-import-openclaw')?.addEventListener('click', openOpenClawImport);

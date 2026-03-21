@@ -53,7 +53,10 @@ use bee::memory::{
     record_learning as learnings_record_learning,
 };
 use bee::react::{compact_context, ContextManager, Planner, ReactEvent};
-use bee::saas::bootstrap_workspace_saas;
+use bee::saas::{
+    bootstrap_workspace_saas, build_bootstrap_plan, persist_bootstrap_plan, IndustryTemplate,
+    OrganizationBootstrapRequest, SaasSqliteStore,
+};
 use bee::skills::{Skill, SkillLoader};
 use bee::tools::{tool_call_schema_json, CreateTool, DynamicAgent};
 
@@ -204,6 +207,31 @@ struct CreateAgentRequest {
 #[derive(Debug, Deserialize)]
 struct InboxProcessRequest {
     assistant_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BootstrapOrganizationRequest {
+    organization_name: String,
+    #[serde(default)]
+    industry: Option<String>,
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+    #[serde(default)]
+    workspace_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BootstrapOrganizationResponse {
+    tenant_id: String,
+    organization_id: String,
+    workspace_id: String,
+    industry: String,
+    team_count: usize,
+    team_names: Vec<String>,
+    agent_template_count: usize,
+    agent_instance_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -423,6 +451,38 @@ fn create_llm_for_model(entry: &ModelEntry) -> Arc<dyn bee::llm::LlmClient> {
     ))
 }
 
+fn saas_db_path(workspace: &std::path::Path) -> PathBuf {
+    workspace.join(".bee").join("saas.db")
+}
+
+fn parse_industry_template(raw: Option<&str>) -> Result<IndustryTemplate, String> {
+    let value = raw.unwrap_or("general").trim().to_ascii_lowercase();
+    match value.as_str() {
+        "" | "general" => Ok(IndustryTemplate::General),
+        "sales_service" | "sales-service" | "sales" => Ok(IndustryTemplate::SalesService),
+        "marketing_studio" | "marketing-studio" | "marketing" => {
+            Ok(IndustryTemplate::MarketingStudio)
+        }
+        "recruiting_agency" | "recruiting-agency" | "recruiting" | "hr" => {
+            Ok(IndustryTemplate::RecruitingAgency)
+        }
+        "software_delivery" | "software-delivery" | "software" | "engineering" => {
+            Ok(IndustryTemplate::SoftwareDelivery)
+        }
+        _ => Err(format!("unsupported industry template: {}", value)),
+    }
+}
+
+fn industry_template_code(template: IndustryTemplate) -> &'static str {
+    match template {
+        IndustryTemplate::General => "general",
+        IndustryTemplate::SalesService => "sales_service",
+        IndustryTemplate::MarketingStudio => "marketing_studio",
+        IndustryTemplate::RecruitingAgency => "recruiting_agency",
+        IndustryTemplate::SoftwareDelivery => "software_delivery",
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
@@ -573,6 +633,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/assistants", get(api_assistants_list))
         .route("/api/agents", get(api_agents_list).post(api_agents_create))
         .route("/api/groups", get(api_groups_list).post(api_groups_create))
+        .route(
+            "/api/organizations/bootstrap",
+            post(api_organizations_bootstrap),
+        )
         .route("/api/tasks", get(api_tasks_list).post(api_tasks_create))
         .route("/api/tasks/:id", axum::routing::patch(api_tasks_update))
         .route("/api/tasks/:id/start", post(api_tasks_start))
@@ -1089,6 +1153,56 @@ async fn api_groups_create(
         },
     );
     Ok((StatusCode::CREATED, Json(group)))
+}
+
+/// POST /api/organizations/bootstrap：根据行业模板初始化公司、团队、默认 Agent 与工作空间
+async fn api_organizations_bootstrap(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<BootstrapOrganizationRequest>,
+) -> Result<(StatusCode, Json<BootstrapOrganizationResponse>), (StatusCode, String)> {
+    let organization_name = req.organization_name.trim().to_string();
+    if organization_name.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "organization_name is required".to_string(),
+        ));
+    }
+
+    let industry = parse_industry_template(req.industry.as_deref())
+        .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
+    let bootstrap_req = OrganizationBootstrapRequest {
+        tenant_id: req
+            .tenant_id
+            .unwrap_or_else(|| format!("tenant_{}", uuid::Uuid::new_v4())),
+        organization_id: req
+            .organization_id
+            .unwrap_or_else(|| format!("org_{}", uuid::Uuid::new_v4())),
+        organization_name,
+        industry,
+        workspace_id: req
+            .workspace_id
+            .unwrap_or_else(|| format!("ws_{}", uuid::Uuid::new_v4())),
+    };
+    let plan = build_bootstrap_plan(&bootstrap_req);
+    let team_names = plan.teams.iter().map(|team| team.name.clone()).collect();
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let result = persist_bootstrap_plan(&store, &plan)
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(BootstrapOrganizationResponse {
+            tenant_id: result.tenant_id,
+            organization_id: result.organization_id,
+            workspace_id: result.workspace_id,
+            industry: industry_template_code(industry).to_string(),
+            team_count: result.team_count,
+            team_names,
+            agent_template_count: result.agent_template_count,
+            agent_instance_count: result.agent_instance_count,
+        }),
+    ))
 }
 
 /// GET /api/tasks：列出所有任务（可选 status 过滤）
