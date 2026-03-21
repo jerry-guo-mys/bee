@@ -73,8 +73,8 @@ impl<'a> SaasSeedRepository<'a> {
     pub fn upsert_agent_template(&self, template: &AgentTemplate) -> anyhow::Result<()> {
         self.store.connection().execute(
             "INSERT OR REPLACE INTO saas_agent_templates
-             (id, tenant_id, name, description, prompt, tool_ids_json, model_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             (id, tenant_id, name, description, prompt, tool_ids_json, model_id, knowledge_base_ids_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 template.id,
                 template.tenant_id,
@@ -83,6 +83,7 @@ impl<'a> SaasSeedRepository<'a> {
                 template.prompt,
                 serde_json::to_string(&template.tool_ids)?,
                 template.model_id,
+                serde_json::to_string(&template.knowledge_base_ids)?,
                 template.created_at,
                 template.updated_at
             ],
@@ -93,8 +94,8 @@ impl<'a> SaasSeedRepository<'a> {
     pub fn create_agent_instance(&self, instance: &AgentInstance) -> anyhow::Result<()> {
         self.store.connection().execute(
             "INSERT OR REPLACE INTO saas_agent_instances
-             (id, tenant_id, organization_id, team_id, template_id, name, status, prompt_override, tool_ids_override_json, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             (id, tenant_id, organization_id, team_id, template_id, name, status, prompt_override, tool_ids_override_json, model_id_override, knowledge_base_ids_override_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 instance.id,
                 instance.tenant_id,
@@ -105,6 +106,8 @@ impl<'a> SaasSeedRepository<'a> {
                 serialize_agent_status(&instance.status),
                 instance.prompt_override,
                 serde_json::to_string(&instance.tool_ids_override)?,
+                instance.model_id_override,
+                serde_json::to_string(&instance.knowledge_base_ids_override)?,
                 instance.created_at,
                 instance.updated_at
             ],

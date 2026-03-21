@@ -55,14 +55,16 @@ use bee::memory::{
 use bee::react::{compact_context, ContextManager, Planner, ReactEvent};
 use bee::saas::{
     bootstrap_workspace_saas, build_bootstrap_plan, persist_bootstrap_plan, IndustryTemplate,
-    OrganizationBootstrapRequest, SaasSqliteStore,
+    instantiate_team_templates, list_team_templates, OrganizationBootstrapRequest,
+    SaasSqliteStore, SaasTemplateRepository, TeamTemplateInstantiationRequest,
 };
 use bee::skills::{Skill, SkillLoader};
 use bee::tools::{tool_call_schema_json, CreateTool, DynamicAgent};
 
 use assistant_catalog::{
-    build_prompt_with_skills, load_assistants, load_skills_overrides, save_skills_overrides,
-    AssistantEntry, AssistantInfo,
+    build_prompt_with_skills, load_assistants, load_knowledge_overrides, load_skills_overrides,
+    platform_template_id, save_knowledge_overrides, save_skills_overrides, AssistantEntry,
+    AssistantInfo,
 };
 use session_store::{
     group_messages_to_llm_messages, load_group_session, load_groups_from_disk,
@@ -234,6 +236,44 @@ struct BootstrapOrganizationResponse {
     team_names: Vec<String>,
     agent_template_count: usize,
     agent_instance_count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentTemplatesQuery {
+    #[serde(default)]
+    tenant_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentTemplateSummary {
+    id: String,
+    tenant_id: String,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model_id: Option<String>,
+    tool_ids: Vec<String>,
+    knowledge_base_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InstantiateTeamTemplatesRequest {
+    organization_id: String,
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    template_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct InstantiateTeamTemplatesResponse {
+    tenant_id: String,
+    organization_id: String,
+    team_id: String,
+    created_count: usize,
+    existing_count: usize,
+    instance_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -628,8 +668,13 @@ async fn main() -> anyhow::Result<()> {
     let components_inner = create_agent_components(&cfg, &workspace);
     let tool_descriptions = components_inner.executor.tool_descriptions();
     let skill_loader = components_inner.skill_loader.clone();
-    let (mut assistants, mut prompts_map, mut skills_map, assistant_entries) =
-        load_assistants(&config_base, &tool_descriptions);
+    let saas_db = saas_db_path(&workspace);
+    let (mut assistants, mut prompts_map, mut skills_map, assistant_entries) = load_assistants(
+        &config_base,
+        &tool_descriptions,
+        Some(&saas_db),
+        "tenant-default",
+    );
 
     let dynamic = dynamic_agent_catalog::load_dynamic_agents(&workspace);
     let all_tool_list: String = tool_descriptions
@@ -728,11 +773,16 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/compact", post(api_compact))
         .route("/api/session/rename", post(api_session_rename))
         .route("/api/assistants", get(api_assistants_list))
+        .route("/api/agent-templates", get(api_agent_templates_list))
         .route("/api/agents", get(api_agents_list).post(api_agents_create))
         .route("/api/groups", get(api_groups_list).post(api_groups_create))
         .route(
             "/api/organizations/bootstrap",
             post(api_organizations_bootstrap),
+        )
+        .route(
+            "/api/teams/:team_id/agent-instances/bootstrap",
+            post(api_team_agent_instances_bootstrap),
         )
         .route("/api/tasks", get(api_tasks_list).post(api_tasks_create))
         .route("/api/tasks/:id", axum::routing::patch(api_tasks_update))
@@ -742,6 +792,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/assistant/:id/skills",
             axum::routing::put(api_assistant_skills_put),
+        )
+        .route(
+            "/api/assistant/:id/knowledge-bases",
+            axum::routing::put(api_assistant_knowledge_bases_put),
         )
         .route("/api/models", get(api_models_list))
         .route("/api/skills", get(api_skills_list))
@@ -1325,6 +1379,82 @@ async fn api_organizations_bootstrap(
     ))
 }
 
+/// GET /api/agent-templates：列出租户下可用模板
+async fn api_agent_templates_list(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AgentTemplatesQuery>,
+) -> Result<Json<Vec<AgentTemplateSummary>>, (StatusCode, String)> {
+    let tenant_id = query
+        .tenant_id
+        .unwrap_or_else(|| "tenant-default".to_string());
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let templates = list_team_templates(&store, &tenant_id)
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+
+    Ok(Json(
+        templates
+            .into_iter()
+            .map(|template| AgentTemplateSummary {
+                id: template.id,
+                tenant_id: template.tenant_id,
+                name: template.name,
+                description: template.description,
+                model_id: template.model_id,
+                tool_ids: template.tool_ids,
+                knowledge_base_ids: template.knowledge_base_ids,
+            })
+            .collect(),
+    ))
+}
+
+/// POST /api/teams/:team_id/agent-instances/bootstrap：把模板实例化到团队
+async fn api_team_agent_instances_bootstrap(
+    Path(team_id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<InstantiateTeamTemplatesRequest>,
+) -> Result<(StatusCode, Json<InstantiateTeamTemplatesResponse>), (StatusCode, String)> {
+    let organization_id = req.organization_id.trim().to_string();
+    if organization_id.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "organization_id is required".to_string(),
+        ));
+    }
+    let team_id = team_id.trim().to_string();
+    if team_id.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "team_id is required".to_string()));
+    }
+
+    let tenant_id = req
+        .tenant_id
+        .unwrap_or_else(|| "tenant-default".to_string());
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let result = instantiate_team_templates(
+        &store,
+        &TeamTemplateInstantiationRequest {
+            tenant_id: tenant_id.clone(),
+            organization_id: organization_id.clone(),
+            team_id: team_id.clone(),
+            template_ids: req.template_ids,
+        },
+    )
+    .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(InstantiateTeamTemplatesResponse {
+            tenant_id,
+            organization_id,
+            team_id,
+            created_count: result.created_count,
+            existing_count: result.existing_count,
+            instance_ids: result.instances.into_iter().map(|instance| instance.id).collect(),
+        }),
+    ))
+}
+
 /// GET /api/tasks：列出所有任务（可选 status 过滤）
 async fn api_tasks_list(
     State(state): State<Arc<AppState>>,
@@ -1482,6 +1612,11 @@ struct UpdateSkillsRequest {
     skills: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct UpdateKnowledgeBasesRequest {
+    knowledge_base_ids: Vec<String>,
+}
+
 /// PUT /api/assistant/:id/skills：更新该智能体的技能配置，持久化到 config/assistant_skills.json
 async fn api_assistant_skills_put(
     State(state): State<Arc<AppState>>,
@@ -1525,11 +1660,136 @@ async fn api_assistant_skills_put(
     }
 
     let mut overrides = load_skills_overrides(base);
-    overrides.insert(id, skills);
+    overrides.insert(id.clone(), skills.clone());
     save_skills_overrides(base, &overrides).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("保存配置失败: {}", e),
+        )
+    })?;
+
+    let db_path = saas_db_path(&state.workspace);
+    let store = SaasSqliteStore::new(&db_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("打开模板仓储失败: {}", e),
+        )
+    })?;
+    let repo = SaasTemplateRepository::new(&store);
+    let template_id = platform_template_id(&id);
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut template = repo
+        .get_agent_template(&template_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("读取模板失败: {}", e),
+            )
+        })?
+        .unwrap_or_else(|| bee::saas::AgentTemplate {
+            id: template_id.clone(),
+            tenant_id: "tenant-default".to_string(),
+            name: entry.name.clone(),
+            description: Some(entry.description.clone()),
+            prompt: Some(build_prompt_with_skills(
+                base,
+                &entry,
+                &[],
+                tool_descriptions,
+                "",
+            )),
+            tool_ids: Vec::new(),
+            model_id: None,
+            knowledge_base_ids: entry.knowledge_bases.clone().unwrap_or_default(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        });
+    template.name = entry.name.clone();
+    template.description = Some(entry.description.clone());
+    template.tool_ids = skills;
+    template.updated_at = now;
+    repo.upsert_agent_template(&template).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("写入模板失败: {}", e),
+        )
+    })?;
+    Ok(StatusCode::OK)
+}
+
+/// PUT /api/assistant/:id/knowledge-bases：更新该智能体的知识库绑定，持久化到 config/assistant_knowledge.json
+async fn api_assistant_knowledge_bases_put(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(req): Json<UpdateKnowledgeBasesRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    if id == "auto" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "无法配置自动分派助手的知识库".to_string(),
+        ));
+    }
+
+    let knowledge_base_ids: Vec<String> = req
+        .knowledge_base_ids
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+
+    let entry = state
+        .assistant_entries
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "智能体不存在".to_string()))?;
+
+    let mut overrides = load_knowledge_overrides(&state.config_base);
+    overrides.insert(id.clone(), knowledge_base_ids.clone());
+    save_knowledge_overrides(&state.config_base, &overrides).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("保存知识库配置失败: {}", e),
+        )
+    })?;
+
+    let db_path = saas_db_path(&state.workspace);
+    let store = SaasSqliteStore::new(&db_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("打开模板仓储失败: {}", e),
+        )
+    })?;
+    let repo = SaasTemplateRepository::new(&store);
+    let template_id = platform_template_id(&id);
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut template = repo
+        .get_agent_template(&template_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("读取模板失败: {}", e),
+            )
+        })?
+        .unwrap_or_else(|| bee::saas::AgentTemplate {
+            id: template_id.clone(),
+            tenant_id: "tenant-default".to_string(),
+            name: entry.name.clone(),
+            description: Some(entry.description.clone()),
+            prompt: Some(entry.prompt_text.clone().unwrap_or_else(|| entry.prompt.clone())),
+            tool_ids: entry.skills.clone().unwrap_or_default(),
+            model_id: None,
+            knowledge_base_ids: Vec::new(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        });
+    template.name = entry.name.clone();
+    template.description = Some(entry.description.clone());
+    template.knowledge_base_ids = knowledge_base_ids;
+    template.updated_at = now;
+    repo.upsert_agent_template(&template).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("写入模板失败: {}", e),
         )
     })?;
     Ok(StatusCode::OK)

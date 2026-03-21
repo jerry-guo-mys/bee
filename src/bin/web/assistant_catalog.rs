@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use bee::saas::{SaasSqliteStore, SaasTemplateRepository};
 use bee::tools::tool_call_schema_json;
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +21,15 @@ pub struct AssistantEntry {
     pub description: String,
     pub prompt: String,
     #[serde(default)]
+    pub prompt_text: Option<String>,
+    #[serde(default)]
     pub skills: Option<Vec<String>>,
+    #[serde(default)]
+    pub knowledge_bases: Option<Vec<String>>,
+}
+
+pub fn platform_template_id(assistant_id: &str) -> String {
+    format!("platform-template-{}", assistant_id)
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,36 +69,47 @@ pub fn save_skills_overrides(
     std::fs::write(path, content)
 }
 
+pub fn load_knowledge_overrides(config_base: &Path) -> HashMap<String, Vec<String>> {
+    let paths = [
+        config_base.join("assistant_knowledge.json"),
+        Path::new("config/assistant_knowledge.json").to_path_buf(),
+        Path::new("../config/assistant_knowledge.json").to_path_buf(),
+    ];
+    for path in &paths {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(overrides) = serde_json::from_str(&content) {
+                return overrides;
+            }
+        }
+    }
+    HashMap::new()
+}
+
+pub fn save_knowledge_overrides(
+    config_base: &Path,
+    overrides: &HashMap<String, Vec<String>>,
+) -> std::io::Result<()> {
+    let path = config_base.join("assistant_knowledge.json");
+    std::fs::create_dir_all(config_base).ok();
+    let content = serde_json::to_string_pretty(overrides)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+    std::fs::write(path, content)
+}
+
 pub fn load_assistants(
     config_base: &Path,
     tool_descriptions: &[(String, String)],
+    template_db_path: Option<&Path>,
+    tenant_id: &str,
 ) -> (
     Vec<AssistantInfo>,
     HashMap<String, String>,
     HashMap<String, Vec<String>>,
     HashMap<String, AssistantEntry>,
 ) {
-    let toml_path = [
-        config_base.join("assistants.toml"),
-        Path::new("config/assistants.toml").to_path_buf(),
-        Path::new("../config/assistants.toml").to_path_buf(),
-    ]
-    .into_iter()
-    .find(|path| path.exists());
-
-    let mut entries: Vec<AssistantEntry> =
-        match toml_path.and_then(|path| std::fs::read_to_string(path).ok()) {
-            Some(content) => toml::from_str::<AssistantsConfig>(&content)
-                .map(|config| config.assistants)
-                .unwrap_or_default(),
-            None => vec![AssistantEntry {
-                id: "default".to_string(),
-                name: "通用助手".to_string(),
-                description: "全能型个人助手".to_string(),
-                prompt: "prompts/system.md".to_string(),
-                skills: None,
-            }],
-        };
+    let mut entries = load_assistants_from_templates(template_db_path, tenant_id)
+        .filter(|templates| !templates.is_empty())
+        .unwrap_or_else(|| load_assistants_from_files(config_base));
 
     for entry in load_skill_assistants(config_base) {
         if let Some(existing) = entries.iter_mut().find(|current| current.id == entry.id) {
@@ -174,6 +194,60 @@ fn resolve_config_base(config_base: &Path) -> PathBuf {
     }
 }
 
+fn load_assistants_from_templates(
+    template_db_path: Option<&Path>,
+    tenant_id: &str,
+) -> Option<Vec<AssistantEntry>> {
+    let db_path = template_db_path?;
+    let store = SaasSqliteStore::new(db_path).ok()?;
+    let repo = SaasTemplateRepository::new(&store);
+    let templates = repo.list_agent_templates(tenant_id).ok()?;
+    Some(
+        templates
+            .into_iter()
+            .map(|template| AssistantEntry {
+                id: template
+                    .id
+                    .trim_start_matches("platform-template-")
+                    .to_string(),
+                name: template.name,
+                description: template
+                    .description
+                    .unwrap_or_else(|| "平台模板助手".to_string()),
+                prompt: String::new(),
+                prompt_text: template.prompt,
+                skills: Some(template.tool_ids),
+                knowledge_bases: Some(template.knowledge_base_ids),
+            })
+            .collect(),
+    )
+}
+
+fn load_assistants_from_files(config_base: &Path) -> Vec<AssistantEntry> {
+    let toml_path = [
+        config_base.join("assistants.toml"),
+        Path::new("config/assistants.toml").to_path_buf(),
+        Path::new("../config/assistants.toml").to_path_buf(),
+    ]
+    .into_iter()
+    .find(|path| path.exists());
+
+    match toml_path.and_then(|path| std::fs::read_to_string(path).ok()) {
+        Some(content) => toml::from_str::<AssistantsConfig>(&content)
+            .map(|config| config.assistants)
+            .unwrap_or_default(),
+        None => vec![AssistantEntry {
+            id: "default".to_string(),
+            name: "通用助手".to_string(),
+            description: "全能型个人助手".to_string(),
+            prompt: "prompts/system.md".to_string(),
+            prompt_text: None,
+            skills: None,
+            knowledge_bases: None,
+        }],
+    }
+}
+
 fn load_skill_assistants(config_base: &Path) -> Vec<AssistantEntry> {
     let skills_dirs = [
         config_base.join("skills"),
@@ -242,6 +316,9 @@ fn resolve_allowed_tools(
 }
 
 fn resolve_prompt_content(base: &Path, entry: &AssistantEntry) -> String {
+    if let Some(prompt_text) = &entry.prompt_text {
+        return prompt_text.clone();
+    }
     let prompt_path = [
         base.join(&entry.prompt),
         Path::new("config").join(&entry.prompt),

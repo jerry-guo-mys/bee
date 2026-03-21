@@ -101,6 +101,8 @@ pub struct AgentTemplate {
     pub tool_ids: Vec<String>,
     #[serde(default)]
     pub model_id: Option<String>,
+    #[serde(default)]
+    pub knowledge_base_ids: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -120,6 +122,10 @@ pub struct AgentInstance {
     pub prompt_override: Option<String>,
     #[serde(default)]
     pub tool_ids_override: Vec<String>,
+    #[serde(default)]
+    pub model_id_override: Option<String>,
+    #[serde(default)]
+    pub knowledge_base_ids_override: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }

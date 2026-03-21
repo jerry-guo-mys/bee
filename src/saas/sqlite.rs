@@ -70,6 +70,7 @@ const SAAS_SCHEMA_STATEMENTS: &[&str] = &[
         prompt TEXT,
         tool_ids_json TEXT,
         model_id TEXT,
+        knowledge_base_ids_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (tenant_id) REFERENCES saas_tenants(id) ON DELETE CASCADE
@@ -84,6 +85,8 @@ const SAAS_SCHEMA_STATEMENTS: &[&str] = &[
         status TEXT NOT NULL,
         prompt_override TEXT,
         tool_ids_override_json TEXT,
+        model_id_override TEXT,
+        knowledge_base_ids_override_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (tenant_id) REFERENCES saas_tenants(id) ON DELETE CASCADE,
@@ -200,6 +203,24 @@ impl SaasSqliteStore {
         for statement in SAAS_SCHEMA_STATEMENTS {
             self.conn.execute(statement, [])?;
         }
+        ensure_column(
+            &self.conn,
+            "saas_agent_instances",
+            "model_id_override",
+            "TEXT",
+        )?;
+        ensure_column(
+            &self.conn,
+            "saas_agent_templates",
+            "knowledge_base_ids_json",
+            "TEXT",
+        )?;
+        ensure_column(
+            &self.conn,
+            "saas_agent_instances",
+            "knowledge_base_ids_override_json",
+            "TEXT",
+        )?;
         Ok(())
     }
 
@@ -210,6 +231,28 @@ impl SaasSqliteStore {
 
 pub fn init_saas_sqlite(db_path: impl AsRef<Path>) -> anyhow::Result<SaasSqliteStore> {
     SaasSqliteStore::new(db_path)
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table_name: &str,
+    column_name: &str,
+    column_definition: &str,
+) -> anyhow::Result<()> {
+    let pragma = format!("PRAGMA table_info({table_name})");
+    let mut stmt = conn.prepare(&pragma)?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for column in columns {
+        if column? == column_name {
+            return Ok(());
+        }
+    }
+
+    let alter = format!(
+        "ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+    );
+    conn.execute(&alter, [])?;
+    Ok(())
 }
 
 #[cfg(test)]

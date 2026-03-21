@@ -10,6 +10,9 @@ pub mod models;
 pub mod repository;
 pub mod sqlite;
 pub mod sqlite_seed_repository;
+pub mod sqlite_template_repository;
+pub mod template_catalog;
+pub mod template_instantiation_service;
 
 pub use bootstrap::{bootstrap_workspace_saas, SaasBootstrapResult};
 pub use bootstrap_service::{
@@ -24,3 +27,10 @@ pub use models::{
 };
 pub use repository::{AgentRepository, ConversationRepository, OrgRepository, TaskRepository};
 pub use sqlite::{init_saas_sqlite, SaasSqliteStore};
+pub use sqlite_seed_repository::SaasSeedRepository;
+pub use sqlite_template_repository::SaasTemplateRepository;
+pub use template_catalog::{load_platform_agent_templates, TemplateAssistantEntry};
+pub use template_instantiation_service::{
+    instantiate_team_templates, list_team_templates, TeamTemplateInstantiationRequest,
+    TeamTemplateInstantiationResult,
+};

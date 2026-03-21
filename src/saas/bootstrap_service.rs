@@ -123,6 +123,7 @@ pub fn build_bootstrap_plan(req: &OrganizationBootstrapRequest) -> OrganizationB
                 prompt: Some(agent.description.to_string()),
                 tool_ids: Vec::new(),
                 model_id: None,
+                knowledge_base_ids: Vec::new(),
                 created_at: now.clone(),
                 updated_at: now.clone(),
             });
@@ -136,6 +137,8 @@ pub fn build_bootstrap_plan(req: &OrganizationBootstrapRequest) -> OrganizationB
                 status: AgentInstanceStatus::Active,
                 prompt_override: Some(agent.description.to_string()),
                 tool_ids_override: Vec::new(),
+                model_id_override: None,
+                knowledge_base_ids_override: Vec::new(),
                 created_at: now.clone(),
                 updated_at: now.clone(),
             });

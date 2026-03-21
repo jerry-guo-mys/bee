@@ -7,16 +7,16 @@
 ## 总体进度
 
 
-| 阶段      | 目标          | 状态  | 进度  | 备注                   |
-| ------- | ----------- | --- | --- | -------------------- |
-| Phase 0 | 架构收口与入口拆分   | 已完成 | 100% | 入口边界已收口，完成配置/仓储/应用服务初步拆分 |
+| 阶段      | 目标          | 状态  | 进度   | 备注                                                          |
+| ------- | ----------- | --- | ---- | ----------------------------------------------------------- |
+| Phase 0 | 架构收口与入口拆分   | 已完成 | 100% | 入口边界已收口，完成配置/仓储/应用服务初步拆分                                    |
 | Phase 1 | 主数据与仓储层落地   | 已完成 | 100% | 已落主数据、repository、sqlite schema，迁移与 bootstrap 覆盖 legacy 文件数据 |
-| Phase 2 | 公司与团队初始化产品化 | 已完成 | 100% | 已落组织初始化模板、最小持久化创建服务、Web API 与最小 UI 入口 |
-| Phase 3 | 运行时多租户化     | 已完成 | 100% | 会话、上下文、记忆根目录与主执行链路工具边界都已具备 scope 语义 |
-| Phase 4 | 配置中心与模板中心   | 未开始 | 0%  | 替代静态 assistants 配置   |
-| Phase 5 | 权限、安全、审计    | 未开始 | 0%  | SaaS 基础设施补齐          |
-| Phase 6 | 任务与工作流产品化   | 未开始 | 0%  | 从群聊原语升级为产品流程         |
-| Phase 7 | 服务拆分与部署演进   | 未开始 | 0%  | 稳定后再拆服务              |
+| Phase 2 | 公司与团队初始化产品化 | 已完成 | 100% | 已落组织初始化模板、最小持久化创建服务、Web API 与最小 UI 入口                       |
+| Phase 3 | 运行时多租户化     | 已完成 | 100% | 会话、上下文、记忆根目录与主执行链路工具边界都已具备 scope 语义                         |
+| Phase 4 | 配置中心与模板中心   | 已完成 | 100% | 模板种子、运行时模板读取、租户级覆盖、团队实例化，以及工具/模型/知识库绑定链路都已落地      |
+| Phase 5 | 权限、安全、审计    | 未开始 | 0%   | SaaS 基础设施补齐                                                 |
+| Phase 6 | 任务与工作流产品化   | 未开始 | 0%   | 从群聊原语升级为产品流程                                                |
+| Phase 7 | 服务拆分与部署演进   | 未开始 | 0%   | 稳定后再拆服务                                                     |
 
 
 ## 执行约束
@@ -32,28 +32,28 @@
 
 ### 子任务
 
-- [x] P0.1 建立总计划文件并初始化阶段状态
-- [x] P0.2 识别 `src/bin/web.rs` 中的业务责任簇并按模块分组
-- [x] P0.3 抽离“助手目录/技能覆盖/静态配置加载”模块
-- [x] P0.4 抽离“任务读写与任务服务”模块
-- [x] P0.5 抽离“群组/会话持久化”模块
-- [x] P0.6 将 `src/bin/web.rs` 收敛为路由装配与 handler 入口
-- [x] P0.7 形成边界说明文档：运行时域 vs 产品域
-- [x] P0.8 执行最小编译检查并记录结果
+- P0.1 建立总计划文件并初始化阶段状态
+- P0.2 识别 `src/bin/web.rs` 中的业务责任簇并按模块分组
+- P0.3 抽离“助手目录/技能覆盖/静态配置加载”模块
+- P0.4 抽离“任务读写与任务服务”模块
+- P0.5 抽离“群组/会话持久化”模块
+- P0.6 将 `src/bin/web.rs` 收敛为路由装配与 handler 入口
+- P0.7 形成边界说明文档：运行时域 vs 产品域
+- P0.8 执行最小编译检查并记录结果
 
 ### 进度记录
 
 
-| 日期         | 子任务  | 状态  | 说明                                 |
-| ---------- | ---- | --- | ---------------------------------- |
-| 2026-03-21 | P0.1 | 完成  | 新建本计划文件并初始化阶段跟踪                    |
-| 2026-03-21 | P0.2 | 完成  | 已识别 `web.rs` 中助手、任务、群组/会话、模型与路由等责任簇 |
-| 2026-03-21 | P0.3 | 完成  | 新增 `src/bin/web/assistant_catalog.rs`，迁出助手目录与技能覆盖加载逻辑 |
-| 2026-03-21 | P0.4 | 完成  | 新增 `src/bin/web/task_service.rs` 和 `src/bin/web/task_coordinator_service.rs`，迁出任务模型、规则与统筹启动流程 |
-| 2026-03-21 | P0.5 | 完成  | 新增 `src/bin/web/session_store.rs`，迁出群组/会话快照与磁盘持久化逻辑 |
+| 日期         | 子任务  | 状态  | 说明                                                                                                 |
+| ---------- | ---- | --- | -------------------------------------------------------------------------------------------------- |
+| 2026-03-21 | P0.1 | 完成  | 新建本计划文件并初始化阶段跟踪                                                                                    |
+| 2026-03-21 | P0.2 | 完成  | 已识别 `web.rs` 中助手、任务、群组/会话、模型与路由等责任簇                                                                |
+| 2026-03-21 | P0.3 | 完成  | 新增 `src/bin/web/assistant_catalog.rs`，迁出助手目录与技能覆盖加载逻辑                                              |
+| 2026-03-21 | P0.4 | 完成  | 新增 `src/bin/web/task_service.rs` 和 `src/bin/web/task_coordinator_service.rs`，迁出任务模型、规则与统筹启动流程      |
+| 2026-03-21 | P0.5 | 完成  | 新增 `src/bin/web/session_store.rs`，迁出群组/会话快照与磁盘持久化逻辑                                                |
 | 2026-03-21 | P0.6 | 完成  | 新增 `src/bin/web/inbox_service.rs`、`src/bin/web/dynamic_agent_catalog.rs`，`web.rs` 收敛到路由与轻量 handler |
-| 2026-03-21 | P0.7 | 完成  | 新增 `docs/plans/2026-03-21-phase0-boundaries.md`，明确接入层、产品域、运行时域边界 |
-| 2026-03-21 | P0.8 | 完成  | `cargo check --bin bee-web --features web` 通过；顺手修复 `workflow` 的特性门问题 |
+| 2026-03-21 | P0.7 | 完成  | 新增 `docs/plans/2026-03-21-phase0-boundaries.md`，明确接入层、产品域、运行时域边界                                   |
+| 2026-03-21 | P0.8 | 完成  | `cargo check --bin bee-web --features web` 通过；顺手修复 `workflow` 的特性门问题                               |
 
 
 ## Phase 1：主数据与仓储层落地
@@ -62,26 +62,26 @@
 
 ### 子任务
 
-- [x] P1.1 定义核心实体：`tenant`、`organization`、`team`、`membership`
-- [x] P1.2 定义核心实体：`agent_template`、`agent_instance`、`workspace`
-- [x] P1.3 定义核心实体：`conversation`、`conversation_message`、`task`
-- [x] P1.4 增加 repository trait：`OrgRepository`
-- [x] P1.5 增加 repository trait：`AgentRepository`
-- [x] P1.6 增加 repository trait：`ConversationRepository`
-- [x] P1.7 增加 repository trait：`TaskRepository`
-- [x] P1.8 用 sqlite 落第一版 schema
-- [x] P1.9 替换 `agents.json`
-- [x] P1.10 替换 `groups.json`
-- [x] P1.11 替换 `sessions/*.json`
-- [x] P1.12 增加迁移/种子初始化逻辑
+- P1.1 定义核心实体：`tenant`、`organization`、`team`、`membership`
+- P1.2 定义核心实体：`agent_template`、`agent_instance`、`workspace`
+- P1.3 定义核心实体：`conversation`、`conversation_message`、`task`
+- P1.4 增加 repository trait：`OrgRepository`
+- P1.5 增加 repository trait：`AgentRepository`
+- P1.6 增加 repository trait：`ConversationRepository`
+- P1.7 增加 repository trait：`TaskRepository`
+- P1.8 用 sqlite 落第一版 schema
+- P1.9 替换 `agents.json`
+- P1.10 替换 `groups.json`
+- P1.11 替换 `sessions/*.json`
+- P1.12 增加迁移/种子初始化逻辑
 
 ### 进度记录
 
 
-| 日期  | 子任务 | 状态  | 说明  |
-| --- | --- | --- | --- |
-| 2026-03-21 | P1.1-P1.7 | 完成  | 新增 `src/saas/models.rs`、`src/saas/repository.rs` 和 `src/saas/mod.rs`，落主数据模型与仓储边界 |
-| 2026-03-21 | P1.8 | 完成  | 新增 `src/saas/sqlite.rs`，完成第一版 SaaS sqlite schema 与初始化入口 |
+| 日期         | 子任务                    | 状态  | 说明                                                                                                       |
+| ---------- | ---------------------- | --- | -------------------------------------------------------------------------------------------------------- |
+| 2026-03-21 | P1.1-P1.7              | 完成  | 新增 `src/saas/models.rs`、`src/saas/repository.rs` 和 `src/saas/mod.rs`，落主数据模型与仓储边界                         |
+| 2026-03-21 | P1.8                   | 完成  | 新增 `src/saas/sqlite.rs`，完成第一版 SaaS sqlite schema 与初始化入口                                                  |
 | 2026-03-21 | P1.9/P1.10/P1.11/P1.12 | 完成  | 新增 `src/saas/migration.rs`、`src/saas/bootstrap.rs`，迁移与 bootstrap 覆盖 `agents/groups/sessions/tasks` 及群聊会话 |
 
 
@@ -91,27 +91,27 @@
 
 ### 子任务
 
-- [x] P2.1 定义组织初始化请求模型
-- [x] P2.2 定义行业模板与团队模板结构
-- [x] P2.3 设计默认团队模板：销售
-- [x] P2.4 设计默认团队模板：客服
-- [x] P2.5 设计默认团队模板：市场
-- [x] P2.6 设计默认团队模板：HR
-- [x] P2.7 设计默认团队模板：研发
-- [x] P2.8 增加“创建公司”应用服务
-- [x] P2.9 增加“根据模板创建团队”应用服务
-- [x] P2.10 增加“为团队生成默认 Agent 实例”应用服务
-- [x] P2.11 提供组织初始化 API
-- [x] P2.12 为 Web UI 增加组织初始化入口
+- P2.1 定义组织初始化请求模型
+- P2.2 定义行业模板与团队模板结构
+- P2.3 设计默认团队模板：销售
+- P2.4 设计默认团队模板：客服
+- P2.5 设计默认团队模板：市场
+- P2.6 设计默认团队模板：HR
+- P2.7 设计默认团队模板：研发
+- P2.8 增加“创建公司”应用服务
+- P2.9 增加“根据模板创建团队”应用服务
+- P2.10 增加“为团队生成默认 Agent 实例”应用服务
+- P2.11 提供组织初始化 API
+- P2.12 为 Web UI 增加组织初始化入口
 
 ### 进度记录
 
 
-| 日期  | 子任务 | 状态  | 说明  |
-| --- | --- | --- | --- |
-| 2026-03-21 | P2.1-P2.7 | 完成  | 新增 `src/saas/bootstrap_service.rs`，落组织初始化请求、行业模板、团队模板与默认 Agent 种子 |
-| 2026-03-21 | P2.8-P2.10 | 完成  | 新增 `src/saas/sqlite_seed_repository.rs`，组织初始化计划已可最小化落库到 tenant/org/team/agent_template/agent_instance |
-| 2026-03-21 | P2.11-P2.12 | 完成  | `bee-web` 新增 `/api/organizations/bootstrap`，设置页增加组织初始化入口，并补齐 workspace 落库 |
+| 日期         | 子任务         | 状态  | 说明                                                                                                    |
+| ---------- | ----------- | --- | ----------------------------------------------------------------------------------------------------- |
+| 2026-03-21 | P2.1-P2.7   | 完成  | 新增 `src/saas/bootstrap_service.rs`，落组织初始化请求、行业模板、团队模板与默认 Agent 种子                                     |
+| 2026-03-21 | P2.8-P2.10  | 完成  | 新增 `src/saas/sqlite_seed_repository.rs`，组织初始化计划已可最小化落库到 tenant/org/team/agent_template/agent_instance |
+| 2026-03-21 | P2.11-P2.12 | 完成  | `bee-web` 新增 `/api/organizations/bootstrap`，设置页增加组织初始化入口，并补齐 workspace 落库                             |
 
 
 ## Phase 3：运行时多租户化
@@ -134,14 +134,14 @@
 ### 进度记录
 
 
-| 日期  | 子任务 | 状态  | 说明  |
-| --- | --- | --- | --- |
-| 2026-03-21 | P3.foundation | 完成  | `gateway/session`、`session_store`、`persistent_session` 已补 `tenant/org/team/agent_instance/user` scope 基础字段，并修复 `saas/migration.rs` 的 feature gate 耦合 |
-| 2026-03-21 | P3.1-P3.4 | 完成  | `ClientInfo.metadata` 已可注入 `SessionScope`，`gateway/runtime` 在创建新上下文时会按 tenant/org/team/user/agent_instance 派生独立 memory workspace |
-| 2026-03-21 | P3.web-scope | 完成  | `bee-web` 的 `chat/history/compact/clear/stream` 已支持显式 scope，请求会映射到 scoped session key、snapshot path 与 memory root |
-| 2026-03-21 | P3.frontend-scope | 完成  | `static/index.html` 已持有当前组织 scope，并在会话加载、发送消息、删除/清理会话时显式传递 `tenant/org/team/agent_instance/user` 维度 |
-| 2026-03-21 | P3.scope-switcher | 完成  | 设置页已增加“当前组织上下文”可视化与编辑入口，会话列表会按当前 tenant/org/team scope 过滤显示 |
-| 2026-03-21 | P3.tool-boundary | 完成  | `bee-web` 主对话、收件箱、任务协调与 `gateway/runtime` 都已按 scope 过滤高风险工具；没有 `team_id` 的会话默认禁用 `shell/code_edit/code_write/git_commit/create/send` 等高风险能力 |
+| 日期         | 子任务               | 状态  | 说明                                                                                                                                                   |
+| ---------- | ----------------- | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-03-21 | P3.foundation     | 完成  | `gateway/session`、`session_store`、`persistent_session` 已补 `tenant/org/team/agent_instance/user` scope 基础字段，并修复 `saas/migration.rs` 的 feature gate 耦合 |
+| 2026-03-21 | P3.1-P3.4         | 完成  | `ClientInfo.metadata` 已可注入 `SessionScope`，`gateway/runtime` 在创建新上下文时会按 tenant/org/team/user/agent_instance 派生独立 memory workspace                     |
+| 2026-03-21 | P3.web-scope      | 完成  | `bee-web` 的 `chat/history/compact/clear/stream` 已支持显式 scope，请求会映射到 scoped session key、snapshot path 与 memory root                                    |
+| 2026-03-21 | P3.frontend-scope | 完成  | `static/index.html` 已持有当前组织 scope，并在会话加载、发送消息、删除/清理会话时显式传递 `tenant/org/team/agent_instance/user` 维度                                                  |
+| 2026-03-21 | P3.scope-switcher | 完成  | 设置页已增加“当前组织上下文”可视化与编辑入口，会话列表会按当前 tenant/org/team scope 过滤显示                                                                                          |
+| 2026-03-21 | P3.tool-boundary  | 完成  | `bee-web` 主对话、收件箱、任务协调与 `gateway/runtime` 都已按 scope 过滤高风险工具；没有 `team_id` 的会话默认禁用 `shell/code_edit/code_write/git_commit/create/send` 等高风险能力          |
 
 
 ## Phase 4：配置中心与模板中心
@@ -162,9 +162,13 @@
 ### 进度记录
 
 
-| 日期  | 子任务 | 状态  | 说明  |
-| --- | --- | --- | --- |
-| -   | -   | 未开始 | -   |
+| 日期         | 子任务       | 状态  | 说明                                                                                                                               |
+| ---------- | --------- | --- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-03-21 | P4.1-P4.3 | 完成  | 新增 `src/saas/template_catalog.rs`、`src/saas/sqlite_template_repository.rs`，`assistants.toml` 已可作为平台模板种子写入 `saas_agent_templates` |
+| 2026-03-21 | P4.runtime-read | 完成  | `src/bin/web/assistant_catalog.rs` 已改为优先读取 sqlite 模板仓储，静态文件退为回退来源 |
+| 2026-03-21 | P4.4 | 完成 | `PUT /api/assistant/:id/skills` 已同步写入 sqlite 模板仓储，租户模板覆盖不再只依赖 `assistant_skills.json` |
+| 2026-03-21 | P4.5-P4.7 | 完成 | 新增 `src/saas/template_instantiation_service.rs`，`bee-web` 提供 `/api/agent-templates` 与 `/api/teams/:team_id/agent-instances/bootstrap`，团队实例已可继承模板的 prompt、tools 与 model 策略 |
+| 2026-03-21 | P4.8 | 完成 | `saas_agent_templates` / `saas_agent_instances` 已补知识库绑定字段与继承链路，`bee-web` 新增 `/api/assistant/:id/knowledge-bases` 用于租户级模板覆盖 |
 
 
 ## Phase 5：权限、安全、审计
