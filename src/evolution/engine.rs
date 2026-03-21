@@ -1,8 +1,8 @@
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 
 use chrono;
 
-use crate::config::{EvolutionSection, ScheduleType, ApprovalMode, SafeMode};
+use crate::config::{ApprovalMode, EvolutionSection, SafeMode, ScheduleType};
 
 pub struct EvolutionEngine {
     config: EvolutionConfig,
@@ -122,8 +122,8 @@ impl EvolutionEngine {
         if let Some(last_run) = self.last_run_time {
             let interval_duration = Duration::from_secs(self.config.schedule_interval_seconds);
             if let Ok(elapsed) = last_run.elapsed() {
-                return elapsed >= interval_duration && 
-                       self.iterations_in_current_period < self.config.max_iterations_per_period;
+                return elapsed >= interval_duration
+                    && self.iterations_in_current_period < self.config.max_iterations_per_period;
             }
         }
         // 从未运行过，或者无法获取时间
@@ -143,19 +143,25 @@ impl EvolutionEngine {
         let (sched_hour, sched_minute) = match self.parse_schedule_time() {
             Some((h, m)) => (h, m),
             None => {
-                eprintln!("⚠️ 无法解析计划时间 '{}'，使用默认时间 02:00", self.config.schedule_time);
+                eprintln!(
+                    "⚠️ 无法解析计划时间 '{}'，使用默认时间 02:00",
+                    self.config.schedule_time
+                );
                 (2, 0) // 默认 02:00
             }
         };
 
         let now = chrono::Local::now();
         let today = now.date_naive();
-        
+
         // 创建今天的计划时间
         let schedule_today = match chrono::NaiveTime::from_hms_opt(sched_hour, sched_minute, 0) {
             Some(t) => chrono::NaiveDateTime::new(today, t),
             None => {
-                eprintln!("⚠️ 无效的计划时间 {}:{}, 跳过本次运行", sched_hour, sched_minute);
+                eprintln!(
+                    "⚠️ 无效的计划时间 {}:{}, 跳过本次运行",
+                    sched_hour, sched_minute
+                );
                 return false;
             }
         };
@@ -170,27 +176,29 @@ impl EvolutionEngine {
         // 检查上次运行时间
         if let Some(last_run) = self.last_run_time {
             // 将 SystemTime 转换为 chrono::DateTime<Local>
-            let last_run_datetime: chrono::DateTime<chrono::Local> = match last_run.duration_since(std::time::UNIX_EPOCH) {
-                Ok(duration) => {
-                    // Convert seconds to DateTime<Utc> then to Local
-                    chrono::DateTime::from_timestamp(duration.as_secs() as i64, 0)
-                        .map(|utc| utc.with_timezone(&chrono::Local))
-                        .unwrap_or_else(chrono::Local::now)
-                }
-                Err(_) => {
-                    // 如果时间在 UNIX_EPOCH 之前，使用当前时间
-                    chrono::Local::now()
-                }
-            };
-            
+            let last_run_datetime: chrono::DateTime<chrono::Local> =
+                match last_run.duration_since(std::time::UNIX_EPOCH) {
+                    Ok(duration) => {
+                        // Convert seconds to DateTime<Utc> then to Local
+                        chrono::DateTime::from_timestamp(duration.as_secs() as i64, 0)
+                            .map(|utc| utc.with_timezone(&chrono::Local))
+                            .unwrap_or_else(chrono::Local::now)
+                    }
+                    Err(_) => {
+                        // 如果时间在 UNIX_EPOCH 之前，使用当前时间
+                        chrono::Local::now()
+                    }
+                };
+
             let last_run_naive = last_run_datetime.naive_local();
-            
+
             // 检查是否已经在当前周期内运行过
             match period {
                 "daily" => {
                     // 如果上次运行在今天计划时间之后，说明已经运行过了
                     if last_run_naive >= schedule_today {
-                        return self.iterations_in_current_period < self.config.max_iterations_per_period;
+                        return self.iterations_in_current_period
+                            < self.config.max_iterations_per_period;
                     }
                 }
                 "weekly" => {
@@ -198,7 +206,8 @@ impl EvolutionEngine {
                     let one_week = chrono::Duration::days(7);
                     let one_week_ago = now_naive - one_week;
                     if last_run_naive >= one_week_ago {
-                        return self.iterations_in_current_period < self.config.max_iterations_per_period;
+                        return self.iterations_in_current_period
+                            < self.config.max_iterations_per_period;
                     }
                 }
                 _ => {}
@@ -212,20 +221,20 @@ impl EvolutionEngine {
 
         true
     }
-    
+
     fn parse_schedule_time(&self) -> Option<(u32, u32)> {
         let parts: Vec<&str> = self.config.schedule_time.split(':').collect();
         if parts.len() != 2 {
             return None;
         }
-        
+
         let hour = parts[0].parse::<u32>().ok()?;
         let minute = parts[1].parse::<u32>().ok()?;
-        
+
         if hour > 23 || minute > 59 {
             return None;
         }
-        
+
         Some((hour, minute))
     }
 

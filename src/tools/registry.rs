@@ -54,7 +54,10 @@ impl ToolRegistry {
     }
 
     pub async fn execute(&self, name: &str, args: Value) -> Result<String, String> {
-        let tool = self.tools.get(name).ok_or_else(|| format!("Unknown tool: {name}"))?;
+        let tool = self
+            .tools
+            .get(name)
+            .ok_or_else(|| format!("Unknown tool: {name}"))?;
         tool.execute(args).await
     }
 

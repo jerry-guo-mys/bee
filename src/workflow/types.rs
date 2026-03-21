@@ -2,8 +2,8 @@
 //!
 //! 定义工作流、任务、依赖关系等核心数据类型
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use thiserror::Error;
 
 #[cfg(feature = "gateway")]

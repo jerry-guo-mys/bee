@@ -65,8 +65,7 @@ fn default_max_context_turns() -> usize {
 }
 
 /// 进化调度类型
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub enum ScheduleType {
     #[serde(rename = "manual")]
     #[default]
@@ -80,8 +79,7 @@ pub enum ScheduleType {
 }
 
 /// 审批模式
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub enum ApprovalMode {
     #[serde(rename = "none")]
     #[default]
@@ -95,8 +93,7 @@ pub enum ApprovalMode {
 }
 
 /// 安全级别
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub enum SafeMode {
     #[serde(rename = "strict")]
     #[default]
@@ -144,7 +141,8 @@ Observation: {observation}
 If the result looks correct and helpful for achieving the goal, respond with "OK".
 If there's an issue or better approach, briefly explain the problem.
 
-Response:"#.to_string()
+Response:"#
+        .to_string()
 }
 
 impl Default for CriticSection {
@@ -502,12 +500,12 @@ fn default_allowed_domains() -> Vec<String> {
         "ja.wikipedia.org".into(),
         // 中文常用
         "www.baidu.com".into(),
-        "baike.baidu.com".into(),      // 百度百科
+        "baike.baidu.com".into(), // 百度百科
         "www.jd.com".into(),
-        "item.jd.com".into(),          // 京东商品页
+        "item.jd.com".into(), // 京东商品页
         "www.taobao.com".into(),
         "www.zhihu.com".into(),
-        "zhuanlan.zhihu.com".into(),   // 知乎专栏
+        "zhuanlan.zhihu.com".into(), // 知乎专栏
         "www.bilibili.com".into(),
         "www.douban.com".into(),
         "movie.douban.com".into(),
@@ -541,7 +539,6 @@ fn default_allowed_domains() -> Vec<String> {
     ]
 }
 
-
 /// 从 config 目录加载配置，环境变量 BEE__* 可覆盖
 ///
 /// 1. 按顺序查找 config/default.toml、../config/default.toml、default.toml，找到则作为第一源
@@ -554,9 +551,7 @@ pub fn load_config(config_path: Option<PathBuf>) -> Result<AppConfig, config::Co
     for name in default_names {
         let path = format!("{}.toml", name);
         if std::path::Path::new(&path).exists() {
-            builder = builder.add_source(
-                config::File::with_name(name).required(false),
-            );
+            builder = builder.add_source(config::File::with_name(name).required(false));
             break;
         }
     }

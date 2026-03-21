@@ -2,8 +2,8 @@
 //!
 //! 使用邻接表和入度表实现 DAG 拓扑排序
 
-use std::collections::HashMap;
 use crate::workflow::types::*;
+use std::collections::HashMap;
 
 /// 工作流依赖图
 pub struct WorkflowGraph {
@@ -28,29 +28,46 @@ impl WorkflowGraph {
             match &task.dependencies {
                 TaskDependencies::None => {}
                 TaskDependencies::Sequential(dep_id) => {
-                    adjacency.entry(dep_id.clone()).or_default().push(task_id.clone());
+                    adjacency
+                        .entry(dep_id.clone())
+                        .or_default()
+                        .push(task_id.clone());
                     *in_degree.entry(task_id.clone()).or_insert(0) += 1;
                 }
                 TaskDependencies::All(dep_ids) => {
                     for dep_id in dep_ids {
-                        adjacency.entry(dep_id.clone()).or_default().push(task_id.clone());
+                        adjacency
+                            .entry(dep_id.clone())
+                            .or_default()
+                            .push(task_id.clone());
                         *in_degree.entry(task_id.clone()).or_insert(0) += 1;
                     }
                 }
                 TaskDependencies::Any(dep_ids) => {
                     for dep_id in dep_ids {
-                        adjacency.entry(dep_id.clone()).or_default().push(task_id.clone());
+                        adjacency
+                            .entry(dep_id.clone())
+                            .or_default()
+                            .push(task_id.clone());
                     }
                     in_degree.insert(task_id.clone(), 1);
                 }
-                TaskDependencies::Condition { task_id: dep_id, .. } => {
-                    adjacency.entry(dep_id.clone()).or_default().push(task_id.clone());
+                TaskDependencies::Condition {
+                    task_id: dep_id, ..
+                } => {
+                    adjacency
+                        .entry(dep_id.clone())
+                        .or_default()
+                        .push(task_id.clone());
                     *in_degree.entry(task_id.clone()).or_insert(0) += 1;
                 }
             }
         }
 
-        Self { adjacency, in_degree }
+        Self {
+            adjacency,
+            in_degree,
+        }
     }
 
     /// 获取可执行的任务（入度为 0 且未执行）
@@ -132,11 +149,17 @@ mod tests {
     #[test]
     fn test_graph_construction_sequential() {
         let mut tasks = HashMap::new();
-        tasks.insert("task1".to_string(), create_test_task("task1", TaskDependencies::None));
-        tasks.insert("task2".to_string(), create_test_task("task2", TaskDependencies::Sequential("task1".to_string())));
-        
+        tasks.insert(
+            "task1".to_string(),
+            create_test_task("task1", TaskDependencies::None),
+        );
+        tasks.insert(
+            "task2".to_string(),
+            create_test_task("task2", TaskDependencies::Sequential("task1".to_string())),
+        );
+
         let graph = WorkflowGraph::new(&tasks);
-        
+
         assert_eq!(graph.in_degree.get("task1"), Some(&0));
         assert_eq!(graph.in_degree.get("task2"), Some(&1));
     }
@@ -145,14 +168,19 @@ mod tests {
     #[test]
     fn test_get_ready_tasks() {
         let mut tasks = HashMap::new();
-        tasks.insert("task1".to_string(), create_test_task("task1", TaskDependencies::None));
-        tasks.insert("task2".to_string(), create_test_task("task2", TaskDependencies::Sequential("task1".to_string())));
-        
+        tasks.insert(
+            "task1".to_string(),
+            create_test_task("task1", TaskDependencies::None),
+        );
+        tasks.insert(
+            "task2".to_string(),
+            create_test_task("task2", TaskDependencies::Sequential("task1".to_string())),
+        );
+
         let graph = WorkflowGraph::new(&tasks);
-        let states: HashMap<TaskId, TaskState> = tasks.iter()
-            .map(|(k, v)| (k.clone(), v.state))
-            .collect();
-        
+        let states: HashMap<TaskId, TaskState> =
+            tasks.iter().map(|(k, v)| (k.clone(), v.state)).collect();
+
         let ready = graph.get_ready_tasks(&states);
         assert_eq!(ready.len(), 1);
         assert_eq!(ready[0], "task1");

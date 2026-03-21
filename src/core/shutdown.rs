@@ -154,7 +154,11 @@ impl ShutdownCoordinator {
                     tracing::warn!("Cleanup task '{}' failed: {}", name, e);
                 }
                 Err(_) => {
-                    tracing::warn!("Cleanup task '{}' timed out after {}s", name, self.timeout_secs);
+                    tracing::warn!(
+                        "Cleanup task '{}' timed out after {}s",
+                        name,
+                        self.timeout_secs
+                    );
                 }
             }
         }
@@ -296,7 +300,9 @@ mod tests {
             let mut coordinator = ShutdownCoordinator::new(manager);
 
             let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            coordinator.register(MockCleanup { called: called.clone() });
+            coordinator.register(MockCleanup {
+                called: called.clone(),
+            });
 
             coordinator.run_cleanup().await;
             assert!(called.load(std::sync::atomic::Ordering::SeqCst));

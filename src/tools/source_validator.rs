@@ -64,7 +64,7 @@ impl Tool for SourceValidatorTool {
         }
 
         let trust_score = self.calculate_trust_score(url);
-        
+
         let credibility = if trust_score >= 0.8 {
             "high"
         } else if trust_score >= 0.6 {

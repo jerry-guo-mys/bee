@@ -37,7 +37,7 @@ impl CodeReadTool {
     /// 验证路径是否在允许范围内
     fn validate_path(&self, file_path: &str) -> Result<PathBuf, String> {
         let path = Path::new(file_path);
-        
+
         // 解析为绝对路径
         let absolute_path = if path.is_absolute() {
             path.to_path_buf()
@@ -93,7 +93,9 @@ impl CodeReadTool {
             ));
         }
 
-        let end = limit.map(|l| (offset + l).min(total_lines)).unwrap_or(total_lines);
+        let end = limit
+            .map(|l| (offset + l).min(total_lines))
+            .unwrap_or(total_lines);
         let slice = &lines[offset..end];
 
         let mut result = String::new();
@@ -182,7 +184,7 @@ impl Tool for CodeReadTool {
             .or(Some(200));
 
         let validated_path = self.validate_path(file_path)?;
-        
+
         if !validated_path.exists() {
             return Err(format!("File not found: {}", validated_path.display()));
         }
@@ -206,17 +208,17 @@ mod tests {
         std::fs::create_dir_all(test_dir.join("src")).unwrap();
         std::fs::write(test_dir.join("Cargo.toml"), "").unwrap();
         std::fs::write(test_dir.join("src/main.rs"), "fn main() {}").unwrap();
-        
+
         let tool = CodeReadTool::new(&test_dir);
-        
+
         // 正常路径
         assert!(tool.validate_path("src/main.rs").is_ok());
         assert!(tool.validate_path("Cargo.toml").is_ok());
-        
+
         // 路径穿越攻击应该被阻止
         assert!(tool.validate_path("../../../etc/passwd").is_err());
         assert!(tool.validate_path("src/../../../etc/passwd").is_err());
-        
+
         std::fs::remove_dir_all(&test_dir).ok();
     }
 
@@ -224,7 +226,7 @@ mod tests {
     fn test_read_nonexistent_file() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let tool = CodeReadTool::new(".");
-        
+
         rt.block_on(async {
             let args = serde_json::json!({
                 "file_path": "nonexistent_file_xyz.txt"

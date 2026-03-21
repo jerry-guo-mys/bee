@@ -1,13 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::evolution::analyzer::SelfAnalyzer;
+use crate::evolution::engine::{EvolutionConfig, EvolutionEngine};
+use crate::evolution::executor::ExecutionEngine;
+use crate::evolution::planner::ImprovementPlanner;
+use crate::evolution::types::{ImprovementPlan, IterationResult};
 use crate::llm::LlmClient;
 use crate::tools::ToolExecutor;
-use crate::evolution::analyzer::SelfAnalyzer;
-use crate::evolution::planner::ImprovementPlanner;
-use crate::evolution::executor::ExecutionEngine;
-use crate::evolution::engine::{EvolutionEngine, EvolutionConfig};
-use crate::evolution::types::{ImprovementPlan, IterationResult};
 
 pub struct EvolutionLoop {
     engine: EvolutionEngine,
@@ -51,8 +51,13 @@ impl EvolutionLoop {
                     result.iteration = iteration;
                     results.push(result.clone());
 
-                    if result.success && result.quality_score >= self.engine.config().target_score_threshold {
-                        println!("Iteration {} succeeded with quality score: {:.2}", iteration, result.quality_score);
+                    if result.success
+                        && result.quality_score >= self.engine.config().target_score_threshold
+                    {
+                        println!(
+                            "Iteration {} succeeded with quality score: {:.2}",
+                            iteration, result.quality_score
+                        );
                         if result.lessons_learned.is_empty() {
                             break;
                         }
@@ -81,7 +86,7 @@ impl EvolutionLoop {
 
     async fn run_iteration(&self) -> Result<IterationResult, String> {
         let analyses = self.analyzer.analyze_codebase().await?;
-        
+
         if analyses.is_empty() {
             return Ok(IterationResult {
                 iteration: 0,
@@ -94,7 +99,7 @@ impl EvolutionLoop {
         }
 
         let plans = self.analyzer.generate_improvement_plans(&analyses).await?;
-        
+
         if plans.is_empty() {
             return Ok(IterationResult {
                 iteration: 0,
@@ -107,15 +112,25 @@ impl EvolutionLoop {
         }
 
         let first_plan = &plans[0];
-        let target_analysis = analyses.iter()
+        let target_analysis = analyses
+            .iter()
             .find(|a| a.file_path == first_plan.target_files[0])
             .ok_or("No matching analysis found")?;
 
-        let steps = self.planner.plan_improvements(target_analysis, first_plan).await?;
+        let steps = self
+            .planner
+            .plan_improvements(target_analysis, first_plan)
+            .await?;
 
-        let refined_steps = self.planner.refine_steps_with_context(&steps, "Self-improvement iteration").await?;
+        let refined_steps = self
+            .planner
+            .refine_steps_with_context(&steps, "Self-improvement iteration")
+            .await?;
 
-        let result = self.executor.execute_plan(first_plan, &refined_steps).await?;
+        let result = self
+            .executor
+            .execute_plan(first_plan, &refined_steps)
+            .await?;
 
         Ok(result)
     }
@@ -126,7 +141,10 @@ impl EvolutionLoop {
         goal: &str,
     ) -> Result<IterationResult, String> {
         let iteration = self.engine.current_iteration() + 1;
-        println!("Starting targeted iteration {} for goal: {}", iteration, goal);
+        println!(
+            "Starting targeted iteration {} for goal: {}",
+            iteration, goal
+        );
 
         let mut analyses = Vec::new();
         for file_path in &target_files {
@@ -150,7 +168,10 @@ impl EvolutionLoop {
         };
 
         let first_analysis = &analyses[0];
-        let steps = self.planner.plan_improvements(first_analysis, &plan).await?;
+        let steps = self
+            .planner
+            .plan_improvements(first_analysis, &plan)
+            .await?;
 
         let refined_steps = self.planner.refine_steps_with_context(&steps, goal).await?;
 

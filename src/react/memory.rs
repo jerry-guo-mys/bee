@@ -87,7 +87,10 @@ impl ContextManager {
         if s.is_empty() {
             return String::new();
         }
-        format!("\n## 程序记忆 / 工具使用经验（请参考，避免重复失败）\n{}\n", s)
+        format!(
+            "\n## 程序记忆 / 工具使用经验（请参考，避免重复失败）\n{}\n",
+            s
+        )
     }
 
     /// 用户偏好段落（从 memory/preferences.md 读取，显式「记住：xxx」会写入该文件）
@@ -155,7 +158,11 @@ impl ContextManager {
             return;
         }
         let tools = tool_names.join(", ");
-        let line = format!("Session strategy: goal \"{}\"; tools used: {}.", goal.trim(), tools);
+        let line = format!(
+            "Session strategy: goal \"{}\"; tools used: {}.",
+            goal.trim(),
+            tools
+        );
         self.push_to_long_term(&line);
     }
 

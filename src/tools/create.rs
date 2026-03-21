@@ -94,7 +94,11 @@ impl CreateTool {
         }
         let guidance = guidance.and_then(|s| {
             let t = s.trim();
-            if t.is_empty() { None } else { Some(t.to_string()) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
         });
         let id = uuid::Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().to_rfc3339();

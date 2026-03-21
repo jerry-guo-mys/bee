@@ -102,9 +102,8 @@ impl CodeGrepTool {
         use_regex: bool,
     ) -> Result<Vec<SearchResult>, String> {
         let mut results = Vec::new();
-        let include_pattern = include.map(|p| {
-            glob::Pattern::new(p).unwrap_or_else(|_| glob::Pattern::new("*").unwrap())
-        });
+        let include_pattern = include
+            .map(|p| glob::Pattern::new(p).unwrap_or_else(|_| glob::Pattern::new("*").unwrap()));
 
         for entry in walkdir::WalkDir::new(dir)
             .max_depth(10)
@@ -189,10 +188,7 @@ impl Tool for CodeGrepTool {
             .and_then(|v| v.as_str())
             .ok_or("Missing required parameter: pattern")?;
 
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
         let include = args.get("include").and_then(|v| v.as_str());
 
@@ -243,7 +239,10 @@ impl Tool for CodeGrepTool {
                 output.push_str(&format!("  {:4}: {}\n", line_num, truncated));
             }
             if result.matches.len() > 10 {
-                output.push_str(&format!("  ... ({} more matches)\n", result.matches.len() - 10));
+                output.push_str(&format!(
+                    "  ... ({} more matches)\n",
+                    result.matches.len() - 10
+                ));
             }
         }
 

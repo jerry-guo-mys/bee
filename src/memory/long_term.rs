@@ -60,7 +60,11 @@ impl InMemoryLongTerm {
     }
 
     /// 相似度：使用 Jaccard 相似度（更好的归一化）
-    fn score(&self, query_tokens: &std::collections::HashSet<String>, doc_tokens: &std::collections::HashSet<String>) -> f32 {
+    fn score(
+        &self,
+        query_tokens: &std::collections::HashSet<String>,
+        doc_tokens: &std::collections::HashSet<String>,
+    ) -> f32 {
         tokenizer::jaccard_similarity(query_tokens, doc_tokens)
     }
 }
@@ -93,11 +97,7 @@ impl LongTermMemory for InMemoryLongTerm {
             .filter(|(s, _)| *s > 0.0)
             .collect();
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        scored
-            .into_iter()
-            .take(k)
-            .map(|(_, t)| t)
-            .collect()
+        scored.into_iter().take(k).map(|(_, t)| t).collect()
     }
 }
 
@@ -169,7 +169,10 @@ impl InMemoryVectorLongTerm {
                         entries.into_iter().map(|e| (e.text, e.embedding)).collect();
                     let n = loaded.len().min(max_entries);
                     let start = loaded.len().saturating_sub(n);
-                    store.write().unwrap().extend(loaded.into_iter().skip(start));
+                    store
+                        .write()
+                        .unwrap()
+                        .extend(loaded.into_iter().skip(start));
                     tracing::info!("vector long-term loaded {} entries from snapshot", n);
                 }
             }

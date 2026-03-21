@@ -5,12 +5,12 @@
 
 use std::io::{self, Stdout};
 
+use crossterm::event::KeyCode;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use crossterm::event::KeyCode;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::sync::watch;
 
@@ -57,81 +57,88 @@ pub async fn run_app(
                         break;
                     }
                 }
-                super::event::AppEvent::Key(key) if !state.input_locked => {
-                    match key.code {
-                        KeyCode::Enter => {
-                            if input_state.focus == InputFocus::Input
-                                || input_state.focus == InputFocus::Send
-                            {
-                                let input = input_buffer.trim().to_string();
-                                input_buffer.clear();
-                                if !input.is_empty() {
-                                    if matches!(input.to_lowercase().as_str(), "/exit" | "exit" | "/quit" | "quit") {
-                                        break;
-                                    }
-                                    event_handler.send_submit(input);
+                super::event::AppEvent::Key(key) if !state.input_locked => match key.code {
+                    KeyCode::Enter => {
+                        if input_state.focus == InputFocus::Input
+                            || input_state.focus == InputFocus::Send
+                        {
+                            let input = input_buffer.trim().to_string();
+                            input_buffer.clear();
+                            if !input.is_empty() {
+                                if matches!(
+                                    input.to_lowercase().as_str(),
+                                    "/exit" | "exit" | "/quit" | "quit"
+                                ) {
+                                    break;
                                 }
+                                event_handler.send_submit(input);
                             }
                         }
-                        KeyCode::Tab => {
-                            input_state.focus = match input_state.focus {
-                                InputFocus::Input => InputFocus::Agent,
-                                InputFocus::Agent => InputFocus::Model,
-                                InputFocus::Model => InputFocus::Send,
-                                InputFocus::Send | InputFocus::Mode | InputFocus::Image => InputFocus::Input,
-                            };
-                        }
-                        KeyCode::BackTab => {
-                            input_state.focus = match input_state.focus {
-                                InputFocus::Input => InputFocus::Send,
-                                InputFocus::Agent => InputFocus::Input,
-                                InputFocus::Model => InputFocus::Agent,
-                                InputFocus::Send | InputFocus::Mode | InputFocus::Image => InputFocus::Model,
-                            };
-                        }
-                        KeyCode::Backspace => {
-                            if input_state.focus == InputFocus::Input {
-                                input_buffer.pop();
-                            }
-                        }
-                        KeyCode::Char(c) => {
-                            if input_state.focus == InputFocus::Input {
-                                input_buffer.push(c);
-                            }
-                        }
-                        KeyCode::Up => {
-                            if input_state.focus == InputFocus::Agent {
-                                input_state.agent_index = input_state.agent_index.saturating_sub(1);
-                            } else if input_state.focus == InputFocus::Model {
-                                input_state.model_index = input_state.model_index.saturating_sub(1);
-                            } else {
-                                conversation_scroll = conversation_scroll.saturating_sub(1);
-                            }
-                        }
-                        KeyCode::Down => {
-                            if input_state.focus == InputFocus::Agent {
-                                input_state.agent_index = (input_state.agent_index + 1).min(agents.len().saturating_sub(1));
-                            } else if input_state.focus == InputFocus::Model {
-                                input_state.model_index = (input_state.model_index + 1).min(models.len().saturating_sub(1));
-                            } else {
-                                conversation_scroll = conversation_scroll.saturating_add(1);
-                            }
-                        }
-                        KeyCode::PageUp => {
-                            conversation_scroll = conversation_scroll.saturating_sub(10);
-                        }
-                        KeyCode::PageDown => {
-                            conversation_scroll = conversation_scroll.saturating_add(10);
-                        }
-                        KeyCode::Home => {
-                            conversation_scroll = 0;
-                        }
-                        KeyCode::End => {
-                            conversation_scroll = usize::MAX;
-                        }
-                        _ => {}
                     }
-                }
+                    KeyCode::Tab => {
+                        input_state.focus = match input_state.focus {
+                            InputFocus::Input => InputFocus::Agent,
+                            InputFocus::Agent => InputFocus::Model,
+                            InputFocus::Model => InputFocus::Send,
+                            InputFocus::Send | InputFocus::Mode | InputFocus::Image => {
+                                InputFocus::Input
+                            }
+                        };
+                    }
+                    KeyCode::BackTab => {
+                        input_state.focus = match input_state.focus {
+                            InputFocus::Input => InputFocus::Send,
+                            InputFocus::Agent => InputFocus::Input,
+                            InputFocus::Model => InputFocus::Agent,
+                            InputFocus::Send | InputFocus::Mode | InputFocus::Image => {
+                                InputFocus::Model
+                            }
+                        };
+                    }
+                    KeyCode::Backspace => {
+                        if input_state.focus == InputFocus::Input {
+                            input_buffer.pop();
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        if input_state.focus == InputFocus::Input {
+                            input_buffer.push(c);
+                        }
+                    }
+                    KeyCode::Up => {
+                        if input_state.focus == InputFocus::Agent {
+                            input_state.agent_index = input_state.agent_index.saturating_sub(1);
+                        } else if input_state.focus == InputFocus::Model {
+                            input_state.model_index = input_state.model_index.saturating_sub(1);
+                        } else {
+                            conversation_scroll = conversation_scroll.saturating_sub(1);
+                        }
+                    }
+                    KeyCode::Down => {
+                        if input_state.focus == InputFocus::Agent {
+                            input_state.agent_index =
+                                (input_state.agent_index + 1).min(agents.len().saturating_sub(1));
+                        } else if input_state.focus == InputFocus::Model {
+                            input_state.model_index =
+                                (input_state.model_index + 1).min(models.len().saturating_sub(1));
+                        } else {
+                            conversation_scroll = conversation_scroll.saturating_add(1);
+                        }
+                    }
+                    KeyCode::PageUp => {
+                        conversation_scroll = conversation_scroll.saturating_sub(10);
+                    }
+                    KeyCode::PageDown => {
+                        conversation_scroll = conversation_scroll.saturating_add(10);
+                    }
+                    KeyCode::Home => {
+                        conversation_scroll = 0;
+                    }
+                    KeyCode::End => {
+                        conversation_scroll = usize::MAX;
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }

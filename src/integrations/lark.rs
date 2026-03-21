@@ -9,12 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    routing::post,
-    Json, Router,
-};
+use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -174,9 +169,13 @@ async fn webhook_handler(
     }
 
     let content_str = msg.content.as_deref().unwrap_or("{}");
-    let content: ContentText = serde_json::from_str(content_str).unwrap_or(ContentText { text: None });
+    let content: ContentText =
+        serde_json::from_str(content_str).unwrap_or(ContentText { text: None });
     let Some(body) = content.text else {
-        tracing::warn!("Lark webhook: no text in content, ignoring. raw content: {}", content_str);
+        tracing::warn!(
+            "Lark webhook: no text in content, ignoring. raw content: {}",
+            content_str
+        );
         return Ok(Json(serde_json::json!({})));
     };
 
@@ -264,7 +263,10 @@ async fn process_and_reply(state: Arc<LarkState>, chat_id: &str, body: &str) -> 
 
 /// 获取 tenant_access_token（带缓存）
 async fn get_tenant_token(state: &LarkState) -> anyhow::Result<String> {
-    let url = format!("{}/open-apis/auth/v3/tenant_access_token/internal", state.base_url);
+    let url = format!(
+        "{}/open-apis/auth/v3/tenant_access_token/internal",
+        state.base_url
+    );
 
     let body = serde_json::json!({
         "app_id": state.app_id,
@@ -272,13 +274,7 @@ async fn get_tenant_token(state: &LarkState) -> anyhow::Result<String> {
     });
 
     let client = reqwest::Client::new();
-    let resp: serde_json::Value = client
-        .post(&url)
-        .json(&body)
-        .send()
-        .await?
-        .json()
-        .await?;
+    let resp: serde_json::Value = client.post(&url).json(&body).send().await?.json().await?;
 
     let token = resp["tenant_access_token"]
         .as_str()

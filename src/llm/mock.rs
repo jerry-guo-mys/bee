@@ -31,7 +31,10 @@ impl LlmClient for MockLlmClient {
     async fn complete_stream(
         &self,
         messages: &[Message],
-    ) -> Result<std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<String, LlmError>> + Send>>, LlmError> {
+    ) -> Result<
+        std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<String, LlmError>> + Send>>,
+        LlmError,
+    > {
         let content = self.complete(messages).await?;
         Ok(Box::pin(stream::iter(vec![Ok(content)])))
     }

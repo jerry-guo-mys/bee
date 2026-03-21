@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use crate::evolution::types::{CodeAnalysis, ImprovementPlan};
 use crate::llm::LlmClient;
 use crate::tools::ToolExecutor;
-use crate::evolution::types::{ImprovementPlan, CodeAnalysis};
 
 pub struct ImprovementPlanner {
     llm: Arc<dyn LlmClient>,
@@ -55,9 +55,11 @@ Return as a numbered list of steps."#,
             content
         );
 
-        let response = self.llm.complete(&[
-            crate::memory::Message::system(prompt)
-        ]).await.map_err(|e| e.to_string())?;
+        let response = self
+            .llm
+            .complete(&[crate::memory::Message::system(prompt)])
+            .await
+            .map_err(|e| e.to_string())?;
 
         let steps = self.parse_steps_from_response(&response);
         Ok(steps)
@@ -69,11 +71,15 @@ Return as a numbered list of steps."#,
             "limit": 500
         });
 
-        self.executor.execute("code_read", args).await.map_err(|e| e.to_string())
+        self.executor
+            .execute("code_read", args)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     fn format_issues(&self, issues: &[crate::evolution::types::Issue]) -> String {
-        issues.iter()
+        issues
+            .iter()
             .map(|issue| {
                 let line_str = if let Some(line) = issue.line_number {
                     format!("Line {}: ", line)
@@ -98,9 +104,13 @@ Return as a numbered list of steps."#,
                 in_list = true;
             }
 
-            if in_list && (trimmed.starts_with(|c: char| c.is_ascii_digit()) || trimmed.starts_with("- ")) {
+            if in_list
+                && (trimmed.starts_with(|c: char| c.is_ascii_digit()) || trimmed.starts_with("- "))
+            {
                 let step = trimmed
-                    .trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ')' || c == '-')
+                    .trim_start_matches(|c: char| {
+                        c.is_ascii_digit() || c == '.' || c == ')' || c == '-'
+                    })
                     .trim()
                     .to_string();
                 if !step.is_empty() {
@@ -139,16 +149,19 @@ Please refine these steps to be more specific and actionable. For each step, inc
 
 Return as a numbered list."#,
             context,
-            steps.iter()
+            steps
+                .iter()
                 .enumerate()
                 .map(|(i, step)| format!("{}. {}", i + 1, step))
                 .collect::<Vec<_>>()
                 .join("\n")
         );
 
-        let response = self.llm.complete(&[
-            crate::memory::Message::system(prompt)
-        ]).await.map_err(|e| e.to_string())?;
+        let response = self
+            .llm
+            .complete(&[crate::memory::Message::system(prompt)])
+            .await
+            .map_err(|e| e.to_string())?;
 
         let refined_steps = self.parse_steps_from_response(&response);
         Ok(refined_steps)

@@ -3,9 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use crate::tools::Tool;
 use crate::llm::LlmClient;
 use crate::memory::Message;
+use crate::tools::Tool;
 
 pub struct DeepSearchTool {
     llm: Arc<dyn LlmClient>,
@@ -58,16 +58,23 @@ Sub-questions:"#,
         );
 
         let messages = vec![Message::user(&prompt)];
-        let response = self.llm.complete(&messages).await
+        let response = self
+            .llm
+            .complete(&messages)
+            .await
             .map_err(|e| format!("LLM error: {}", e))?;
 
-        let queries: Vec<String> = serde_json::from_str(&response)
-            .unwrap_or_else(|_| vec![query.to_string()]);
+        let queries: Vec<String> =
+            serde_json::from_str(&response).unwrap_or_else(|_| vec![query.to_string()]);
 
         Ok(queries.into_iter().take(5).collect())
     }
 
-    async fn search_round(&self, queries: &[String], round: usize) -> Result<Vec<SearchResult>, String> {
+    async fn search_round(
+        &self,
+        queries: &[String],
+        round: usize,
+    ) -> Result<Vec<SearchResult>, String> {
         let mut results = Vec::new();
 
         for query in queries {
@@ -91,7 +98,13 @@ Sub-questions:"#,
         let results_summary: String = previous_results
             .iter()
             .take(3)
-            .map(|r| format!("- {}: {}", r.query, r.content.chars().take(200).collect::<String>()))
+            .map(|r| {
+                format!(
+                    "- {}: {}",
+                    r.query,
+                    r.content.chars().take(200).collect::<String>()
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -106,16 +119,17 @@ Output format (JSON array):
 ["follow-up query 1", "follow-up query 2"]
 
 Follow-up queries:"#,
-            original_query,
-            results_summary
+            original_query, results_summary
         );
 
         let messages = vec![Message::user(&prompt)];
-        let response = self.llm.complete(&messages).await
+        let response = self
+            .llm
+            .complete(&messages)
+            .await
             .map_err(|e| format!("LLM error: {}", e))?;
 
-        let queries: Vec<String> = serde_json::from_str(&response)
-            .unwrap_or_else(|_| vec![]);
+        let queries: Vec<String> = serde_json::from_str(&response).unwrap_or_else(|_| vec![]);
 
         Ok(queries.into_iter().take(3).collect())
     }
@@ -127,7 +141,13 @@ Follow-up queries:"#,
     ) -> Result<(String, Vec<String>, Vec<String>), String> {
         let findings: String = results
             .iter()
-            .map(|r| format!("Source: {}\n{}", r.source_url, r.content.chars().take(500).collect::<String>()))
+            .map(|r| {
+                format!(
+                    "Source: {}\n{}",
+                    r.source_url,
+                    r.content.chars().take(500).collect::<String>()
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n\n---\n\n");
 
@@ -147,25 +167,40 @@ Output format (JSON):
 }}
 
 Synthesis:"#,
-            topic,
-            findings
+            topic, findings
         );
 
         let messages = vec![Message::user(&prompt)];
-        let response = self.llm.complete(&messages).await
+        let response = self
+            .llm
+            .complete(&messages)
+            .await
             .map_err(|e| format!("LLM error: {}", e))?;
 
         let synthesis: Value = serde_json::from_str(&response)
             .map_err(|e| format!("Failed to parse synthesis: {}", e))?;
 
-        let summary = synthesis["summary"].as_str().unwrap_or("No summary available").to_string();
+        let summary = synthesis["summary"]
+            .as_str()
+            .unwrap_or("No summary available")
+            .to_string();
         let key_findings = synthesis["key_findings"]
             .as_array()
-            .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(String::from).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(String::from)
+                    .collect()
+            })
             .unwrap_or_default();
         let follow_up_questions = synthesis["follow_up_questions"]
             .as_array()
-            .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(String::from).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(String::from)
+                    .collect()
+            })
             .unwrap_or_default();
 
         Ok((summary, key_findings, follow_up_questions))
@@ -193,10 +228,7 @@ impl Tool for DeepSearchTool {
             return Err("Missing topic".to_string());
         }
 
-        let max_rounds = args
-            .get("max_rounds")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(3) as usize;
+        let max_rounds = args.get("max_rounds").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
 
         tracing::info!(topic = %topic, max_rounds = max_rounds, "deep_search started");
 
@@ -222,7 +254,7 @@ impl Tool for DeepSearchTool {
             }
         }
 
-        let (summary, key_findings, follow_up_questions) = 
+        let (summary, key_findings, follow_up_questions) =
             self.synthesize_results(topic, &all_results).await?;
 
         let result = DeepResearchResult {

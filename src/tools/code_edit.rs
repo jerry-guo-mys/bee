@@ -78,7 +78,7 @@ impl CodeEditTool {
         let backup_path = file_path.with_extension("bak");
         std::fs::copy(file_path, &backup_path)
             .map_err(|e| format!("Failed to create backup: {}", e))?;
-        
+
         Ok(backup_path)
     }
 
@@ -104,22 +104,22 @@ impl CodeEditTool {
                 // 检查后续行是否匹配
                 let mut matched = true;
                 let mut reconstructed = String::new();
-                
+
                 for (j, old_line) in old_lines.iter().enumerate() {
                     if i + j >= content_lines.len() {
                         matched = false;
                         break;
                     }
-                    
+
                     let content_line = content_lines[i + j];
                     let old_trimmed = old_line.trim_start();
                     let content_trimmed = content_line.trim_start();
-                    
+
                     if old_trimmed != content_trimmed {
                         matched = false;
                         break;
                     }
-                    
+
                     if j > 0 {
                         reconstructed.push('\n');
                     }
@@ -128,8 +128,8 @@ impl CodeEditTool {
 
                 if matched {
                     // 计算字节位置
-                    let byte_pos: usize = content_lines[..i].join("\n").len()
-                        + if i > 0 { 1 } else { 0 };
+                    let byte_pos: usize =
+                        content_lines[..i].join("\n").len() + if i > 0 { 1 } else { 0 };
                     return Some((byte_pos, reconstructed));
                 }
             }
@@ -167,7 +167,7 @@ impl CodeEditTool {
                 new_string,
                 &content[pos + old_string.len()..]
             );
-            
+
             std::fs::write(file_path, new_content)
                 .map_err(|e| format!("Failed to write file: {}", e))?;
 
@@ -184,14 +184,15 @@ impl CodeEditTool {
         }
 
         // 尝试缩进容忍匹配
-        if let Some((pos, actual_old)) = self.find_with_indentation_tolerance(&content, old_string) {
+        if let Some((pos, actual_old)) = self.find_with_indentation_tolerance(&content, old_string)
+        {
             let new_content = format!(
                 "{}{}{}",
                 &content[..pos],
                 new_string,
                 &content[pos + actual_old.len()..]
             );
-            
+
             std::fs::write(file_path, new_content)
                 .map_err(|e| format!("Failed to write file: {}", e))?;
 
@@ -211,7 +212,8 @@ impl CodeEditTool {
 
         // 未找到匹配
         Err("Could not find the specified text in file. \
-             The old_string must match exactly (excluding leading whitespace differences).".to_string())
+             The old_string must match exactly (excluding leading whitespace differences)."
+            .to_string())
     }
 
     fn perform_multi_edit(
@@ -220,7 +222,7 @@ impl CodeEditTool {
         edits: Vec<(String, String)>,
     ) -> Result<Vec<EditResult>, String> {
         let mut results = Vec::new();
-        
+
         for (old_string, new_string) in edits {
             match self.perform_edit(file_path, &old_string, &new_string) {
                 Ok(result) => results.push(result),
@@ -235,7 +237,7 @@ impl CodeEditTool {
                 }
             }
         }
-        
+
         Ok(results)
     }
 }
@@ -282,7 +284,7 @@ impl Tool for CodeEditTool {
         // 检查是否有批量编辑
         if let Some(edits_array) = args.get("edits").and_then(|v| v.as_array()) {
             let mut edit_pairs = Vec::new();
-            
+
             for edit in edits_array {
                 let old = edit
                     .get("old_string")
@@ -296,7 +298,7 @@ impl Tool for CodeEditTool {
             }
 
             let results = self.perform_multi_edit(&validated_path, edit_pairs)?;
-            
+
             let success_count = results.iter().filter(|r| r.success).count();
             let fail_count = results.len() - success_count;
 
@@ -329,7 +331,7 @@ impl Tool for CodeEditTool {
             .ok_or("Missing required parameter: new_string")?;
 
         let result = self.perform_edit(&validated_path, old_string, new_string)?;
-        
+
         Ok(format!(
             "✓ {}\nFile: {}\nLine: {}",
             result.message,
@@ -355,8 +357,12 @@ mod tests {
     fn test_exact_match() {
         let test_dir = std::path::PathBuf::from("./target/test_code_edit");
         std::fs::create_dir_all(&test_dir).unwrap();
-        
-        let file_path = create_test_file(&test_dir, "test1.rs", "fn main() {\n    println!(\"Hello\");\n}\n");
+
+        let file_path = create_test_file(
+            &test_dir,
+            "test1.rs",
+            "fn main() {\n    println!(\"Hello\");\n}\n",
+        );
 
         let tool = CodeEditTool::new(&test_dir).with_backup(false);
 
@@ -374,7 +380,7 @@ mod tests {
 
         let content = std::fs::read_to_string(&file_path).unwrap();
         assert!(content.contains("println!(\"World\")"));
-        
+
         std::fs::remove_dir_all(&test_dir).ok();
     }
 
@@ -382,8 +388,12 @@ mod tests {
     fn test_indentation_tolerance() {
         let test_dir = std::path::PathBuf::from("./target/test_code_edit2");
         std::fs::create_dir_all(&test_dir).unwrap();
-        
-        let file_path = create_test_file(&test_dir, "test2.rs", "fn main() {\n    println!(\"Hello\");\n}\n");
+
+        let file_path = create_test_file(
+            &test_dir,
+            "test2.rs",
+            "fn main() {\n    println!(\"Hello\");\n}\n",
+        );
 
         let tool = CodeEditTool::new(&test_dir).with_backup(false);
 
@@ -401,7 +411,7 @@ mod tests {
 
         let content = std::fs::read_to_string(&file_path).unwrap();
         assert!(content.contains("println!(\"World\")"));
-        
+
         std::fs::remove_dir_all(&test_dir).ok();
     }
 }

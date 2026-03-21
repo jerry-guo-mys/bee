@@ -121,7 +121,11 @@ impl Tool for ShellTool {
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         if !output.status.success() {
-            return Err(format!("Exit {:?}\nstderr: {}", output.status, stderr.trim()));
+            return Err(format!(
+                "Exit {:?}\nstderr: {}",
+                output.status,
+                stderr.trim()
+            ));
         }
         Ok(if stderr.is_empty() {
             stdout

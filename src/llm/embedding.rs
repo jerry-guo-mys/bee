@@ -27,9 +27,7 @@ impl OpenAiEmbedder {
             .unwrap_or_else(|| "sk-placeholder".to_string());
 
         let config = if let Some(url) = base_url {
-            OpenAIConfig::new()
-                .with_api_base(url)
-                .with_api_key(api_key)
+            OpenAIConfig::new().with_api_base(url).with_api_key(api_key)
         } else {
             OpenAIConfig::new().with_api_key(api_key)
         };

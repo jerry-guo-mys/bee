@@ -12,16 +12,16 @@ use crate::config::AppConfig;
 use crate::core::{AgentBuilder, AgentComponents, AgentError};
 use crate::llm::create_embedder_from_config;
 use crate::memory::{
-    assistant_memory_root, ConsolidateResult, FileLongTerm, InMemoryLongTerm, InMemoryVectorLongTerm,
-    list_daily_logs_for_llm, lessons_path, long_term_path, memory_root, preferences_path,
-    procedural_path, vector_snapshot_path, LongTermMemory, Message,
+    assistant_memory_root, lessons_path, list_daily_logs_for_llm, long_term_path, memory_root,
+    preferences_path, procedural_path, vector_snapshot_path, ConsolidateResult, FileLongTerm,
+    InMemoryLongTerm, InMemoryVectorLongTerm, LongTermMemory, Message,
 };
 use crate::react::{react_loop, ContextManager, Planner, ReactEvent};
 use crate::skills::SkillSelector;
 use tokio::sync::mpsc;
 
 /// 创建 Agent 组件：使用统一的 AgentBuilder（解决问题 1.1）
-/// 
+///
 /// 现在接受配置参数而非内部加载（解决问题 1.2）
 pub fn create_agent_components(cfg: &AppConfig, workspace: &Path) -> AgentComponents {
     AgentBuilder::new(cfg.clone(), workspace.to_path_buf())
@@ -63,7 +63,10 @@ pub fn create_vector_long_term_for_assistant(
         .clone()
         .or_else(|| std::env::var("OPENAI_API_KEY").ok());
     let embedder = create_embedder_from_config(
-        cfg.memory.embedding_base_url.as_deref().or(cfg.llm.base_url.as_deref()),
+        cfg.memory
+            .embedding_base_url
+            .as_deref()
+            .or(cfg.llm.base_url.as_deref()),
         &cfg.memory.embedding_model,
         api_key.as_deref(),
     )?;
@@ -138,7 +141,10 @@ pub fn create_context_with_long_term_for_assistant(
                         .clone()
                         .or_else(|| std::env::var("OPENAI_API_KEY").ok());
                     if let Some(embedder) = create_embedder_from_config(
-                        cfg.memory.embedding_base_url.as_deref().or(cfg.llm.base_url.as_deref()),
+                        cfg.memory
+                            .embedding_base_url
+                            .as_deref()
+                            .or(cfg.llm.base_url.as_deref()),
                         &cfg.memory.embedding_model,
                         api_key.as_deref(),
                     ) {
@@ -353,10 +359,7 @@ pub async fn process_message_with_skills(
     planner_override: Option<&Planner>,
     allowed_tools: Option<&[String]>,
 ) -> Result<String, AgentError> {
-    let selector = SkillSelector::new(
-        components.skill_cache(),
-        Arc::clone(&components.llm),
-    );
+    let selector = SkillSelector::new(components.skill_cache(), Arc::clone(&components.llm));
 
     let skills = selector.select(user_input).await;
 

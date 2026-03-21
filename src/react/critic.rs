@@ -98,7 +98,11 @@ impl Critic {
             .replace("{observation}", observation);
 
         let messages = vec![Message::user(prompt)];
-        let response = self.llm.complete(&messages).await.map_err(|e| e.to_string())?;
+        let response = self
+            .llm
+            .complete(&messages)
+            .await
+            .map_err(|e| e.to_string())?;
         let response = response.trim().to_uppercase();
 
         if response.starts_with("OK") || response.is_empty() {

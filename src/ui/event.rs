@@ -39,16 +39,28 @@ impl EventHandler {
 
     fn handle_key(&self, key: KeyEvent) -> AppEvent {
         match key.code {
-            KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('c')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 let _ = self.cmd_tx.send(Command::Cancel);
                 AppEvent::Command(Command::Cancel)
             }
-            KeyCode::Char('l') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('l')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 let _ = self.cmd_tx.send(Command::Clear);
                 AppEvent::Command(Command::Clear)
             }
             KeyCode::Esc => AppEvent::Command(Command::Cancel),
-            KeyCode::Char('q') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('q')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 AppEvent::Command(Command::Quit)
             }
             _ => AppEvent::Key(key),

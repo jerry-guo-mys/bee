@@ -46,7 +46,10 @@ impl Tool for TestCheckTool {
 
     async fn execute(&self, args: Value) -> Result<String, String> {
         let features = args.get("features").and_then(|v| v.as_str());
-        let all_targets = args.get("all_targets").and_then(|v| v.as_bool()).unwrap_or(true);
+        let all_targets = args
+            .get("all_targets")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
 
         let mut cmd = Command::new("cargo");
         cmd.arg("check");

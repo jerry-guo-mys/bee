@@ -16,38 +16,24 @@ pub enum Intent {
     /// 普通对话（聊天、问答）
     Chat,
     /// 代码相关（编写、审查、调试）
-    Code {
-        action: CodeAction,
-    },
+    Code { action: CodeAction },
     /// 搜索信息
-    Search {
-        query: String,
-    },
+    Search { query: String },
     /// 文件操作
     FileOperation {
         action: FileAction,
         path: Option<String>,
     },
     /// 系统命令执行
-    Shell {
-        command: Option<String>,
-    },
+    Shell { command: Option<String> },
     /// 使用特定技能
-    UseSkill {
-        skill_id: String,
-    },
+    UseSkill { skill_id: String },
     /// 记忆相关（回忆、总结）
-    Memory {
-        action: MemoryAction,
-    },
+    Memory { action: MemoryAction },
     /// 任务管理（创建、查看、完成）
-    Task {
-        action: TaskAction,
-    },
+    Task { action: TaskAction },
     /// 浏览网页
-    Browse {
-        url: Option<String>,
-    },
+    Browse { url: Option<String> },
     /// 不确定，需要进一步澄清
     Unclear,
 }

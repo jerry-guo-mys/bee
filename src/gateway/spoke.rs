@@ -19,7 +19,10 @@ pub trait SpokeAdapter: Send + Sync {
     fn spoke_type(&self) -> SpokeType;
 
     /// 启动适配器
-    async fn start(&self, message_tx: mpsc::UnboundedSender<(ClientInfo, GatewayMessage)>) -> Result<(), String>;
+    async fn start(
+        &self,
+        message_tx: mpsc::UnboundedSender<(ClientInfo, GatewayMessage)>,
+    ) -> Result<(), String>;
 
     /// 发送消息到客户端
     async fn send(&self, client_id: &str, message: GatewayMessage) -> Result<(), String>;
@@ -208,12 +211,7 @@ pub struct ApiPluginSpoke {
 
 #[allow(dead_code)]
 impl ApiPluginSpoke {
-    pub fn new(
-        name: String,
-        description: String,
-        endpoint: String,
-        method: String,
-    ) -> Self {
+    pub fn new(name: String, description: String, endpoint: String, method: String) -> Self {
         Self {
             name,
             description,
@@ -269,8 +267,8 @@ impl CapabilitySpoke for ApiPluginSpoke {
             .await
             .map_err(|e| format!("Failed to read response: {}", e))?;
 
-        let result: serde_json::Value = serde_json::from_str(&body)
-            .unwrap_or_else(|_| serde_json::Value::String(body));
+        let result: serde_json::Value =
+            serde_json::from_str(&body).unwrap_or_else(|_| serde_json::Value::String(body));
 
         Ok(result)
     }
@@ -309,15 +307,18 @@ impl SpokeAdapter for WebSocketSpoke {
         SpokeType::Web
     }
 
-    async fn start(&self, _message_tx: mpsc::UnboundedSender<(ClientInfo, GatewayMessage)>) -> Result<(), String> {
+    async fn start(
+        &self,
+        _message_tx: mpsc::UnboundedSender<(ClientInfo, GatewayMessage)>,
+    ) -> Result<(), String> {
         Ok(())
     }
 
     async fn send(&self, client_id: &str, message: GatewayMessage) -> Result<(), String> {
         let connections = self.connections.read().await;
         if let Some(conn) = connections.get(client_id) {
-            let json = serde_json::to_string(&message)
-                .map_err(|e| format!("Serialize error: {}", e))?;
+            let json =
+                serde_json::to_string(&message).map_err(|e| format!("Serialize error: {}", e))?;
             conn.tx
                 .send(json)
                 .map_err(|e| format!("Send error: {}", e))?;
@@ -351,7 +352,10 @@ impl SpokeAdapter for HttpSpoke {
         self.spoke_type
     }
 
-    async fn start(&self, _message_tx: mpsc::UnboundedSender<(ClientInfo, GatewayMessage)>) -> Result<(), String> {
+    async fn start(
+        &self,
+        _message_tx: mpsc::UnboundedSender<(ClientInfo, GatewayMessage)>,
+    ) -> Result<(), String> {
         Ok(())
     }
 
@@ -403,13 +407,17 @@ impl SpokeAdapter for TuiSpoke {
         SpokeType::Tui
     }
 
-    async fn start(&self, _message_tx: mpsc::UnboundedSender<(ClientInfo, GatewayMessage)>) -> Result<(), String> {
+    async fn start(
+        &self,
+        _message_tx: mpsc::UnboundedSender<(ClientInfo, GatewayMessage)>,
+    ) -> Result<(), String> {
         Ok(())
     }
 
     async fn send(&self, _client_id: &str, message: GatewayMessage) -> Result<(), String> {
         if let Some(tx) = self.tx.read().await.as_ref() {
-            tx.send(message).map_err(|e| format!("TUI send error: {}", e))?;
+            tx.send(message)
+                .map_err(|e| format!("TUI send error: {}", e))?;
         }
         Ok(())
     }

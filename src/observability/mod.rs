@@ -103,7 +103,7 @@ impl Metrics {
     /// 导出为 Prometheus 格式
     pub fn to_prometheus(&self) -> String {
         let mut output = String::new();
-        
+
         // LLM metrics
         output.push_str(&format!(
             "# TYPE bee_llm_calls_total counter\nbee_llm_calls_total {}\n",
@@ -129,7 +129,7 @@ impl Metrics {
             "# TYPE bee_llm_latency_ms_total counter\nbee_llm_latency_ms_total {}\n",
             self.llm.total_latency_ms.load(Ordering::Relaxed)
         ));
-        
+
         // Tool metrics
         output.push_str(&format!(
             "# TYPE bee_tool_executions_total counter\nbee_tool_executions_total {}\n",
@@ -147,7 +147,7 @@ impl Metrics {
             "# TYPE bee_tool_execution_time_ms_total counter\nbee_tool_execution_time_ms_total {}\n",
             self.tools.total_execution_time_ms.load(Ordering::Relaxed)
         ));
-        
+
         // Session metrics
         output.push_str(&format!(
             "# TYPE bee_session_requests_total counter\nbee_session_requests_total {}\n",
@@ -195,7 +195,7 @@ impl Metrics {
             "# TYPE bee_behavior_error_rate gauge\nbee_behavior_error_rate {}\n",
             self.behavior.error_rate()
         ));
-        
+
         output
     }
 }
@@ -212,16 +212,25 @@ pub struct LlmMetrics {
 }
 
 impl LlmMetrics {
-    pub fn record_call(&self, success: bool, latency: Duration, prompt_tokens: u64, completion_tokens: u64) {
+    pub fn record_call(
+        &self,
+        success: bool,
+        latency: Duration,
+        prompt_tokens: u64,
+        completion_tokens: u64,
+    ) {
         self.total_calls.fetch_add(1, Ordering::Relaxed);
         if success {
             self.successful_calls.fetch_add(1, Ordering::Relaxed);
         } else {
             self.failed_calls.fetch_add(1, Ordering::Relaxed);
         }
-        self.total_latency_ms.fetch_add(latency.as_millis() as u64, Ordering::Relaxed);
-        self.total_prompt_tokens.fetch_add(prompt_tokens, Ordering::Relaxed);
-        self.total_completion_tokens.fetch_add(completion_tokens, Ordering::Relaxed);
+        self.total_latency_ms
+            .fetch_add(latency.as_millis() as u64, Ordering::Relaxed);
+        self.total_prompt_tokens
+            .fetch_add(prompt_tokens, Ordering::Relaxed);
+        self.total_completion_tokens
+            .fetch_add(completion_tokens, Ordering::Relaxed);
     }
 
     pub fn average_latency_ms(&self) -> f64 {
@@ -262,7 +271,8 @@ impl ToolMetrics {
         } else {
             self.failed_executions.fetch_add(1, Ordering::Relaxed);
         }
-        self.total_execution_time_ms.fetch_add(duration.as_millis() as u64, Ordering::Relaxed);
+        self.total_execution_time_ms
+            .fetch_add(duration.as_millis() as u64, Ordering::Relaxed);
     }
 
     pub fn average_execution_time_ms(&self) -> f64 {
@@ -319,7 +329,8 @@ pub struct BehaviorMetrics {
 impl BehaviorMetrics {
     /// 记录意图误解
     pub fn record_intent_misunderstanding(&self) {
-        self.intent_misunderstandings.fetch_add(1, Ordering::Relaxed);
+        self.intent_misunderstandings
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// 记录工具误用
@@ -346,7 +357,8 @@ impl BehaviorMetrics {
     pub fn record_task(&self, completed_first_try: bool) {
         self.tasks_total.fetch_add(1, Ordering::Relaxed);
         if completed_first_try {
-            self.tasks_completed_first_try.fetch_add(1, Ordering::Relaxed);
+            self.tasks_completed_first_try
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -424,7 +436,9 @@ impl Drop for SpanTimer {
 #[macro_export]
 macro_rules! record_llm_call {
     ($metrics:expr, $success:expr, $latency:expr, $prompt:expr, $completion:expr) => {
-        $metrics.llm.record_call($success, $latency, $prompt, $completion);
+        $metrics
+            .llm
+            .record_call($success, $latency, $prompt, $completion);
     };
 }
 
@@ -478,8 +492,10 @@ mod tests {
     #[test]
     fn test_metrics_to_json() {
         let metrics = Metrics::new();
-        metrics.llm.record_call(true, Duration::from_millis(100), 50, 25);
-        
+        metrics
+            .llm
+            .record_call(true, Duration::from_millis(100), 50, 25);
+
         let json = metrics.to_json();
         assert!(json["llm"]["total_calls"].as_u64().unwrap() == 1);
     }
@@ -494,7 +510,7 @@ mod tests {
     #[test]
     fn test_behavior_metrics() {
         let metrics = BehaviorMetrics::default();
-        
+
         metrics.record_intent_misunderstanding();
         metrics.record_tool_misuse();
         metrics.record_path_error();
@@ -512,7 +528,7 @@ mod tests {
     #[test]
     fn test_behavior_metrics_completion_rate() {
         let metrics = BehaviorMetrics::default();
-        
+
         metrics.record_task(true);
         metrics.record_task(true);
         metrics.record_task(false);

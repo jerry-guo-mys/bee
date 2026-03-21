@@ -89,13 +89,13 @@ fn extract_first_json_object(s: &str) -> Option<&str> {
     let mut start = None;
     let mut in_string = false;
     let mut escape_next = false;
-    
+
     for (i, ch) in s.char_indices() {
         if escape_next {
             escape_next = false;
             continue;
         }
-        
+
         match ch {
             '\\' if in_string => {
                 escape_next = true;
@@ -129,19 +129,19 @@ fn try_parse_json(json_str: &str) -> Result<ToolCall, serde_json::Error> {
     if let Ok(tc) = serde_json::from_str::<ToolCall>(json_str) {
         return Ok(tc);
     }
-    
+
     // 策略 2：去除可能的前后空白和控制字符
     let cleaned = json_str.trim().trim_matches(|c: char| c.is_control());
     if let Ok(tc) = serde_json::from_str::<ToolCall>(cleaned) {
         return Ok(tc);
     }
-    
+
     // 策略 3：处理可能的单引号（非标准 JSON）
     let double_quoted = cleaned.replace('\'', "\"");
     if let Ok(tc) = serde_json::from_str::<ToolCall>(&double_quoted) {
         return Ok(tc);
     }
-    
+
     // 最终：返回原始解析错误
     serde_json::from_str::<ToolCall>(json_str)
 }
@@ -206,10 +206,7 @@ impl Planner {
         let system = "You are a summarizer. Summarize the following conversation in one short paragraph: key facts, decisions, user preferences, and the latest question if any. Use the same language as the conversation. Output only the summary, no preamble.";
         let mut full = vec![Message::system(system.to_string())];
         full.extend(messages.to_vec());
-        self.llm
-            .complete(&full)
-            .await
-            .map_err(AgentError::LlmError)
+        self.llm.complete(&full).await.map_err(AgentError::LlmError)
     }
 }
 
@@ -347,12 +344,12 @@ Let me read that file for you.
     #[test]
     fn test_parse_llm_output_with_validation() {
         let valid_tools = vec!["cat".to_string(), "shell".to_string()];
-        
+
         // 有效工具
         let output = r#"{"tool": "cat", "args": {"path": "test.txt"}}"#;
         let result = parse_llm_output_with_validation(output, Some(&valid_tools)).unwrap();
         assert!(matches!(result, PlannerOutput::ToolCall(_)));
-        
+
         // 无效工具
         let output = r#"{"tool": "invalid_tool", "args": {}}"#;
         let result = parse_llm_output_with_validation(output, Some(&valid_tools));
@@ -372,12 +369,12 @@ Let me read that file for you.
     #[test]
     fn test_validate_tool_name() {
         let tools = vec!["cat".to_string(), "shell".to_string()];
-        
+
         assert!(validate_tool_name("cat", Some(&tools)));
         assert!(validate_tool_name("shell", Some(&tools)));
         assert!(!validate_tool_name("invalid", Some(&tools)));
         assert!(!validate_tool_name("", Some(&tools)));
-        
+
         // 无验证列表时接受任意非空
         assert!(validate_tool_name("anything", None));
         assert!(!validate_tool_name("", None));

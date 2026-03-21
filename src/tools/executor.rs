@@ -26,16 +26,16 @@ impl ToolExecutor {
     }
 
     /// 执行指定工具；超时返回 ToolTimeout，工具返回 Err 则转为 ToolExecutionFailed；输出 JSON 审计日志
-    pub async fn execute(&self, tool_name: &str, args: serde_json::Value) -> Result<String, AgentError> {
+    pub async fn execute(
+        &self,
+        tool_name: &str,
+        args: serde_json::Value,
+    ) -> Result<String, AgentError> {
         let start = Instant::now();
         let args_preview = args_preview(&args);
         let metrics = Metrics::global();
-        
-        let result = timeout(
-            self.timeout,
-            self.registry.execute(tool_name, args),
-        )
-        .await;
+
+        let result = timeout(self.timeout, self.registry.execute(tool_name, args)).await;
 
         let (ok, outcome, success): (bool, &str, bool) = match &result {
             Ok(Ok(_)) => (true, "ok", true),
@@ -44,10 +44,10 @@ impl ToolExecutor {
         };
         let duration = start.elapsed();
         let duration_ms = duration.as_millis() as u64;
-        
+
         // 记录工具执行 metrics
         metrics.tools.record_execution(success, duration);
-        
+
         let audit = serde_json::json!({
             "event": "tool_audit",
             "tool": tool_name,

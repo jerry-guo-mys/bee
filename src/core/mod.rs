@@ -17,8 +17,11 @@ pub use error::{AgentError, RecoveryAction};
 pub use orchestrator::{create_agent, Command};
 pub use recovery::RecoveryEngine;
 pub use session_supervisor::SessionSupervisor;
+pub use shutdown::{
+    run_with_graceful_shutdown, ShutdownCleanup, ShutdownCoordinator, ShutdownManager,
+    ShutdownReason,
+};
 pub use state::{AgentPhase, InternalStateSnapshot, UiState};
-pub use shutdown::{run_with_graceful_shutdown, ShutdownCleanup, ShutdownCoordinator, ShutdownManager, ShutdownReason};
 pub use task_scheduler::{TaskKind, TaskScheduler};
 
 /// 白皮书 §3.1：记忆管理器，实现中即 [ContextManager](crate::react::ContextManager)

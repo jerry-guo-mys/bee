@@ -10,14 +10,13 @@ use crate::core::{RecoveryEngine, TaskScheduler};
 use crate::llm::LlmClient;
 use crate::react::{Critic, Planner};
 use crate::skills::{SkillCache, SkillLoader};
-use crate::tools::{
-    CatTool, CodeEditTool, CodeGrepTool, CodeReadTool, CodeWriteTool,
-    DeepSearchTool, EchoTool, GitCommitTool, KnowledgeGraphBuilder, LsTool, PluginTool,
-    ReportGeneratorTool, SearchTool, ShellTool, SourceValidatorTool, TestCheckTool, TestRunTool,
-    ToolExecutor, ToolRegistry,
-};
 #[cfg(feature = "browser")]
 use crate::tools::BrowserTool;
+use crate::tools::{
+    CatTool, CodeEditTool, CodeGrepTool, CodeReadTool, CodeWriteTool, DeepSearchTool, EchoTool,
+    GitCommitTool, KnowledgeGraphBuilder, LsTool, PluginTool, ReportGeneratorTool, SearchTool,
+    ShellTool, SourceValidatorTool, TestCheckTool, TestRunTool, ToolExecutor, ToolRegistry,
+};
 #[cfg(feature = "web")]
 use crate::tools::{CreateGroupTool, CreateTool, ListAgentsTool, SendTool};
 
@@ -77,7 +76,7 @@ impl AgentBuilder {
     }
 
     /// 构建统一的工具注册表（所有接入方式共享同一套工具）
-    /// 
+    ///
     /// 需要传入共享的 LLM 客户端供深度研究等工具使用
     pub fn build_tool_registry(&self, llm: Arc<dyn LlmClient>) -> ToolRegistry {
         let mut tools = ToolRegistry::new();
@@ -153,28 +152,33 @@ impl AgentBuilder {
 
         // 如果配置了独立的 Critic 模型，使用独立的 LLM 实例
         let critic_llm: Arc<dyn LlmClient> = if let Some(ref model) = self.config.critic.model {
-            let provider = self.config.critic.provider.as_deref()
+            let provider = self
+                .config
+                .critic
+                .provider
+                .as_deref()
                 .unwrap_or(&self.config.llm.provider);
-            
+
             if provider.to_lowercase() == "deepseek" {
                 Arc::new(crate::llm::create_deepseek_client(Some(model)))
             } else {
                 let base_url = self.config.llm.base_url.as_deref();
                 let api_key = std::env::var("OPENAI_API_KEY").ok();
-                Arc::new(crate::llm::OpenAiClient::new(base_url, model, api_key.as_deref()))
+                Arc::new(crate::llm::OpenAiClient::new(
+                    base_url,
+                    model,
+                    api_key.as_deref(),
+                ))
             }
         } else {
             planner_llm
         };
 
         // 尝试从文件加载 prompt，否则使用配置中的模板
-        let critic_prompt = [
-            "config/prompts/critic.md",
-            "../config/prompts/critic.md",
-        ]
-        .into_iter()
-        .find_map(|p| std::fs::read_to_string(p).ok())
-        .unwrap_or_else(|| self.config.critic.prompt_template.clone());
+        let critic_prompt = ["config/prompts/critic.md", "../config/prompts/critic.md"]
+            .into_iter()
+            .find_map(|p| std::fs::read_to_string(p).ok())
+            .unwrap_or_else(|| self.config.critic.prompt_template.clone());
 
         // 创建修改后的配置副本，使用文件中的 prompt
         let mut critic_config = self.config.critic.clone();

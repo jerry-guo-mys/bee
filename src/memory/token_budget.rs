@@ -133,7 +133,10 @@ impl TokenBudget {
             }
 
             let estimated_tokens = TokenEstimator::estimate(&content);
-            let segment_limit = self.segment_limits.get(&segment).copied()
+            let segment_limit = self
+                .segment_limits
+                .get(&segment)
+                .copied()
                 .unwrap_or(remaining);
             let allowed = remaining.min(segment_limit);
 
@@ -165,7 +168,10 @@ impl TokenBudget {
 
         let truncated: String = text.chars().take(target_chars).collect();
 
-        format!("{}...\n[truncated due to token budget]", truncated.trim_end())
+        format!(
+            "{}...\n[truncated due to token budget]",
+            truncated.trim_end()
+        )
     }
 
     /// 获取总预算
@@ -212,10 +218,13 @@ impl MemoryCache {
 
     /// 设置缓存内容
     pub fn set(&mut self, segment: MemorySegment, content: String) {
-        self.cache.insert(segment, CachedContent {
-            content,
-            timestamp: std::time::Instant::now(),
-        });
+        self.cache.insert(
+            segment,
+            CachedContent {
+                content,
+                timestamp: std::time::Instant::now(),
+            },
+        );
     }
 
     /// 清除指定段落的缓存
@@ -250,13 +259,15 @@ mod tests {
 
     #[test]
     fn test_token_budget_allocation() {
-        let budget = TokenBudget::new(1000)
-            .with_segment_limit(MemorySegment::LongTerm, 200);
+        let budget = TokenBudget::new(1000).with_segment_limit(MemorySegment::LongTerm, 200);
 
         let segments = vec![
             (MemorySegment::SystemPrompt, "System prompt".to_string()),
             (MemorySegment::WorkingMemory, "Working memory".to_string()),
-            (MemorySegment::LongTerm, "Long term memory content".to_string()),
+            (
+                MemorySegment::LongTerm,
+                "Long term memory content".to_string(),
+            ),
         ];
 
         let allocated = budget.allocate(&segments);

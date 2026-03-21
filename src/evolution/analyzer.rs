@@ -2,9 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::evolution::types::{
+    CodeAnalysis, CodeMetrics, ImprovementPlan, ImprovementType, Issue, Priority, Severity,
+};
 use crate::llm::LlmClient;
 use crate::tools::ToolExecutor;
-use crate::evolution::types::{CodeAnalysis, Issue, Severity, CodeMetrics, ImprovementPlan, ImprovementType, Priority};
 
 pub struct SelfAnalyzer {
     #[allow(dead_code)]
@@ -48,7 +50,11 @@ impl SelfAnalyzer {
             "path": self.project_root.to_str().unwrap()
         });
 
-        let result = self.executor.execute("code_grep", args).await.map_err(|e| e.to_string())?;
+        let result = self
+            .executor
+            .execute("code_grep", args)
+            .await
+            .map_err(|e| e.to_string())?;
 
         let mut files = Vec::new();
         for line in result.lines() {
@@ -82,22 +88,22 @@ impl SelfAnalyzer {
     }
 
     async fn read_file_content(&self, file_path: &Path) -> Result<String, String> {
-        let rel_path = file_path.strip_prefix(&self.project_root)
+        let rel_path = file_path
+            .strip_prefix(&self.project_root)
             .unwrap_or(file_path);
-        
+
         let args = serde_json::json!({
             "file_path": rel_path.to_string_lossy().to_string(),
             "limit": 200
         });
 
-        self.executor.execute("code_read", args).await.map_err(|e| e.to_string())
+        self.executor
+            .execute("code_read", args)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    async fn analyze_syntax(
-        &self,
-        content: &str,
-        _file_path: &Path,
-    ) -> Result<Vec<Issue>, String> {
+    async fn analyze_syntax(&self, content: &str, _file_path: &Path) -> Result<Vec<Issue>, String> {
         let mut issues = Vec::new();
 
         let lines: Vec<&str> = content.lines().collect();
@@ -202,10 +208,11 @@ impl SelfAnalyzer {
     fn calculate_metrics(&self, content: &str) -> CodeMetrics {
         let lines_of_code = content.lines().count();
 
-        let comment_count = content.lines()
+        let comment_count = content
+            .lines()
             .filter(|l| l.trim().starts_with("//"))
             .count();
-        
+
         let documentation_coverage = if lines_of_code > 0 {
             Some(comment_count as f64 / lines_of_code as f64)
         } else {
@@ -272,10 +279,14 @@ impl SelfAnalyzer {
             priority: Priority::Medium,
         };
 
-        let error_count = analysis.issues.iter()
+        let error_count = analysis
+            .issues
+            .iter()
             .filter(|i| matches!(i.severity, Severity::Error))
             .count();
-        let warning_count = analysis.issues.iter()
+        let warning_count = analysis
+            .issues
+            .iter()
             .filter(|i| matches!(i.severity, Severity::Warning))
             .count();
 
@@ -287,7 +298,10 @@ impl SelfAnalyzer {
         } else if warning_count > 3 {
             plan.improvement_type = ImprovementType::Refactor;
             plan.priority = Priority::High;
-            plan.title = format!("Refactor {} ({} warnings)", analysis.file_path, warning_count);
+            plan.title = format!(
+                "Refactor {} ({} warnings)",
+                analysis.file_path, warning_count
+            );
             plan.description = "Improve code quality by addressing warnings".to_string();
         } else if let Some(doc_coverage) = analysis.metrics.documentation_coverage {
             if doc_coverage < 0.1 {

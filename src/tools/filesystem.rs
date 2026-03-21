@@ -44,9 +44,8 @@ impl SafeFs {
 
     pub fn read_file(&self, path: &str) -> Result<String, AgentError> {
         let resolved = self.resolve(path)?;
-        std::fs::read_to_string(&resolved).map_err(|e| {
-            AgentError::ToolExecutionFailed(format!("Read failed: {}", e))
-        })
+        std::fs::read_to_string(&resolved)
+            .map_err(|e| AgentError::ToolExecutionFailed(format!("Read failed: {}", e)))
     }
 
     pub fn list_dir(&self, path: &str) -> Result<Vec<String>, AgentError> {
@@ -56,9 +55,9 @@ impl SafeFs {
             self.resolve(path)?
         };
         let mut entries = Vec::new();
-        for e in std::fs::read_dir(&base).map_err(|e| {
-            AgentError::ToolExecutionFailed(format!("List failed: {}", e))
-        })? {
+        for e in std::fs::read_dir(&base)
+            .map_err(|e| AgentError::ToolExecutionFailed(format!("List failed: {}", e)))?
+        {
             let e = e.map_err(|e| AgentError::ToolExecutionFailed(e.to_string()))?;
             let name = e.file_name().to_string_lossy().to_string();
             if !name.starts_with('.') {
@@ -99,10 +98,7 @@ impl Tool for CatTool {
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
         tracing::info!(path = %path, "cat tool execute");
         self.fs.read_file(path).map_err(|e| e.to_string())
     }
@@ -132,10 +128,7 @@ impl Tool for LsTool {
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
         tracing::info!(path = %path, "ls tool execute");
         let entries = self.fs.list_dir(path).map_err(|e| e.to_string())?;
         Ok(entries.join("\n"))
