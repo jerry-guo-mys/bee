@@ -26,6 +26,7 @@ pub mod observability;
 pub mod plugins;
 pub mod react;
 pub mod saas;
+pub mod service_contracts;
 pub mod skills;
 pub mod tools;
 pub mod ui;
