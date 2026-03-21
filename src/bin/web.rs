@@ -17,6 +17,8 @@ mod session_store;
 mod task_coordinator_service;
 #[path = "web/task_service.rs"]
 mod task_service;
+#[path = "web/workflow_product_service.rs"]
+mod workflow_product_service;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -77,6 +79,11 @@ use session_store::{
 use task_service::{
     apply_task_update, build_task, load_tasks, save_tasks, status_label, CreateTaskRequest, Task,
     TaskStatus, UpdateTaskRequest,
+};
+use workflow_product_service::{
+    build_task_board, list_workflow_templates, start_workflow_run, TaskBoardColumn,
+    WorkflowRunResult as ProductWorkflowRunResult, WorkflowStartRequest,
+    WorkflowTemplateSummary,
 };
 
 const DEFAULT_MAX_TURNS: usize = 20;
@@ -283,6 +290,40 @@ struct InstantiateTeamTemplatesResponse {
     created_count: usize,
     existing_count: usize,
     instance_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TaskBoardQuery {
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+    #[serde(default)]
+    team_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkflowTemplatesQuery {
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct StartWorkflowRequest {
+    template_id: String,
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+    #[serde(default)]
+    team_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1001,6 +1042,9 @@ async fn main() -> anyhow::Result<()> {
             "/api/organizations/bootstrap",
             post(api_organizations_bootstrap),
         )
+        .route("/api/task-board", get(api_task_board))
+        .route("/api/workflow-templates", get(api_workflow_templates_list))
+        .route("/api/workflows/start", post(api_workflows_start))
         .route(
             "/api/teams/:team_id/agent-instances/bootstrap",
             post(api_team_agent_instances_bootstrap),
@@ -1746,6 +1790,124 @@ async fn api_team_agent_instances_bootstrap(
     ))
 }
 
+/// GET /api/task-board：按看板列返回当前组织/团队任务
+async fn api_task_board(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<TaskBoardQuery>,
+) -> Result<Json<Vec<TaskBoardColumn>>, (StatusCode, String)> {
+    let tenant_id = query
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| query.scope.management_tenant_id());
+    let organization_id = query
+        .organization_id
+        .clone()
+        .or_else(|| query.scope.management_organization_id());
+    let team_id = query.team_id.clone().or_else(|| query.scope.team_id.clone());
+    require_management_access(
+        &state.workspace,
+        &query
+            .scope
+            .to_access_context(tenant_id.clone(), organization_id.clone(), team_id.clone()),
+        if team_id.is_some() {
+            AccessRequirement::TeamAdmin
+        } else {
+            AccessRequirement::OrgAdmin
+        },
+    )?;
+    let tasks = load_tasks(&state.workspace);
+    Ok(Json(build_task_board(
+        &tasks,
+        Some(&tenant_id),
+        organization_id.as_deref(),
+        team_id.as_deref(),
+    )))
+}
+
+/// GET /api/workflow-templates：列出产品级工作流模板
+async fn api_workflow_templates_list(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<WorkflowTemplatesQuery>,
+) -> Result<Json<Vec<WorkflowTemplateSummary>>, (StatusCode, String)> {
+    require_management_access(
+        &state.workspace,
+        &query.scope.to_access_context(
+            query.scope.management_tenant_id(),
+            query.scope.management_organization_id(),
+            query.scope.team_id.clone(),
+        ),
+        AccessRequirement::OrgAdmin,
+    )?;
+    Ok(Json(list_workflow_templates()))
+}
+
+/// POST /api/workflows/start：根据产品级模板创建一组任务
+async fn api_workflows_start(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<StartWorkflowRequest>,
+) -> Result<(StatusCode, Json<ProductWorkflowRunResult>), (StatusCode, String)> {
+    let tenant_id = req
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| req.scope.management_tenant_id());
+    let organization_id = req
+        .organization_id
+        .clone()
+        .or_else(|| req.scope.management_organization_id());
+    let team_id = req.team_id.clone().or_else(|| req.scope.team_id.clone());
+    let title = req.title.trim().to_string();
+    if title.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "title is required".to_string()));
+    }
+    require_management_access(
+        &state.workspace,
+        &req.scope
+            .to_access_context(tenant_id.clone(), organization_id.clone(), team_id.clone()),
+        if team_id.is_some() {
+            AccessRequirement::TeamAdmin
+        } else {
+            AccessRequirement::OrgAdmin
+        },
+    )?;
+
+    let mut tasks = load_tasks(&state.workspace);
+    let workflow = start_workflow_run(&WorkflowStartRequest {
+        tenant_id: Some(tenant_id.clone()),
+        organization_id: organization_id.clone(),
+        team_id: team_id.clone(),
+        title,
+        description: req.description.clone(),
+        template_id: req.template_id.clone(),
+    })
+    .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
+    for task in &workflow.tasks {
+        tasks.push(task.clone());
+        emit_event(
+            &state.event_bus,
+            WorkspaceEvent::TaskCreated {
+                id: task.id.clone(),
+                title: task.title.clone(),
+            },
+        );
+    }
+    save_tasks(&state.workspace, &tasks);
+    let _ = write_audit_log(
+        &state.workspace,
+        req.scope
+            .to_audit_actor(tenant_id.clone(), organization_id.clone(), team_id.clone()),
+        "workflow.start",
+        "workflow_run",
+        workflow.workflow_run_id.clone(),
+        serde_json::json!({
+            "workflow_template_id": workflow.workflow_template_id,
+            "task_ids": workflow.tasks.iter().map(|task| task.id.clone()).collect::<Vec<_>>(),
+            "team_id": team_id,
+        }),
+    );
+
+    Ok((StatusCode::CREATED, Json(workflow)))
+}
+
 /// GET /api/tasks：列出所有任务（可选 status 过滤）
 async fn api_tasks_list(
     State(state): State<Arc<AppState>>,
@@ -1758,11 +1920,28 @@ async fn api_tasks_list(
         "done" => Some(TaskStatus::Done),
         _ => None,
     });
-    let list: Vec<Task> = if let Some(st) = status_filter {
-        tasks.into_iter().filter(|t| t.status == st).collect()
-    } else {
-        tasks
-    };
+    let tenant_filter = query.get("tenant_id").cloned();
+    let org_filter = query.get("organization_id").cloned();
+    let team_filter = query.get("team_id").cloned();
+    let list: Vec<Task> = tasks
+        .into_iter()
+        .filter(|task| status_filter.is_none_or(|status| task.status == status))
+        .filter(|task| {
+            tenant_filter
+                .as_deref()
+                .is_none_or(|tenant_id| task.tenant_id.as_deref() == Some(tenant_id))
+        })
+        .filter(|task| {
+            org_filter
+                .as_deref()
+                .is_none_or(|organization_id| task.organization_id.as_deref() == Some(organization_id))
+        })
+        .filter(|task| {
+            team_filter
+                .as_deref()
+                .is_none_or(|team_id| task.team_id.as_deref() == Some(team_id))
+        })
+        .collect();
     Ok(Json(list))
 }
 
@@ -1813,7 +1992,19 @@ async fn api_tasks_create(
     } else {
         None
     };
-    let task = build_task(&req, assignee_ids, group_id);
+    let task = build_task(
+        &req,
+        assignee_ids,
+        group_id.clone(),
+        req.tenant_id.clone().or_else(|| Some("tenant-default".to_string())),
+        req.organization_id
+            .clone()
+            .or_else(|| Some("org-default".to_string())),
+        req.team_id.clone(),
+        req.workflow_template_id.clone(),
+        req.workflow_run_id.clone(),
+        req.internal_group || group_id.is_some(),
+    );
     let mut tasks = load_tasks(&state.workspace);
     tasks.push(task.clone());
     save_tasks(&state.workspace, &tasks);
