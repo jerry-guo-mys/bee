@@ -11,7 +11,8 @@ use html2text::from_read;
 use reqwest::Client;
 use serde_json::Value;
 
-use crate::tools::Tool;
+use crate::tools::output;
+use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
 
 /// Search 工具：抓取 URL 内容，仅允许白名单域名；超时与最大字符数由配置决定
 pub struct SearchTool {
@@ -87,6 +88,26 @@ fn extract_domain(url: &str) -> Option<String> {
     Some(host.to_lowercase())
 }
 
+fn is_blocked_host(domain: &str) -> bool {
+    let lower = domain.to_lowercase();
+    if matches!(lower.as_str(), "localhost" | "0.0.0.0") || lower.ends_with(".local") {
+        return true;
+    }
+    if lower.starts_with("127.") || lower.starts_with("10.") || lower.starts_with("192.168.") {
+        return true;
+    }
+    if let Some(rest) = lower.strip_prefix("172.") {
+        if let Some(octet) = rest.split('.').next() {
+            if let Ok(value) = octet.parse::<u8>() {
+                if (16..=31).contains(&value) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 fn is_github_repo_url(url: &str) -> bool {
     let Some(url) = url
         .trim()
@@ -106,6 +127,37 @@ fn is_github_repo_url(url: &str) -> bool {
         return false;
     }
     true
+}
+
+#[derive(Clone, Debug)]
+struct SearchEngineTarget {
+    engine: String,
+    query: String,
+}
+
+fn search_engine_target(url: &str) -> Option<SearchEngineTarget> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed.host_str()?.to_lowercase();
+    let path = parsed.path().to_lowercase();
+    let query_pairs: std::collections::HashMap<String, String> = parsed
+        .query_pairs()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+
+    let query = if host.contains("baidu.com") && path == "/s" {
+        query_pairs.get("wd").cloned()
+    } else if host.contains("google.") && path == "/search" {
+        query_pairs.get("q").cloned()
+    } else if host.contains("bing.com") && path == "/search" {
+        query_pairs.get("q").cloned()
+    } else {
+        None
+    }?;
+
+    Some(SearchEngineTarget {
+        engine: host,
+        query,
+    })
 }
 
 impl SearchTool {
@@ -142,6 +194,12 @@ impl SearchTool {
 
     fn is_allowed(&self, url: &str) -> Result<(), String> {
         let domain = extract_domain(url).ok_or_else(|| "Invalid or missing URL".to_string())?;
+        if is_blocked_host(&domain) {
+            return Err(format!("Blocked internal domain: {}", domain));
+        }
+        if self.allowed_domains.is_empty() || self.allowed_domains.contains("*") {
+            return Ok(());
+        }
         if self
             .allowed_domains
             .iter()
@@ -160,14 +218,8 @@ impl SearchTool {
         }
     }
 
-    async fn fetch(&self, url: &str) -> Result<String, String> {
+    async fn fetch_page_text(&self, url: &str) -> Result<String, String> {
         self.is_allowed(url)?;
-        if is_github_repo_url(url) {
-            return Err(
-                "GitHub repository URLs should use github_repo_inspect, not search".to_string(),
-            );
-        }
-
         let resp = self
             .client
             .get(url)
@@ -178,18 +230,101 @@ impl SearchTool {
             return Err(format!("HTTP {}", resp.status()));
         }
         let mut body = resp.text().await.map_err(|e| format!("Read body: {}", e))?;
-
-        // 去除 BOM，避免 HTML 检测失败
         if body.starts_with('\u{FEFF}') {
             body = body[1..].to_string();
         }
-
-        // 若为 HTML，提取可读文本（GitHub、维基等均返回 HTML）
-        let body = if looks_like_html(&body) {
+        let text = if looks_like_html(&body) {
             self.html_to_text(&body)
         } else {
             body
         };
+        Ok(text)
+    }
+
+    fn extract_candidate_urls(&self, html: &str, engine_host: &str) -> Vec<String> {
+        let Ok(regex) = regex::Regex::new(r#"https?://[^\s"'<>)]+"#) else {
+            return Vec::new();
+        };
+
+        let mut urls = Vec::new();
+        for matched in regex.find_iter(html) {
+            let candidate = matched
+                .as_str()
+                .trim_end_matches(['"', '\'', ')', ']', '}', ',', '.'])
+                .replace("&amp;", "&");
+            let Some(domain) = extract_domain(&candidate) else {
+                continue;
+            };
+            if domain.contains(engine_host) || is_blocked_host(&domain) {
+                continue;
+            }
+            if urls.iter().any(|seen| seen == &candidate) {
+                continue;
+            }
+            urls.push(candidate);
+            if urls.len() >= 5 {
+                break;
+            }
+        }
+        urls
+    }
+
+    async fn fetch_search_engine_results(
+        &self,
+        url: &str,
+        target: &SearchEngineTarget,
+    ) -> Result<String, String> {
+        let resp = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {}", resp.status()));
+        }
+        let html = resp.text().await.map_err(|e| format!("Read body: {}", e))?;
+        let candidate_urls = self.extract_candidate_urls(&html, &target.engine);
+        let mut candidates = Vec::new();
+
+        for candidate_url in candidate_urls {
+            if let Ok(text) = self.fetch_page_text(&candidate_url).await {
+                let snippet = if text.chars().count() > 400 {
+                    format!("{}...", text.chars().take(400).collect::<String>())
+                } else {
+                    text
+                };
+                candidates.push(serde_json::json!({
+                    "url": candidate_url,
+                    "snippet": snippet,
+                }));
+            }
+        }
+
+        output::structured(
+            self.name(),
+            format!("Fetched search results for {}", target.query),
+            false,
+            serde_json::json!({
+                "search_engine": target.engine,
+                "query": target.query,
+                "candidates": candidates,
+            }),
+        )
+    }
+
+    async fn fetch(&self, url: &str) -> Result<String, String> {
+        self.is_allowed(url)?;
+        if is_github_repo_url(url) {
+            return Err(
+                "GitHub repository URLs should use github_repo_inspect, not search".to_string(),
+            );
+        }
+        if let Some(target) = search_engine_target(url) {
+            return self.fetch_search_engine_results(url, &target).await;
+        }
+
+        let body = self.fetch_page_text(url).await?;
 
         let len = body.chars().count();
         if len > self.max_result_chars {
@@ -210,6 +345,13 @@ impl Tool for SearchTool {
         "Fetch URL content and extract readable text from general web pages on the allowlist. Use github_repo_inspect for GitHub repository, blob, or tree URLs. Args: {\"url\": \"https://...\"}."
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::RemoteWeb, vec![ToolIntent::FetchWebPage])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::StructuredJson)
+            .with_freshness(true)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
         let url = args
             .get("url")
@@ -220,6 +362,18 @@ impl Tool for SearchTool {
             return Err("Missing url".to_string());
         }
         tracing::info!(url = %url, "search tool fetch");
-        self.fetch(url).await
+        if search_engine_target(url).is_some() {
+            return self.fetch(url).await;
+        }
+        let content = self.fetch(url).await?;
+        output::structured(
+            self.name(),
+            format!("Fetched web content from {}", url),
+            false,
+            serde_json::json!({
+                "url": url,
+                "content": content,
+            }),
+        )
     }
 }

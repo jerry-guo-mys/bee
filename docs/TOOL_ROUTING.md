@@ -21,10 +21,33 @@
 
 实现位置：
 
-- [`tool_routing.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/tool_routing.rs)
+- [`tool_policy.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/tool_policy.rs)
 - [`agent.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/agent.rs)
 - [`runtime.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/gateway/runtime.rs)
 - [`web.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/bin/web.rs)
+
+### 1.1 工具元数据
+
+所有工具现在都支持统一元数据：
+
+- `scope`
+- `intents`
+- `risk`
+- `output_shape`
+- `supports_freshness`
+- `supports_side_effects`
+
+这些元数据会进入：
+
+- tool schema
+- 路由过滤
+- 执行前 guardrail
+- 观测与审计
+
+实现位置：
+
+- [`metadata.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/tools/metadata.rs)
+- [`registry.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/tools/registry.rs)
 
 ### 2. 专用工具负责专用语义
 
@@ -37,7 +60,19 @@ GitHub 仓库的 `repo/blob/tree` 检查只由 `github_repo_inspect` 负责。
 - [`github_repo_inspect.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/tools/github_repo_inspect.rs)
 - [`search.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/tools/search.rs)
 
-### 3. 工具返回后尽快收口
+### 3. 执行前 rewrite / guard
+
+在 planner 产出工具调用后、真正执行前，会经过统一策略层：
+
+- rewrite：如 `search + GitHub repo URL` 自动改写为 `github_repo_inspect`
+- guard：如“直接解释型问题”禁止再调用 `ls`、`cat`、`code_read`、`shell`
+
+实现位置：
+
+- [`tool_policy.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/tool_policy.rs)
+- [`loop_.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/react/loop_.rs)
+
+### 4. 工具返回后尽快收口
 
 当 `github_repo_inspect` 已经返回 `repo_summary`、`detected_stack`、`top_level_directories`、`key_files_found` 或 `file_snippets` 时，Planner 会被明确引导直接回答，而不是继续试探本地工具。
 
@@ -45,6 +80,25 @@ GitHub 仓库的 `repo/blob/tree` 检查只由 `github_repo_inspect` 负责。
 
 - [`loop_.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/react/loop_.rs)
 - [`system.md`](/Users/g/Documents/GitHub/feature/org_20260321/config/prompts/system.md)
+
+### 5. 结构化输出与可观测性
+
+关键工具现在会统一输出：
+
+- `tool`
+- `summary`
+- `sufficient_to_answer`
+- `data`
+
+并新增策略层观测：
+
+- `policy_rewrites`
+- `policy_blocks`
+
+实现位置：
+
+- [`output.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/tools/output.rs)
+- [`observability/mod.rs`](/Users/g/Documents/GitHub/feature/org_20260321/src/observability/mod.rs)
 
 ## 路由矩阵
 

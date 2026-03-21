@@ -11,6 +11,8 @@ pub mod git_commit;
 pub mod git_diff;
 pub mod github_repo_inspect;
 pub mod knowledge_graph;
+pub mod metadata;
+pub mod output;
 pub mod plugin;
 pub mod registry;
 pub mod report_generator;
@@ -20,6 +22,7 @@ pub mod shell;
 pub mod source_validator;
 pub mod test_check;
 pub mod test_run;
+pub mod weather;
 
 #[cfg(feature = "web")]
 pub mod create;
@@ -46,6 +49,7 @@ pub use git_commit::GitCommitTool;
 pub use git_diff::GitDiffTool;
 pub use github_repo_inspect::GitHubRepoInspectTool;
 pub use knowledge_graph::KnowledgeGraphBuilder;
+pub use metadata::{ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
 pub use plugin::PluginTool;
 pub use registry::{Tool, ToolRegistry};
 pub use report_generator::ReportGeneratorTool;
@@ -55,6 +59,7 @@ pub use shell::ShellTool;
 pub use source_validator::SourceValidatorTool;
 pub use test_check::TestCheckTool;
 pub use test_run::TestRunTool;
+pub use weather::WeatherTool;
 
 #[cfg(feature = "web")]
 pub use create::{CreateTool, DynamicAgent};

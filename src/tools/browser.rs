@@ -144,6 +144,22 @@ impl BrowserTool {
 
     fn is_allowed(&self, url: &str) -> Result<(), String> {
         let domain = extract_domain(url).ok_or_else(|| "Invalid or missing URL".to_string())?;
+        let is_blocked = matches!(domain.as_str(), "localhost" | "0.0.0.0")
+            || domain.ends_with(".local")
+            || domain.starts_with("127.")
+            || domain.starts_with("10.")
+            || domain.starts_with("192.168.")
+            || domain
+                .strip_prefix("172.")
+                .and_then(|rest| rest.split('.').next())
+                .and_then(|octet| octet.parse::<u8>().ok())
+                .is_some_and(|value| (16..=31).contains(&value));
+        if is_blocked {
+            return Err(format!("Blocked internal domain: {}", domain));
+        }
+        if self.allowed_domains.is_empty() || self.allowed_domains.contains("*") {
+            return Ok(());
+        }
         if self.allowed_domains.contains(&domain) {
             return Ok(());
         }

@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use crate::llm::LlmClient;
 use crate::memory::Message;
-use crate::tools::Tool;
+use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
 
 pub struct DeepSearchTool {
     llm: Arc<dyn LlmClient>,
@@ -471,6 +471,16 @@ impl Tool for DeepSearchTool {
 
     fn description(&self) -> &str {
         "Conduct deep research on a complex topic through multiple rounds of autonomous search. Automatically decomposes query, performs iterative searches, and synthesizes findings. Args: {\"topic\": \"research question\", \"max_rounds\": 3 (optional)}"
+    }
+
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(
+            ToolScope::RemoteWeb,
+            vec![ToolIntent::Research, ToolIntent::FetchWebPage],
+        )
+        .with_risk(ToolRisk::Medium)
+        .with_output_shape(ToolOutputShape::StructuredJson)
+        .with_freshness(true)
     }
 
     fn timeout_secs(&self) -> Option<u64> {

@@ -10,6 +10,9 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use crate::tools::metadata::ToolMetadata;
+use crate::tools::{ToolIntent, ToolOutputShape, ToolRisk, ToolScope};
+
 /// 工具 trait：名称、描述（供 LLM 理解）、参数 schema、异步执行（args 为 JSON）
 /// 解决问题 6.2：添加 parameters_schema 方法
 #[async_trait]
@@ -19,6 +22,13 @@ pub trait Tool: Send + Sync {
 
     /// 工具描述（供 LLM 理解功能）
     fn description(&self) -> &str;
+
+    /// 工具元数据：用于工具路由、策略收敛与审计
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::Mixed, vec![ToolIntent::Other])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::PlainText)
+    }
 
     /// 可选的工具级超时覆盖（秒）；未设置时由 ToolExecutor 使用全局默认值
     fn timeout_secs(&self) -> Option<u64> {
@@ -93,6 +103,21 @@ impl ToolRegistry {
         self.tools.keys().cloned().collect()
     }
 
+    pub fn tool_metadata(&self, name: &str) -> Option<ToolMetadata> {
+        self.tools.get(name).map(|tool| tool.metadata())
+    }
+
+    pub fn tool_metadata_for_names(&self, names: &[String]) -> Vec<(String, ToolMetadata)> {
+        names
+            .iter()
+            .filter_map(|name| {
+                self.tools
+                    .get(name)
+                    .map(|tool| (name.clone(), tool.metadata()))
+            })
+            .collect()
+    }
+
     /// 返回 (name, description) 列表，用于生成 prompt 中的 Available tools 段落
     pub fn tool_descriptions(&self) -> Vec<(String, String)> {
         self.tools
@@ -111,7 +136,8 @@ impl ToolRegistry {
                 serde_json::json!({
                     "name": name,
                     "description": tool.description(),
-                    "parameters": tool.parameters_schema()
+                    "parameters": tool.parameters_schema(),
+                    "metadata": tool.metadata(),
                 })
             })
             .collect();

@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{json, Value};
 
-use crate::tools::Tool;
+use crate::tools::output;
+use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
 
 pub struct GitHubRepoInspectTool {
     client: Client,
@@ -350,6 +351,16 @@ impl Tool for GitHubRepoInspectTool {
         "Inspect an external GitHub repository, file, or directory and return structured technical architecture signals. Args: {\"url\": \"https://github.com/org/repo\"}."
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(
+            ToolScope::GitHub,
+            vec![ToolIntent::InspectRepository, ToolIntent::FetchWebPage],
+        )
+        .with_risk(ToolRisk::Low)
+        .with_output_shape(ToolOutputShape::StructuredJson)
+        .with_freshness(true)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
         let url = args
             .get("url")
@@ -378,8 +389,23 @@ impl Tool for GitHubRepoInspectTool {
             None => return Err("Invalid GitHub repository URL".to_string()),
         };
 
-        let output = serde_json::to_string_pretty(&result)
-            .map_err(|e| format!("Serialize failed: {}", e))?;
-        Ok(self.truncate_chars(&output, self.max_result_chars))
+        let summary = match result["target_type"].as_str().unwrap_or("") {
+            "repo" => result["repo_summary"]
+                .as_str()
+                .unwrap_or("Inspected GitHub repository")
+                .to_string(),
+            "blob" => format!(
+                "Fetched GitHub file {}",
+                result["path"].as_str().unwrap_or("")
+            ),
+            "tree" => format!(
+                "Listed GitHub directory {}",
+                result["directory"].as_str().unwrap_or("")
+            ),
+            _ => "Inspected GitHub target".to_string(),
+        };
+
+        let wrapped = output::structured(self.name(), summary, true, result)?;
+        Ok(self.truncate_chars(&wrapped, self.max_result_chars))
     }
 }

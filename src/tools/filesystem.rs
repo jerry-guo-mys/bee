@@ -9,7 +9,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::core::AgentError;
-use crate::tools::Tool;
+use crate::tools::output;
+use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
 
 /// 沙箱文件系统：绑定根目录，resolve 校验路径在根下，防止路径逃逸
 #[derive(Debug, Clone)]
@@ -119,10 +120,25 @@ impl Tool for CatTool {
         "Read file contents. Args: {\"path\": \"file path relative to workspace\"}"
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ReadFile])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::StructuredJson)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
         let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
         tracing::info!(path = %path, "cat tool execute");
-        self.fs.read_file(path).map_err(|e| e.to_string())
+        let content = self.fs.read_file(path).map_err(|e| e.to_string())?;
+        output::structured(
+            self.name(),
+            format!("Read local file {}", path),
+            true,
+            serde_json::json!({
+                "path": path,
+                "content": content,
+            }),
+        )
     }
 }
 
@@ -149,10 +165,24 @@ impl Tool for LsTool {
         "List directory. Args: {\"path\": \"directory path, default '.'\"}"
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ListDirectory])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::StructuredJson)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
         let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
         tracing::info!(path = %path, "ls tool execute");
         let entries = self.fs.list_dir(path).map_err(|e| e.to_string())?;
-        Ok(entries.join("\n"))
+        output::structured(
+            self.name(),
+            format!("Listed local directory {}", path),
+            false,
+            serde_json::json!({
+                "path": path,
+                "entries": entries,
+            }),
+        )
     }
 }

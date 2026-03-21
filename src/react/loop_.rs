@@ -8,7 +8,7 @@ use tokio::sync::broadcast;
 use crate::core::{AgentError, RecoveryAction, RecoveryEngine, TaskScheduler};
 use crate::memory::Message;
 use crate::react::{parse_llm_output, ContextManager, Critic, CriticResult, Planner, ReactEvent};
-use crate::tool_routing::rewrite_tool_call;
+use crate::tool_policy::{guard_tool_call, rewrite_tool_call, should_use_long_term_memory};
 use crate::tools::ToolExecutor;
 
 /// 单次对话内最大 ReAct 步数，防止死循环
@@ -305,7 +305,11 @@ async fn react_loop_impl(
 
         let messages = context.to_llm_messages();
         let working_section = context.working_memory_section();
-        let long_term_block = context.long_term_section(user_input);
+        let long_term_block = if should_use_long_term_memory(user_input) {
+            context.long_term_section(user_input)
+        } else {
+            String::new()
+        };
         if !long_term_block.is_empty() {
             let preview: String = long_term_block.chars().take(MEMORY_PREVIEW_CHARS).collect();
             let preview = if long_term_block.len() > MEMORY_PREVIEW_CHARS {
@@ -490,8 +494,9 @@ async fn react_loop_impl(
                 });
             }
             Ok(crate::react::planner::PlannerOutput::ToolCall(tc)) => {
-                let (tool_name, tool_args) = rewrite_tool_call(&tc.tool, &tc.args)
-                    .unwrap_or_else(|| (tc.tool.clone(), tc.args.clone()));
+                let rewritten = rewrite_tool_call(&tc.tool, &tc.args);
+                let tool_name = rewritten.tool_name.clone();
+                let tool_args = rewritten.args.clone();
                 send_event(
                     &event_tx,
                     ReactEvent::ToolCall {
@@ -522,6 +527,39 @@ async fn react_loop_impl(
                     );
                     context.append_hallucination_lesson(&tool_name, &ref_names);
                     return Err(AgentError::HallucinatedTool(tool_name));
+                }
+                let tool_metadata = executor.tool_metadata(&tool_name);
+                if let Err(policy_error) =
+                    guard_tool_call(user_input, &tool_name, tool_metadata.as_ref(), &tool_args)
+                {
+                    let metrics = crate::observability::Metrics::global();
+                    metrics.tools.record_policy_block();
+                    metrics.behavior.record_tool_misuse();
+                    tracing::warn!(
+                        requested_tool = %tc.tool,
+                        effective_tool = %tool_name,
+                        detail = %policy_error,
+                        "tool policy blocked tool call"
+                    );
+                    send_event(
+                        &event_tx,
+                        ReactEvent::Recovery {
+                            action: "ToolPolicy".to_string(),
+                            detail: policy_error.clone(),
+                        },
+                    );
+                    context.push_message(Message::user(format!("Tool policy: {}", policy_error)));
+                    step += 1;
+                    continue;
+                }
+                if let Some(original_tool) = rewritten.rewritten_from.as_deref() {
+                    let metrics = crate::observability::Metrics::global();
+                    metrics.tools.record_policy_rewrite();
+                    tracing::info!(
+                        requested_tool = %original_tool,
+                        rewritten_tool = %tool_name,
+                        "tool policy rewrote tool call"
+                    );
                 }
                 // 工具并发限制：从 TaskScheduler 获取许可后再执行
                 let _permit = if let Some(sched) = task_scheduler {

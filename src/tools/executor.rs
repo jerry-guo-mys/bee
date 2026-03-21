@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::core::AgentError;
 use crate::observability::Metrics;
-use crate::tools::ToolRegistry;
+use crate::tools::{ToolMetadata, ToolRegistry};
 
 /// 工具执行器：对每次调用施加超时，并将结果映射为 AgentError
 pub struct ToolExecutor {
@@ -105,6 +105,14 @@ impl ToolExecutor {
 
     pub fn tool_names(&self) -> Vec<String> {
         self.registry.tool_names()
+    }
+
+    pub fn tool_metadata(&self, name: &str) -> Option<ToolMetadata> {
+        self.registry.tool_metadata(name)
+    }
+
+    pub fn tool_metadata_for_names(&self, names: &[String]) -> Vec<(String, ToolMetadata)> {
+        self.registry.tool_metadata_for_names(names)
     }
 
     /// 返回 (name, description) 列表，用于按智能体技能过滤后生成 prompt

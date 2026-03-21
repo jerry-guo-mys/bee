@@ -65,7 +65,7 @@ use bee::saas::{
     SaasTemplateRepository, TeamTemplateInstantiationRequest, ToolPolicyInput, ToolPolicyScope,
 };
 use bee::skills::{Skill, SkillLoader};
-use bee::tool_routing::refine_allowed_tools_for_input;
+use bee::tool_policy::refine_allowed_tools_for_input;
 use bee::tools::{tool_call_schema_json, CreateTool, DynamicAgent};
 
 use assistant_catalog::{
@@ -3191,11 +3191,16 @@ async fn api_chat_stream(
     let (event_tx, event_rx) = mpsc::unbounded_channel::<ReactEvent>();
     let (context_tx, context_rx) = tokio::sync::oneshot::channel();
 
+    let components = state.components.read().await.clone();
+    let resolved_allowed_tools =
+        resolve_allowed_tools_for_scope(&state, &assistant_id, &scope).await;
     let allowed_for_spawn = refine_allowed_tools_for_input(
         &message,
-        &resolve_allowed_tools_for_scope(&state, &assistant_id, &scope).await,
-    );
-    let components = state.components.read().await.clone();
+        &components
+            .executor
+            .tool_metadata_for_names(&resolved_allowed_tools),
+    )
+    .allowed_tools;
     let session_id_clone = session_id.clone();
     let assistant_id_clone = assistant_id.clone();
     let session_key_clone = key.clone();

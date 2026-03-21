@@ -1645,7 +1645,7 @@
           if (!stepsContent || !stepKey) return null;
           return stepsContent.querySelector(`.step-item[data-step-key="${stepKey}"]`);
         };
-        const trimStepCount = (maxSteps = 6) => {
+        const trimStepCount = (maxSteps = 9) => {
           if (!stepsContent) return;
           while (stepsContent.children.length > maxSteps) {
             stepsContent.removeChild(stepsContent.firstChild);

@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::tools::Tool;
+use crate::tools::output;
+use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
 
 /// 代码读取工具
 pub struct CodeReadTool {
@@ -149,6 +150,12 @@ impl Tool for CodeReadTool {
         "Read code file contents with line numbers"
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ReadCode])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::StructuredJson)
+    }
+
     fn parameters_schema(&self) -> Value {
         serde_json::json!({
             "type": "object",
@@ -201,7 +208,16 @@ impl Tool for CodeReadTool {
             return Err(format!("Path is not a file: {}", validated_path.display()));
         }
 
-        self.read_file_with_lines(&validated_path, offset, limit)
+        let content = self.read_file_with_lines(&validated_path, offset, limit)?;
+        output::structured(
+            self.name(),
+            format!("Read code file {}", validated_path.display()),
+            true,
+            serde_json::json!({
+                "file_path": validated_path.display().to_string(),
+                "content": content,
+            }),
+        )
     }
 }
 

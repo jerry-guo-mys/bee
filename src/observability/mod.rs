@@ -78,6 +78,8 @@ impl Metrics {
                 "total_executions": self.tools.total_executions.load(Ordering::Relaxed),
                 "successful_executions": self.tools.successful_executions.load(Ordering::Relaxed),
                 "failed_executions": self.tools.failed_executions.load(Ordering::Relaxed),
+                "policy_rewrites": self.tools.policy_rewrites.load(Ordering::Relaxed),
+                "policy_blocks": self.tools.policy_blocks.load(Ordering::Relaxed),
                 "total_execution_time_ms": self.tools.total_execution_time_ms.load(Ordering::Relaxed),
                 "average_execution_time_ms": self.tools.average_execution_time_ms(),
             },
@@ -142,6 +144,14 @@ impl Metrics {
         output.push_str(&format!(
             "# TYPE bee_tool_executions_failure counter\nbee_tool_executions_failure {}\n",
             self.tools.failed_executions.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "# TYPE bee_tool_policy_rewrites counter\nbee_tool_policy_rewrites {}\n",
+            self.tools.policy_rewrites.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "# TYPE bee_tool_policy_blocks counter\nbee_tool_policy_blocks {}\n",
+            self.tools.policy_blocks.load(Ordering::Relaxed)
         ));
         output.push_str(&format!(
             "# TYPE bee_tool_execution_time_ms_total counter\nbee_tool_execution_time_ms_total {}\n",
@@ -260,6 +270,8 @@ pub struct ToolMetrics {
     pub total_executions: AtomicU64,
     pub successful_executions: AtomicU64,
     pub failed_executions: AtomicU64,
+    pub policy_rewrites: AtomicU64,
+    pub policy_blocks: AtomicU64,
     pub total_execution_time_ms: AtomicU64,
 }
 
@@ -283,6 +295,14 @@ impl ToolMetrics {
         } else {
             total as f64 / count as f64
         }
+    }
+
+    pub fn record_policy_rewrite(&self) {
+        self.policy_rewrites.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_policy_block(&self) {
+        self.policy_blocks.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -471,9 +491,13 @@ mod tests {
         let metrics = ToolMetrics::default();
         metrics.record_execution(true, Duration::from_millis(50));
         metrics.record_execution(true, Duration::from_millis(100));
+        metrics.record_policy_rewrite();
+        metrics.record_policy_block();
 
         assert_eq!(metrics.total_executions.load(Ordering::Relaxed), 2);
         assert_eq!(metrics.average_execution_time_ms(), 75.0);
+        assert_eq!(metrics.policy_rewrites.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.policy_blocks.load(Ordering::Relaxed), 1);
     }
 
     #[test]

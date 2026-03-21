@@ -10,7 +10,7 @@ use serde_json::Value;
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
-use crate::tools::Tool;
+use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
 
 /// 禁止的命令/子串（即使白名单中有同名，也不允许带这些参数）
 const FORBIDDEN_SUBSTR: &[&str] = &[
@@ -76,6 +76,16 @@ impl Tool for ShellTool {
 
     fn description(&self) -> &str {
         "Run a whitelisted shell command. Allowed commands: ls, grep, cat, head, tail, wc, find, cargo, rustc (configurable)."
+    }
+
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(
+            ToolScope::System,
+            vec![ToolIntent::RunCommand, ToolIntent::ExecuteSideEffect],
+        )
+        .with_risk(ToolRisk::High)
+        .with_output_shape(ToolOutputShape::PlainText)
+        .with_side_effects(true)
     }
 
     fn timeout_secs(&self) -> Option<u64> {

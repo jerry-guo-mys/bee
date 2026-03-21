@@ -16,7 +16,7 @@ use crate::tools::{
     CatTool, CodeEditTool, CodeGrepTool, CodeReadTool, CodeWriteTool, DeepSearchTool, EchoTool,
     GitCommitTool, GitHubRepoInspectTool, KnowledgeGraphBuilder, LsTool, PluginTool,
     ReportGeneratorTool, SearchTool, ShellTool, SourceValidatorTool, TestCheckTool, TestRunTool,
-    ToolExecutor, ToolRegistry,
+    ToolExecutor, ToolRegistry, WeatherTool,
 };
 #[cfg(feature = "web")]
 use crate::tools::{CreateGroupTool, CreateTool, ListAgentsTool, SendTool};
@@ -94,6 +94,7 @@ impl AgentBuilder {
             self.config.tools.search.timeout_secs,
             self.config.tools.search.max_result_chars,
         ));
+        tools.register(WeatherTool::new(self.config.tools.search.timeout_secs));
         tools.register(GitHubRepoInspectTool::new(
             self.config.tools.search.max_result_chars,
         ));

@@ -36,15 +36,7 @@ allowed_commands = ["ls", "grep", "cat", "head", "tail", "wc", "find", "cargo", 
 [tools.search]
 timeout_secs = 15
 max_result_chars = 8000
-allowed_domains = [
-  "en.wikipedia.org", "zh.wikipedia.org", "ja.wikipedia.org",
-  "www.baidu.com", "baike.baidu.com",
-  "www.jd.com", "item.jd.com",
-  "docs.rs", "github.com", "stackoverflow.com",
-  "www.google.com", "google.com", "news.google.com",
-  "www.bing.com", "bing.com",
-  "developer.mozilla.org", "arxiv.org"
-]
+allowed_domains = ["*"]
 
 [tools.deep_research]
 max_rounds = 5

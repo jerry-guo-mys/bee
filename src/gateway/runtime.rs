@@ -18,7 +18,7 @@ use crate::saas::{
     default_low_risk_tools, resolve_effective_tool_allowlist, SaasSqliteStore, ToolPolicyScope,
 };
 use crate::skills::SkillSelector;
-use crate::tool_routing::{refine_allowed_tools_for_input, system_hint_for_input};
+use crate::tool_policy::refine_allowed_tools_for_input;
 
 /// Runtime 配置
 #[derive(Debug, Clone)]
@@ -231,7 +231,11 @@ impl AgentRuntime {
             .unwrap_or_default();
         let allowed_tools =
             resolve_allowed_tools_for_scope(&self.components, &self.config.workspace, &scope);
-        let allowed_tools = refine_allowed_tools_for_input(user_input, &allowed_tools);
+        let allowed_tool_metadata = self
+            .components
+            .executor
+            .tool_metadata_for_names(&allowed_tools);
+        let policy_decision = refine_allowed_tools_for_input(user_input, &allowed_tool_metadata);
 
         let mut context = self
             .session_store
@@ -266,10 +270,10 @@ impl AgentRuntime {
         } else {
             None
         };
-        let system_prompt = match (system_prompt, system_hint_for_input(user_input)) {
+        let system_prompt = match (system_prompt, policy_decision.system_hint.as_deref()) {
             (Some(base), Some(hint)) => Some(format!("{base}\n\n{hint}")),
             (Some(base), None) => Some(base),
-            (None, Some(hint)) => Some(hint),
+            (None, Some(hint)) => Some(hint.to_string()),
             (None, None) => None,
         };
 
@@ -285,7 +289,7 @@ impl AgentRuntime {
             self.components.critic.as_ref(),
             Some(&self.components.task_scheduler),
             system_prompt.as_deref(),
-            Some(allowed_tools.as_slice()),
+            Some(policy_decision.allowed_tools.as_slice()),
         )
         .await;
 

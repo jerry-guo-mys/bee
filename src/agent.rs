@@ -18,7 +18,7 @@ use crate::memory::{
 };
 use crate::react::{react_loop, ContextManager, Planner, ReactEvent};
 use crate::skills::SkillSelector;
-use crate::tool_routing::{refine_allowed_tools_for_input, system_hint_for_input};
+use crate::tool_policy::refine_allowed_tools_for_input;
 use tokio::sync::mpsc;
 
 /// 创建 Agent 组件：使用统一的 AgentBuilder（解决问题 1.1）
@@ -245,9 +245,10 @@ pub async fn process_message(
     allowed_tools: Option<&[String]>,
 ) -> Result<String, AgentError> {
     let cancel_token = tokio_util::sync::CancellationToken::new();
-    let refined_tools =
-        allowed_tools.map(|tools| refine_allowed_tools_for_input(user_input, tools));
-    let system_hint = system_hint_for_input(user_input);
+    let policy_decision = allowed_tools.map(|tools| {
+        let metadata = components.executor.tool_metadata_for_names(tools);
+        refine_allowed_tools_for_input(user_input, &metadata)
+    });
     let result = react_loop(
         &components.planner,
         &components.executor,
@@ -259,8 +260,12 @@ pub async fn process_message(
         cancel_token,
         components.critic.as_ref(),
         Some(&components.task_scheduler),
-        system_hint.as_deref(),
-        refined_tools.as_deref(),
+        policy_decision
+            .as_ref()
+            .and_then(|decision| decision.system_hint.as_deref()),
+        policy_decision
+            .as_ref()
+            .map(|decision| decision.allowed_tools.as_slice()),
     )
     .await?;
     Ok(result.response)
@@ -310,12 +315,19 @@ pub async fn process_message_stream_with_cancel(
     cancel_token: tokio_util::sync::CancellationToken,
 ) -> Result<String, AgentError> {
     let planner = planner_override.unwrap_or(&components.planner);
-    let refined_tools =
-        allowed_tools.map(|tools| refine_allowed_tools_for_input(user_input, tools));
-    let combined_system_prompt = match (system_prompt_override, system_hint_for_input(user_input)) {
+    let policy_decision = allowed_tools.map(|tools| {
+        let metadata = components.executor.tool_metadata_for_names(tools);
+        refine_allowed_tools_for_input(user_input, &metadata)
+    });
+    let combined_system_prompt = match (
+        system_prompt_override,
+        policy_decision
+            .as_ref()
+            .and_then(|decision| decision.system_hint.as_deref()),
+    ) {
         (Some(base), Some(hint)) => Some(format!("{base}\n\n{hint}")),
         (Some(base), None) => Some(base.to_string()),
-        (None, Some(hint)) => Some(hint),
+        (None, Some(hint)) => Some(hint.to_string()),
         (None, None) => None,
     };
 
@@ -337,7 +349,9 @@ pub async fn process_message_stream_with_cancel(
                             components.critic.as_ref(),
                             Some(&components.task_scheduler),
                             combined_system_prompt.as_deref(),
-                            refined_tools.as_deref(),
+                            policy_decision
+                                .as_ref()
+                                .map(|decision| decision.allowed_tools.as_slice()),
                         )
                         .await
                     })
@@ -355,7 +369,9 @@ pub async fn process_message_stream_with_cancel(
                     components.critic.as_ref(),
                     Some(&components.task_scheduler),
                     combined_system_prompt.as_deref(),
-                    refined_tools.as_deref(),
+                    policy_decision
+                        .as_ref()
+                        .map(|decision| decision.allowed_tools.as_slice()),
                 )
                 .await
             }
@@ -374,7 +390,9 @@ pub async fn process_message_stream_with_cancel(
                 components.critic.as_ref(),
                 Some(&components.task_scheduler),
                 combined_system_prompt.as_deref(),
-                refined_tools.as_deref(),
+                policy_decision
+                    .as_ref()
+                    .map(|decision| decision.allowed_tools.as_slice()),
             )
             .await
         }
