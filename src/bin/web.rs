@@ -53,6 +53,7 @@ use bee::memory::{
     record_learning as learnings_record_learning,
 };
 use bee::react::{compact_context, ContextManager, Planner, ReactEvent};
+use bee::saas::bootstrap_workspace_saas;
 use bee::skills::{Skill, SkillLoader};
 use bee::tools::{tool_call_schema_json, CreateTool, DynamicAgent};
 
@@ -437,6 +438,21 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| std::env::current_dir().unwrap().join("workspace"));
     let workspace = workspace.canonicalize().unwrap_or(workspace);
     std::fs::create_dir_all(&workspace).ok();
+    match bootstrap_workspace_saas(&workspace) {
+        Ok(result) => {
+            tracing::info!(
+                "SaaS bootstrap initialized at {} (agents={}, groups={}, conversations={}, tasks={})",
+                result.db_path.display(),
+                result.report.agent_instances_imported,
+                result.report.groups_imported,
+                result.report.conversations_imported,
+                result.report.tasks_imported
+            );
+        }
+        Err(err) => {
+            tracing::warn!("SaaS bootstrap failed: {}", err);
+        }
+    }
 
     let config_base = std::path::Path::new("config");
     let system_prompt = [

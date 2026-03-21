@@ -10,7 +10,7 @@
 | 阶段      | 目标          | 状态  | 进度  | 备注                   |
 | ------- | ----------- | --- | --- | -------------------- |
 | Phase 0 | 架构收口与入口拆分   | 已完成 | 100% | 入口边界已收口，完成配置/仓储/应用服务初步拆分 |
-| Phase 1 | 主数据与仓储层落地   | 未开始 | 0%  | 组织/团队/Agent 实例模型     |
+| Phase 1 | 主数据与仓储层落地   | 已完成 | 100% | 已落主数据、repository、sqlite schema，迁移与 bootstrap 覆盖 legacy 文件数据 |
 | Phase 2 | 公司与团队初始化产品化 | 未开始 | 0%  | 组织初始化向导与模板           |
 | Phase 3 | 运行时多租户化     | 未开始 | 0%  | 会话、记忆、上下文隔离          |
 | Phase 4 | 配置中心与模板中心   | 未开始 | 0%  | 替代静态 assistants 配置   |
@@ -62,25 +62,27 @@
 
 ### 子任务
 
-- P1.1 定义核心实体：`tenant`、`organization`、`team`、`membership`
-- P1.2 定义核心实体：`agent_template`、`agent_instance`、`workspace`
-- P1.3 定义核心实体：`conversation`、`conversation_message`、`task`
-- P1.4 增加 repository trait：`OrgRepository`
-- P1.5 增加 repository trait：`AgentRepository`
-- P1.6 增加 repository trait：`ConversationRepository`
-- P1.7 增加 repository trait：`TaskRepository`
-- P1.8 用 sqlite 落第一版 schema
-- P1.9 替换 `agents.json`
-- P1.10 替换 `groups.json`
-- P1.11 替换 `sessions/*.json`
-- P1.12 增加迁移/种子初始化逻辑
+- [x] P1.1 定义核心实体：`tenant`、`organization`、`team`、`membership`
+- [x] P1.2 定义核心实体：`agent_template`、`agent_instance`、`workspace`
+- [x] P1.3 定义核心实体：`conversation`、`conversation_message`、`task`
+- [x] P1.4 增加 repository trait：`OrgRepository`
+- [x] P1.5 增加 repository trait：`AgentRepository`
+- [x] P1.6 增加 repository trait：`ConversationRepository`
+- [x] P1.7 增加 repository trait：`TaskRepository`
+- [x] P1.8 用 sqlite 落第一版 schema
+- [x] P1.9 替换 `agents.json`
+- [x] P1.10 替换 `groups.json`
+- [x] P1.11 替换 `sessions/*.json`
+- [x] P1.12 增加迁移/种子初始化逻辑
 
 ### 进度记录
 
 
 | 日期  | 子任务 | 状态  | 说明  |
 | --- | --- | --- | --- |
-| -   | -   | 未开始 | -   |
+| 2026-03-21 | P1.1-P1.7 | 完成  | 新增 `src/saas/models.rs`、`src/saas/repository.rs` 和 `src/saas/mod.rs`，落主数据模型与仓储边界 |
+| 2026-03-21 | P1.8 | 完成  | 新增 `src/saas/sqlite.rs`，完成第一版 SaaS sqlite schema 与初始化入口 |
+| 2026-03-21 | P1.9/P1.10/P1.11/P1.12 | 完成  | 新增 `src/saas/migration.rs`、`src/saas/bootstrap.rs`，迁移与 bootstrap 覆盖 `agents/groups/sessions/tasks` 及群聊会话 |
 
 
 ## Phase 2：公司与团队初始化产品化
