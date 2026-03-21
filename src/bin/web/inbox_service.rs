@@ -5,9 +5,11 @@ use tokio::sync::mpsc;
 
 use super::session_store::{
     group_messages_to_llm_messages, load_group_session, save_group_session, GroupChatMessage,
+    WebSessionScope,
 };
 use super::{
-    emit_event, get_or_create_vector_for_assistant, AppState, WorkspaceEvent, DEFAULT_MAX_TURNS,
+    emit_event, get_or_create_vector_for_assistant, resolve_allowed_tools_for_scope, AppState,
+    WorkspaceEvent, DEFAULT_MAX_TURNS,
 };
 use bee::agent::{create_context_with_long_term_for_assistant, process_message_stream};
 
@@ -67,12 +69,14 @@ pub async fn process_inbox(
             .await
             .get(assistant_id)
             .cloned();
-        let allowed = state
-            .assistant_skills
-            .read()
-            .await
-            .get(assistant_id)
-            .cloned();
+        let scope = WebSessionScope {
+            tenant_id: Some("tenant-default".to_string()),
+            organization_id: Some("org-default".to_string()),
+            team_id: None,
+            agent_instance_id: Some(assistant_id.to_string()),
+            user_id: Some(group.id.clone()),
+        };
+        let allowed = resolve_allowed_tools_for_scope(&state, assistant_id, &scope).await;
         let reply = process_message_stream(
             components.as_ref(),
             &mut context,
@@ -80,7 +84,7 @@ pub async fn process_inbox(
             tx,
             prompt.as_deref(),
             None,
-            allowed.as_deref(),
+            Some(allowed.as_slice()),
             Some(assistant_id),
         )
         .await

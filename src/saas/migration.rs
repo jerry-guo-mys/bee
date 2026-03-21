@@ -10,7 +10,6 @@ use rusqlite::params;
 
 use crate::memory::Role;
 use crate::saas::sqlite::SaasSqliteStore;
-use crate::tools::DynamicAgent;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct MigrationReport {
@@ -234,7 +233,7 @@ impl<'a> LegacyWorkspaceImporter<'a> {
         if !path.exists() {
             return Ok(());
         }
-        let agents: Vec<DynamicAgent> = serde_json::from_str(
+        let agents: Vec<LegacyDynamicAgent> = serde_json::from_str(
             &std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?,
         )
         .with_context(|| format!("parse {}", path.display()))?;
@@ -379,6 +378,17 @@ impl<'a> LegacyWorkspaceImporter<'a> {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct LegacyDynamicAgent {
+    id: String,
+    role: String,
+    #[serde(default)]
+    parent_id: Option<String>,
+    #[serde(default)]
+    guidance: Option<String>,
+    created_at: String,
 }
 
 fn map_task_status(status: &LegacyTaskStatus) -> &'static str {

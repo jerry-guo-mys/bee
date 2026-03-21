@@ -17,6 +17,38 @@ use super::assistant_catalog::AssistantInfo;
 pub struct SessionSnapshot {
     pub messages: Vec<Message>,
     pub max_turns: usize,
+    #[serde(default)]
+    pub scope: Option<WebSessionScope>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WebSessionScope {
+    #[serde(default)]
+    pub tenant_id: Option<String>,
+    #[serde(default)]
+    pub organization_id: Option<String>,
+    #[serde(default)]
+    pub team_id: Option<String>,
+    #[serde(default)]
+    pub agent_instance_id: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<String>,
+}
+
+impl WebSessionScope {
+    pub fn key_suffix(&self) -> String {
+        [
+            self.tenant_id.as_deref().unwrap_or("tenant-default"),
+            self.organization_id.as_deref().unwrap_or("org-default"),
+            self.team_id.as_deref().unwrap_or("team-default"),
+            self.agent_instance_id.as_deref().unwrap_or("agent-default"),
+            self.user_id.as_deref().unwrap_or("user-default"),
+        ]
+        .into_iter()
+        .map(sanitize_scope_segment)
+        .collect::<Vec<_>>()
+        .join("--")
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -41,8 +73,15 @@ pub struct GroupInfo {
     pub created_at: String,
 }
 
-pub fn session_key(session_id: &str, assistant_id: &str) -> String {
-    format!("{}::{}", session_id, assistant_id)
+pub fn session_key(
+    session_id: &str,
+    assistant_id: &str,
+    scope: Option<&WebSessionScope>,
+) -> String {
+    match scope {
+        Some(scope) => format!("{}::{}::{}", session_id, assistant_id, scope.key_suffix()),
+        None => format!("{}::{}", session_id, assistant_id),
+    }
 }
 
 pub fn group_session_path(sessions_dir: &Path, group_id: &str) -> PathBuf {
@@ -50,7 +89,12 @@ pub fn group_session_path(sessions_dir: &Path, group_id: &str) -> PathBuf {
     sessions_dir.join(format!("group_{}.json", safe_gid))
 }
 
-pub fn session_path(sessions_dir: &Path, session_id: &str, assistant_id: &str) -> PathBuf {
+pub fn session_path(
+    sessions_dir: &Path,
+    session_id: &str,
+    assistant_id: &str,
+    scope: Option<&WebSessionScope>,
+) -> PathBuf {
     let safe_sid = session_id.replace('/', "_").replace('\\', "_");
     let safe_aid = assistant_id.replace('/', "_").replace('\\', "_");
     let aid = if safe_aid.is_empty() {
@@ -58,7 +102,10 @@ pub fn session_path(sessions_dir: &Path, session_id: &str, assistant_id: &str) -
     } else {
         safe_aid.as_str()
     };
-    sessions_dir.join(format!("{}---{}.json", safe_sid, aid))
+    let suffix = scope
+        .map(|scope| format!("---{}", scope.key_suffix()))
+        .unwrap_or_default();
+    sessions_dir.join(format!("{}---{}{}.json", safe_sid, aid, suffix))
 }
 
 pub fn load_groups_from_disk(path: &Path) -> Arc<RwLock<HashMap<String, GroupInfo>>> {
@@ -129,10 +176,11 @@ pub fn load_session_from_disk(
     workspace: &Path,
     cfg: &AppConfig,
     vector_for_assistant: Option<Arc<InMemoryVectorLongTerm>>,
+    requested_scope: Option<&WebSessionScope>,
 ) -> Option<ContextManager> {
-    let path = session_path(sessions_dir, session_id, assistant_id);
+    let path = session_path(sessions_dir, session_id, assistant_id, requested_scope);
     let data = std::fs::read_to_string(&path).ok().or_else(|| {
-        if assistant_id == "default" {
+        if assistant_id == "default" && requested_scope.is_none() {
             let legacy_path =
                 sessions_dir.join(format!("{}.json", session_id.replace(['/', '\\'], "_")));
             std::fs::read_to_string(&legacy_path).ok()
@@ -142,7 +190,8 @@ pub fn load_session_from_disk(
     })?;
     let snapshot: SessionSnapshot = serde_json::from_str(&data).ok()?;
     let conversation = ConversationMemory::from_messages(snapshot.messages, snapshot.max_turns);
-    let assistant_root = assistant_memory_root(workspace, assistant_id);
+    let assistant_root =
+        scoped_assistant_memory_root(workspace, assistant_id, snapshot.scope.as_ref());
     std::fs::create_dir_all(&assistant_root).ok();
     let long_term: Arc<dyn bee::memory::LongTermMemory> = if let Some(vector) = vector_for_assistant
     {
@@ -170,16 +219,21 @@ pub fn save_session_to_disk(
     session_id: &str,
     assistant_id: &str,
     context: &ContextManager,
+    scope: Option<&WebSessionScope>,
 ) {
-    let path = session_path(sessions_dir, session_id, assistant_id);
+    let scope = scope
+        .cloned()
+        .unwrap_or_else(|| default_web_session_scope(session_id, assistant_id));
+    let path = session_path(sessions_dir, session_id, assistant_id, Some(&scope));
     let snapshot = SessionSnapshot {
         messages: context.messages().to_vec(),
         max_turns: context.conversation.max_turns(),
+        scope: Some(scope.clone()),
     };
     if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
         let _ = std::fs::write(path, json);
     }
-    let assistant_root = assistant_memory_root(workspace, assistant_id);
+    let assistant_root = scoped_assistant_memory_root(workspace, assistant_id, Some(&scope));
     std::fs::create_dir_all(assistant_root.join("logs")).ok();
     let date = chrono::Local::now().format("%Y-%m-%d").to_string();
     let _ = append_daily_log(
@@ -188,4 +242,61 @@ pub fn save_session_to_disk(
         &format!("{}:{}", session_id, assistant_id),
         context.messages(),
     );
+}
+
+fn default_web_session_scope(session_id: &str, assistant_id: &str) -> WebSessionScope {
+    WebSessionScope {
+        tenant_id: Some("tenant-default".to_string()),
+        organization_id: Some("org-default".to_string()),
+        team_id: None,
+        agent_instance_id: Some(assistant_id.to_string()),
+        user_id: Some(session_id.to_string()),
+    }
+}
+
+fn scoped_assistant_memory_root(
+    workspace: &Path,
+    assistant_id: &str,
+    scope: Option<&WebSessionScope>,
+) -> PathBuf {
+    let Some(scope) = scope else {
+        return assistant_memory_root(workspace, assistant_id);
+    };
+
+    let mut root = workspace.join(".bee").join("web_scopes");
+    root.push(sanitize_scope_segment(
+        scope.tenant_id.as_deref().unwrap_or("tenant-default"),
+    ));
+    root.push(sanitize_scope_segment(
+        scope.organization_id.as_deref().unwrap_or("org-default"),
+    ));
+    if let Some(team_id) = scope.team_id.as_deref() {
+        root.push("teams");
+        root.push(sanitize_scope_segment(team_id));
+    }
+    if let Some(user_id) = scope.user_id.as_deref() {
+        root.push("users");
+        root.push(sanitize_scope_segment(user_id));
+    }
+    root.push("assistants");
+    root.push(sanitize_scope_segment(assistant_id));
+    root
+}
+
+fn sanitize_scope_segment(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "default".to_string()
+    } else {
+        sanitized
+    }
 }

@@ -67,7 +67,7 @@ use assistant_catalog::{
 use session_store::{
     group_messages_to_llm_messages, load_group_session, load_groups_from_disk,
     load_session_from_disk, save_group_session, save_groups_to_disk, save_session_to_disk,
-    session_key, session_path, GroupChatMessage, GroupInfo, SessionSnapshot,
+    session_key, session_path, GroupChatMessage, GroupInfo, SessionSnapshot, WebSessionScope,
 };
 use task_service::{
     apply_task_update, build_task, load_tasks, save_tasks, status_label, CreateTaskRequest, Task,
@@ -183,6 +183,8 @@ struct ChatRequest {
     /// 可切换模型：选用的模型 id，缺省为 "default"（使用配置）
     #[serde(default)]
     model_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
 }
 
 #[derive(Debug, Serialize)]
@@ -242,6 +244,8 @@ struct HistoryQuery {
     /// 群聊：有 group_id 时按群加载历史，返回消息含 assistant_id
     #[serde(default)]
     group_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
 }
 
 #[derive(Debug, Serialize)]
@@ -276,6 +280,46 @@ struct ClearSessionRequest {
     session_id: Option<String>,
     #[serde(default)]
     assistant_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct WebScopeParams {
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+    #[serde(default)]
+    team_id: Option<String>,
+    #[serde(default)]
+    agent_instance_id: Option<String>,
+    #[serde(default)]
+    user_id: Option<String>,
+}
+
+impl WebScopeParams {
+    fn to_scope(&self, session_id: &str, assistant_id: &str) -> WebSessionScope {
+        WebSessionScope {
+            tenant_id: self
+                .tenant_id
+                .clone()
+                .or_else(|| Some("tenant-default".to_string())),
+            organization_id: self
+                .organization_id
+                .clone()
+                .or_else(|| Some("org-default".to_string())),
+            team_id: self.team_id.clone(),
+            agent_instance_id: self
+                .agent_instance_id
+                .clone()
+                .or_else(|| Some(assistant_id.to_string())),
+            user_id: self
+                .user_id
+                .clone()
+                .or_else(|| Some(session_id.to_string())),
+        }
+    }
 }
 
 /// 会话列表项
@@ -292,6 +336,16 @@ struct SessionListItem {
     updated_at: String,
     /// 日期 YYYY-MM-DD，用于前端分组（今天/昨天/上周/更早）
     date: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tenant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    organization_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    team_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_instance_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -481,6 +535,49 @@ fn industry_template_code(template: IndustryTemplate) -> &'static str {
         IndustryTemplate::RecruitingAgency => "recruiting_agency",
         IndustryTemplate::SoftwareDelivery => "software_delivery",
     }
+}
+
+async fn resolve_allowed_tools_for_scope(
+    state: &AppState,
+    assistant_id: &str,
+    scope: &WebSessionScope,
+) -> Vec<String> {
+    let base_tools = state
+        .assistant_skills
+        .read()
+        .await
+        .get(assistant_id)
+        .cloned()
+        .unwrap_or_else(|| {
+            state
+                .tool_descriptions
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect()
+        });
+
+    let has_team_scope = scope
+        .team_id
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
+    if has_team_scope {
+        return base_tools;
+    }
+
+    let high_risk = [
+        "shell",
+        "code_edit",
+        "code_write",
+        "git_commit",
+        "create",
+        "create_group",
+        "send",
+        "browser",
+    ];
+    base_tools
+        .into_iter()
+        .filter(|tool| !high_risk.contains(&tool.as_str()))
+        .collect()
 }
 
 #[tokio::main]
@@ -877,7 +974,8 @@ async fn api_compact(
         }
     };
     let assistant_id = req.assistant_id.as_deref().unwrap_or("default");
-    let key = session_key(&session_id, assistant_id);
+    let scope = req.scope.to_scope(&session_id, assistant_id);
+    let key = session_key(&session_id, assistant_id, Some(&scope));
     let vector = get_or_create_vector_for_assistant(&state, assistant_id).await;
     let mut context = state
         .sessions
@@ -892,6 +990,7 @@ async fn api_compact(
                 &state.workspace,
                 &state.config,
                 vector.clone(),
+                Some(&scope),
             )
             .unwrap_or_else(|| {
                 create_context_with_long_term_for_assistant(
@@ -912,6 +1011,7 @@ async fn api_compact(
                 &session_id,
                 assistant_id,
                 &context,
+                Some(&scope),
             );
             state.sessions.write().await.insert(key, context);
             Ok(StatusCode::OK)
@@ -933,12 +1033,13 @@ async fn api_session_clear(
         None => return Ok(StatusCode::OK),
     };
     let assistant_id = req.assistant_id.as_deref().unwrap_or("default");
-    let key = session_key(&session_id, assistant_id);
+    let scope = req.scope.to_scope(&session_id, assistant_id);
+    let key = session_key(&session_id, assistant_id, Some(&scope));
     {
         let mut sessions = state.sessions.write().await;
         sessions.remove(&key);
     }
-    let path = session_path(&state.sessions_dir, &session_id, assistant_id);
+    let path = session_path(&state.sessions_dir, &session_id, assistant_id, Some(&scope));
     let _ = std::fs::remove_file(&path);
     // 兼容旧格式：若存在 session_id.json 也删除
     if assistant_id == "default" {
@@ -969,12 +1070,16 @@ async fn api_sessions_list(
             continue;
         }
         let (session_id, assistant_id) = if let Some(idx) = stem.find("---") {
-            let (sid, aid) = stem.split_at(idx);
-            (sid.to_string(), aid.trim_start_matches("---").to_string())
+            let (sid, rest) = stem.split_at(idx);
+            let assistant_with_scope = rest.trim_start_matches("---");
+            let assistant_id = assistant_with_scope
+                .split("---")
+                .next()
+                .unwrap_or(assistant_with_scope);
+            (sid.to_string(), assistant_id.to_string())
         } else {
             (stem.to_string(), "default".to_string())
         };
-        let id = session_key(&session_id, &assistant_id);
 
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
@@ -984,6 +1089,7 @@ async fn api_sessions_list(
             Ok(s) => s,
             Err(_) => continue,
         };
+        let id = session_key(&session_id, &assistant_id, snap.scope.as_ref());
 
         let title = snap
             .messages
@@ -1021,6 +1127,20 @@ async fn api_sessions_list(
             message_count: snap.messages.len(),
             updated_at,
             date,
+            tenant_id: snap
+                .scope
+                .as_ref()
+                .and_then(|scope| scope.tenant_id.clone()),
+            organization_id: snap
+                .scope
+                .as_ref()
+                .and_then(|scope| scope.organization_id.clone()),
+            team_id: snap.scope.as_ref().and_then(|scope| scope.team_id.clone()),
+            agent_instance_id: snap
+                .scope
+                .as_ref()
+                .and_then(|scope| scope.agent_instance_id.clone()),
+            user_id: snap.scope.as_ref().and_then(|scope| scope.user_id.clone()),
         });
     }
 
@@ -1675,7 +1795,8 @@ async fn api_history(
         }
     };
     let assistant_id = q.assistant_id.as_deref().unwrap_or("default");
-    let key = session_key(&session_id, assistant_id);
+    let scope = q.scope.to_scope(&session_id, assistant_id);
+    let key = session_key(&session_id, assistant_id, Some(&scope));
     let vector = get_or_create_vector_for_assistant(&state, assistant_id).await;
     let context_opt = {
         let sessions = state.sessions.read().await;
@@ -1691,6 +1812,7 @@ async fn api_history(
                 &state.workspace,
                 &state.config,
                 vector,
+                Some(&scope),
             ) {
                 loaded
             } else {
@@ -1745,7 +1867,8 @@ async fn api_chat(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let assistant_id = req.assistant_id.as_deref().unwrap_or("default");
-    let key = session_key(&session_id, assistant_id);
+    let scope = req.scope.to_scope(&session_id, assistant_id);
+    let key = session_key(&session_id, assistant_id, Some(&scope));
     let vector = get_or_create_vector_for_assistant(&state, assistant_id).await;
     let mut context = {
         let mut sessions = state.sessions.write().await;
@@ -1757,6 +1880,7 @@ async fn api_chat(
                 &state.workspace,
                 &state.config,
                 vector.clone(),
+                Some(&scope),
             )
             .unwrap_or_else(|| {
                 create_context_with_long_term_for_assistant(
@@ -1771,20 +1895,10 @@ async fn api_chat(
     };
 
     let components = state.components.read().await.clone();
-    let allowed = state
-        .assistant_skills
-        .read()
+    let allowed = resolve_allowed_tools_for_scope(&state, assistant_id, &scope).await;
+    let reply = process_message(components.as_ref(), &mut context, message, Some(&allowed))
         .await
-        .get(assistant_id)
-        .cloned();
-    let reply = process_message(
-        components.as_ref(),
-        &mut context,
-        message,
-        allowed.as_deref(),
-    )
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     {
         let mut sessions = state.sessions.write().await;
@@ -1795,6 +1909,7 @@ async fn api_chat(
             &session_id,
             assistant_id,
             &context,
+            Some(&scope),
         );
     }
 
@@ -2022,7 +2137,8 @@ async fn api_chat_stream(
         .get(&assistant_id)
         .cloned();
 
-    let key = session_key(&session_id, &assistant_id);
+    let scope = req.scope.to_scope(&session_id, &assistant_id);
+    let key = session_key(&session_id, &assistant_id, Some(&scope));
     let vector = get_or_create_vector_for_assistant(&state, &assistant_id).await;
     let context = {
         let mut sessions = state.sessions.write().await;
@@ -2034,6 +2150,7 @@ async fn api_chat_stream(
                 &state.workspace,
                 &state.config,
                 vector.clone(),
+                Some(&scope),
             )
             .unwrap_or_else(|| {
                 create_context_with_long_term_for_assistant(
@@ -2050,16 +2167,12 @@ async fn api_chat_stream(
     let (event_tx, event_rx) = mpsc::unbounded_channel::<ReactEvent>();
     let (context_tx, context_rx) = tokio::sync::oneshot::channel();
 
-    let allowed_for_spawn = state
-        .assistant_skills
-        .read()
-        .await
-        .get(&assistant_id)
-        .cloned();
+    let allowed_for_spawn = resolve_allowed_tools_for_scope(&state, &assistant_id, &scope).await;
     let components = state.components.read().await.clone();
     let session_id_clone = session_id.clone();
     let assistant_id_clone = assistant_id.clone();
     let session_key_clone = key.clone();
+    let scope_clone = scope.clone();
     let state_spawn = Arc::clone(&state);
     let model_configs = state.model_configs.clone();
     tokio::spawn(async move {
@@ -2077,7 +2190,7 @@ async fn api_chat_stream(
             None
         };
         let planner_ref = planner_override.as_deref();
-        let allowed = allowed_for_spawn.as_deref();
+        let allowed = Some(allowed_for_spawn.as_slice());
         let _ = process_message_stream(
             components.as_ref(),
             &mut ctx,
@@ -2096,6 +2209,7 @@ async fn api_chat_stream(
             &session_id_clone,
             &assistant_id_clone,
             &ctx,
+            Some(&scope_clone),
         );
         let mut sessions = state_spawn.sessions.write().await;
         sessions.insert(session_key_clone.clone(), ctx);

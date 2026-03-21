@@ -8,8 +8,9 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use super::message::{GatewayMessage, MessageType, SessionStatus};
+use super::session::SessionScope;
 use super::session_store::SessionStore;
-use crate::agent::create_agent_components;
+use crate::agent::{create_agent_components, create_context_with_long_term_for_assistant};
 use crate::config::AppConfig;
 use crate::core::{AgentComponents, AgentError};
 use crate::react::{react_loop, ReactEvent};
@@ -89,7 +90,9 @@ impl AgentRuntime {
     ) -> Result<String, AgentError> {
         let request_id = uuid::Uuid::new_v4().to_string();
 
-        self.session_store.set_status(session_id, SessionStatus::Processing).await;
+        self.session_store
+            .set_status(session_id, SessionStatus::Processing)
+            .await;
 
         response_tx
             .send(GatewayMessage::new(
@@ -171,7 +174,9 @@ impl AgentRuntime {
             .run_react_loop(session_id, user_input, event_tx, assistant_id, model)
             .await;
 
-        self.session_store.set_status(session_id, SessionStatus::Idle).await;
+        self.session_store
+            .set_status(session_id, SessionStatus::Idle)
+            .await;
 
         match &result {
             Ok(response) => {
@@ -207,7 +212,7 @@ impl AgentRuntime {
         session_id: &str,
         user_input: &str,
         event_tx: mpsc::UnboundedSender<ReactEvent>,
-        _assistant_id: Option<&str>,
+        assistant_id: Option<&str>,
         _model: Option<&str>,
     ) -> Result<String, AgentError> {
         let cancel_token = self
@@ -215,12 +220,27 @@ impl AgentRuntime {
             .new_cancel_token(session_id)
             .await
             .unwrap_or_else(tokio_util::sync::CancellationToken::new);
+        let scope = self
+            .session_store
+            .get_scope(session_id)
+            .await
+            .unwrap_or_default();
+        let allowed_tools = resolve_allowed_tools_for_scope(&self.components, &scope);
 
         let mut context = self
             .session_store
             .get_context(session_id)
             .await
-            .unwrap_or_else(|| crate::react::ContextManager::new(20));
+            .unwrap_or_else(|| {
+                let scoped_workspace = scoped_runtime_workspace(&self.config.workspace, &scope);
+                create_context_with_long_term_for_assistant(
+                    &self.config.app_config,
+                    self.config.app_config.app.max_context_turns,
+                    Some(&scoped_workspace),
+                    None,
+                    assistant_id,
+                )
+            });
 
         let system_prompt = if self.config.enable_skills {
             let selector = SkillSelector::new(
@@ -232,7 +252,10 @@ impl AgentRuntime {
                 None
             } else {
                 let skills_prompt = SkillSelector::build_skills_prompt(&skills);
-                Some(format!("{}\n\n{}", self.config.system_prompt, skills_prompt))
+                Some(format!(
+                    "{}\n\n{}",
+                    self.config.system_prompt, skills_prompt
+                ))
             }
         } else {
             None
@@ -250,7 +273,7 @@ impl AgentRuntime {
             self.components.critic.as_ref(),
             Some(&self.components.task_scheduler),
             system_prompt.as_deref(),
-            None,
+            Some(allowed_tools.as_slice()),
         )
         .await;
 
@@ -258,7 +281,9 @@ impl AgentRuntime {
 
         if let Ok(ref react_result) = result {
             for msg in &react_result.messages {
-                self.session_store.add_message(session_id, msg.clone()).await;
+                self.session_store
+                    .add_message(session_id, msg.clone())
+                    .await;
             }
         }
 
@@ -271,7 +296,82 @@ impl AgentRuntime {
     }
 
     /// 获取会话历史
-    pub async fn get_history(&self, session_id: &str, limit: Option<usize>) -> Vec<(String, String)> {
+    pub async fn get_history(
+        &self,
+        session_id: &str,
+        limit: Option<usize>,
+    ) -> Vec<(String, String)> {
         self.session_store.get_history(session_id, limit).await
     }
+}
+
+fn scoped_runtime_workspace(base_workspace: &std::path::Path, scope: &SessionScope) -> PathBuf {
+    let mut path = base_workspace.join(".bee").join("runtime_scopes");
+    path.push(sanitize_scope_segment(
+        scope.tenant_id.as_deref().unwrap_or("tenant-default"),
+    ));
+    path.push(sanitize_scope_segment(
+        scope.organization_id.as_deref().unwrap_or("org-default"),
+    ));
+    if let Some(team_id) = scope.team_id.as_deref() {
+        path.push("teams");
+        path.push(sanitize_scope_segment(team_id));
+    }
+    if let Some(user_id) = scope.user_id.as_deref() {
+        path.push("users");
+        path.push(sanitize_scope_segment(user_id));
+    }
+    if let Some(agent_instance_id) = scope.agent_instance_id.as_deref() {
+        path.push("agents");
+        path.push(sanitize_scope_segment(agent_instance_id));
+    }
+    let _ = std::fs::create_dir_all(&path);
+    path
+}
+
+fn sanitize_scope_segment(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "default".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn resolve_allowed_tools_for_scope(
+    components: &AgentComponents,
+    scope: &SessionScope,
+) -> Vec<String> {
+    let tools = components.executor.tool_names();
+    let has_team_scope = scope
+        .team_id
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
+    if has_team_scope {
+        return tools;
+    }
+
+    let high_risk = [
+        "shell",
+        "code_edit",
+        "code_write",
+        "git_commit",
+        "create",
+        "create_group",
+        "send",
+        "browser",
+    ];
+    tools
+        .into_iter()
+        .filter(|tool| !high_risk.contains(&tool.as_str()))
+        .collect()
 }

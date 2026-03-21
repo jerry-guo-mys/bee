@@ -12,7 +12,7 @@
 | Phase 0 | 架构收口与入口拆分   | 已完成 | 100% | 入口边界已收口，完成配置/仓储/应用服务初步拆分 |
 | Phase 1 | 主数据与仓储层落地   | 已完成 | 100% | 已落主数据、repository、sqlite schema，迁移与 bootstrap 覆盖 legacy 文件数据 |
 | Phase 2 | 公司与团队初始化产品化 | 已完成 | 100% | 已落组织初始化模板、最小持久化创建服务、Web API 与最小 UI 入口 |
-| Phase 3 | 运行时多租户化     | 未开始 | 0%  | 会话、记忆、上下文隔离          |
+| Phase 3 | 运行时多租户化     | 已完成 | 100% | 会话、上下文、记忆根目录与主执行链路工具边界都已具备 scope 语义 |
 | Phase 4 | 配置中心与模板中心   | 未开始 | 0%  | 替代静态 assistants 配置   |
 | Phase 5 | 权限、安全、审计    | 未开始 | 0%  | SaaS 基础设施补齐          |
 | Phase 6 | 任务与工作流产品化   | 未开始 | 0%  | 从群聊原语升级为产品流程         |
@@ -136,7 +136,12 @@
 
 | 日期  | 子任务 | 状态  | 说明  |
 | --- | --- | --- | --- |
-| -   | -   | 未开始 | -   |
+| 2026-03-21 | P3.foundation | 完成  | `gateway/session`、`session_store`、`persistent_session` 已补 `tenant/org/team/agent_instance/user` scope 基础字段，并修复 `saas/migration.rs` 的 feature gate 耦合 |
+| 2026-03-21 | P3.1-P3.4 | 完成  | `ClientInfo.metadata` 已可注入 `SessionScope`，`gateway/runtime` 在创建新上下文时会按 tenant/org/team/user/agent_instance 派生独立 memory workspace |
+| 2026-03-21 | P3.web-scope | 完成  | `bee-web` 的 `chat/history/compact/clear/stream` 已支持显式 scope，请求会映射到 scoped session key、snapshot path 与 memory root |
+| 2026-03-21 | P3.frontend-scope | 完成  | `static/index.html` 已持有当前组织 scope，并在会话加载、发送消息、删除/清理会话时显式传递 `tenant/org/team/agent_instance/user` 维度 |
+| 2026-03-21 | P3.scope-switcher | 完成  | 设置页已增加“当前组织上下文”可视化与编辑入口，会话列表会按当前 tenant/org/team scope 过滤显示 |
+| 2026-03-21 | P3.tool-boundary | 完成  | `bee-web` 主对话、收件箱、任务协调与 `gateway/runtime` 都已按 scope 过滤高风险工具；没有 `team_id` 的会话默认禁用 `shell/code_edit/code_write/git_commit/create/send` 等高风险能力 |
 
 
 ## Phase 4：配置中心与模板中心

@@ -5,10 +5,11 @@ use bytes::Bytes;
 use futures_util::stream;
 use tokio::sync::mpsc;
 
-use super::session_store::save_session_to_disk;
+use super::session_store::{save_session_to_disk, WebSessionScope};
 use super::task_service::{load_tasks, save_tasks, status_label, TaskStatus};
 use super::{
-    emit_event, get_or_create_vector_for_assistant, AppState, WorkspaceEvent, DEFAULT_MAX_TURNS,
+    emit_event, get_or_create_vector_for_assistant, resolve_allowed_tools_for_scope, AppState,
+    WorkspaceEvent, DEFAULT_MAX_TURNS,
 };
 use bee::agent::{create_context_with_long_term_for_assistant, process_message_stream};
 use bee::react::ReactEvent;
@@ -51,6 +52,16 @@ pub async fn start_task(
         task.title, description
     );
     let session_key = format!("task_coord_{}", task_id);
+    let scope = WebSessionScope {
+        tenant_id: Some("tenant-default".to_string()),
+        organization_id: Some("org-default".to_string()),
+        team_id: task
+            .group_id
+            .clone()
+            .or_else(|| Some(format!("task_{}", task_id))),
+        agent_instance_id: Some(coordinator_id.clone()),
+        user_id: Some(session_key.clone()),
+    };
     let vector = get_or_create_vector_for_assistant(&state, &coordinator_id).await;
     let mut context = {
         let mut sessions = state.sessions.write().await;
@@ -64,17 +75,13 @@ pub async fn start_task(
             )
         })
     };
-    let allowed = state
-        .assistant_skills
-        .read()
-        .await
-        .get(&coordinator_id)
-        .cloned();
+    let allowed = resolve_allowed_tools_for_scope(&state, &coordinator_id, &scope).await;
     let components = state.components.read().await.clone();
     let (event_tx, event_rx) = mpsc::unbounded_channel::<ReactEvent>();
     let state_spawn = Arc::clone(&state);
     let task_id_clone = task_id.clone();
     let coordinator_id_clone = coordinator_id.clone();
+    let scope_clone = scope.clone();
     tokio::spawn(async move {
         let _ = process_message_stream(
             components.as_ref(),
@@ -83,7 +90,7 @@ pub async fn start_task(
             event_tx,
             Some(system_prompt.as_str()),
             None,
-            allowed.as_deref(),
+            Some(allowed.as_slice()),
             Some(&coordinator_id_clone),
         )
         .await;
@@ -93,6 +100,7 @@ pub async fn start_task(
             &format!("task_coord_{}", task_id_clone),
             &coordinator_id_clone,
             &context,
+            Some(&scope_clone),
         );
         let mut tasks = load_tasks(&state_spawn.workspace);
         let updated = tasks
