@@ -54,9 +54,12 @@ use bee::memory::{
 };
 use bee::react::{compact_context, ContextManager, Planner, ReactEvent};
 use bee::saas::{
-    bootstrap_workspace_saas, build_bootstrap_plan, persist_bootstrap_plan, IndustryTemplate,
-    instantiate_team_templates, list_team_templates, OrganizationBootstrapRequest,
-    SaasSqliteStore, SaasTemplateRepository, TeamTemplateInstantiationRequest,
+    append_audit_log, audit_detail_json, bootstrap_workspace_saas, build_bootstrap_plan,
+    default_low_risk_tools, ensure_access, instantiate_team_templates, list_audit_logs,
+    list_team_templates, list_tool_policies, persist_bootstrap_plan,
+    resolve_effective_tool_allowlist, upsert_tool_policy, AccessContext, AccessRequirement,
+    AuditActor, AuditLogInput, IndustryTemplate, OrganizationBootstrapRequest, SaasSqliteStore,
+    SaasTemplateRepository, TeamTemplateInstantiationRequest, ToolPolicyInput, ToolPolicyScope,
 };
 use bee::skills::{Skill, SkillLoader};
 use bee::tools::{tool_call_schema_json, CreateTool, DynamicAgent};
@@ -224,6 +227,8 @@ struct BootstrapOrganizationRequest {
     organization_id: Option<String>,
     #[serde(default)]
     workspace_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
 }
 
 #[derive(Debug, Serialize)]
@@ -242,6 +247,8 @@ struct BootstrapOrganizationResponse {
 struct AgentTemplatesQuery {
     #[serde(default)]
     tenant_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
 }
 
 #[derive(Debug, Serialize)]
@@ -264,6 +271,8 @@ struct InstantiateTeamTemplatesRequest {
     tenant_id: Option<String>,
     #[serde(default)]
     template_ids: Vec<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
 }
 
 #[derive(Debug, Serialize)]
@@ -274,6 +283,48 @@ struct InstantiateTeamTemplatesResponse {
     created_count: usize,
     existing_count: usize,
     instance_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolPoliciesQuery {
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateToolPolicyRequest {
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+    #[serde(default)]
+    team_id: Option<String>,
+    #[serde(default)]
+    allowed_tool_ids: Vec<String>,
+    #[serde(default)]
+    denied_tool_ids: Vec<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuditLogsQuery {
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+    #[serde(default = "default_audit_limit")]
+    limit: usize,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+fn default_audit_limit() -> usize {
+    50
 }
 
 #[derive(Debug, Deserialize)]
@@ -358,6 +409,52 @@ impl WebScopeParams {
                 .user_id
                 .clone()
                 .or_else(|| Some(session_id.to_string())),
+        }
+    }
+
+    fn management_tenant_id(&self) -> String {
+        self.tenant_id
+            .clone()
+            .unwrap_or_else(|| "tenant-default".to_string())
+    }
+
+    fn management_organization_id(&self) -> Option<String> {
+        self.organization_id
+            .clone()
+            .or_else(|| Some("org-default".to_string()))
+    }
+
+    fn management_user_id(&self) -> String {
+        self.user_id
+            .clone()
+            .unwrap_or_else(|| "user-default".to_string())
+    }
+
+    fn to_access_context(
+        &self,
+        tenant_id: String,
+        organization_id: Option<String>,
+        team_id: Option<String>,
+    ) -> AccessContext {
+        AccessContext {
+            tenant_id,
+            organization_id,
+            team_id,
+            user_id: self.management_user_id(),
+        }
+    }
+
+    fn to_audit_actor(
+        &self,
+        tenant_id: String,
+        organization_id: Option<String>,
+        team_id: Option<String>,
+    ) -> AuditActor {
+        AuditActor {
+            tenant_id,
+            organization_id,
+            team_id,
+            user_id: Some(self.management_user_id()),
         }
     }
 }
@@ -549,6 +646,120 @@ fn saas_db_path(workspace: &std::path::Path) -> PathBuf {
     workspace.join(".bee").join("saas.db")
 }
 
+fn write_audit_log(
+    workspace: &std::path::Path,
+    actor: AuditActor,
+    action: impl Into<String>,
+    resource_type: impl Into<String>,
+    resource_id: impl Into<String>,
+    detail: serde_json::Value,
+) -> Result<(), String> {
+    let store = SaasSqliteStore::new(saas_db_path(workspace)).map_err(|err| err.to_string())?;
+    append_audit_log(
+        &store,
+        AuditLogInput {
+            actor,
+            action: action.into(),
+            resource_type: resource_type.into(),
+            resource_id: resource_id.into(),
+            detail_json: Some(audit_detail_json(detail).map_err(|err| err.to_string())?),
+        },
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+fn require_management_access(
+    workspace: &std::path::Path,
+    ctx: &AccessContext,
+    requirement: AccessRequirement,
+) -> Result<(), (StatusCode, String)> {
+    let store = SaasSqliteStore::new(saas_db_path(workspace))
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    ensure_access(&store, ctx, requirement)
+        .map(|_| ())
+        .map_err(|err| (StatusCode::FORBIDDEN, err))
+}
+
+fn assistant_knowledge_bases(state: &AppState, assistant_id: &str) -> Vec<String> {
+    state
+        .assistant_entries
+        .get(assistant_id)
+        .and_then(|entry| entry.knowledge_bases.clone())
+        .unwrap_or_default()
+}
+
+fn audit_knowledge_access(
+    state: &AppState,
+    assistant_id: &str,
+    scope: &WebSessionScope,
+    session_id: &str,
+) {
+    let knowledge_base_ids = assistant_knowledge_bases(state, assistant_id);
+    if knowledge_base_ids.is_empty() {
+        return;
+    }
+    let tenant_id = scope
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| "tenant-default".to_string());
+    let organization_id = scope
+        .organization_id
+        .clone()
+        .or_else(|| Some("org-default".to_string()));
+    let _ = write_audit_log(
+        &state.workspace,
+        AuditActor {
+            tenant_id: tenant_id.clone(),
+            organization_id: organization_id.clone(),
+            team_id: scope.team_id.clone(),
+            user_id: scope.user_id.clone().or_else(|| Some(session_id.to_string())),
+        },
+        "knowledge_base.access",
+        "assistant_session",
+        session_id.to_string(),
+        serde_json::json!({
+            "assistant_id": assistant_id,
+            "knowledge_base_ids": knowledge_base_ids,
+            "agent_instance_id": scope.agent_instance_id,
+        }),
+    );
+}
+
+fn audit_tool_failure(
+    state: &AppState,
+    scope: &WebSessionScope,
+    session_id: &str,
+    tool: &str,
+    reason: &str,
+) {
+    let tenant_id = scope
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| "tenant-default".to_string());
+    let organization_id = scope
+        .organization_id
+        .clone()
+        .or_else(|| Some("org-default".to_string()));
+    let _ = write_audit_log(
+        &state.workspace,
+        AuditActor {
+            tenant_id,
+            organization_id,
+            team_id: scope.team_id.clone(),
+            user_id: scope.user_id.clone().or_else(|| Some(session_id.to_string())),
+        },
+        "tool.failure",
+        "tool_execution",
+        tool.to_string(),
+        serde_json::json!({
+            "session_id": session_id,
+            "reason": reason,
+            "agent_instance_id": scope.agent_instance_id,
+        }),
+    );
+}
+
 fn parse_industry_template(raw: Option<&str>) -> Result<IndustryTemplate, String> {
     let value = raw.unwrap_or("general").trim().to_ascii_lowercase();
     match value.as_str() {
@@ -596,28 +807,38 @@ async fn resolve_allowed_tools_for_scope(
                 .collect()
         });
 
-    let has_team_scope = scope
+    let tenant_id = scope
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| "tenant-default".to_string());
+    let organization_id = scope
+        .organization_id
+        .clone()
+        .or_else(|| Some("org-default".to_string()));
+    let default_tools = if scope
         .team_id
         .as_deref()
-        .is_some_and(|value| !value.trim().is_empty());
-    if has_team_scope {
-        return base_tools;
-    }
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        base_tools
+    } else {
+        default_low_risk_tools(&base_tools)
+    };
 
-    let high_risk = [
-        "shell",
-        "code_edit",
-        "code_write",
-        "git_commit",
-        "create",
-        "create_group",
-        "send",
-        "browser",
-    ];
-    base_tools
-        .into_iter()
-        .filter(|tool| !high_risk.contains(&tool.as_str()))
-        .collect()
+    if let Ok(store) = SaasSqliteStore::new(saas_db_path(&state.workspace)) {
+        if let Ok(resolved) = resolve_effective_tool_allowlist(
+            &store,
+            &ToolPolicyScope {
+                tenant_id,
+                organization_id,
+                team_id: scope.team_id.clone(),
+            },
+            &default_tools,
+        ) {
+            return resolved;
+        }
+    }
+    default_tools
 }
 
 #[tokio::main]
@@ -789,6 +1010,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/tasks/:id/start", post(api_tasks_start))
         .route("/api/inbox/process", post(api_inbox_process))
         .route("/api/tools", get(api_tools_list))
+        .route(
+            "/api/tool-policies",
+            get(api_tool_policies_list).put(api_tool_policies_put),
+        )
+        .route("/api/audit-logs", get(api_audit_logs_list))
         .route(
             "/api/assistant/:id/skills",
             axum::routing::put(api_assistant_skills_put),
@@ -1029,6 +1255,7 @@ async fn api_compact(
     };
     let assistant_id = req.assistant_id.as_deref().unwrap_or("default");
     let scope = req.scope.to_scope(&session_id, assistant_id);
+    audit_knowledge_access(&state, assistant_id, &scope, &session_id);
     let key = session_key(&session_id, assistant_id, Some(&scope));
     let vector = get_or_create_vector_for_assistant(&state, assistant_id).await;
     let mut context = state
@@ -1342,16 +1569,27 @@ async fn api_organizations_bootstrap(
         ));
     }
 
+    let tenant_id = req
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| format!("tenant_{}", uuid::Uuid::new_v4()));
+    let organization_id = req
+        .organization_id
+        .clone()
+        .unwrap_or_else(|| format!("org_{}", uuid::Uuid::new_v4()));
+    require_management_access(
+        &state.workspace,
+        &req.scope.to_access_context(tenant_id.clone(), None, None),
+        AccessRequirement::PlatformAdmin,
+    )?;
+
     let industry = parse_industry_template(req.industry.as_deref())
         .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
     let bootstrap_req = OrganizationBootstrapRequest {
-        tenant_id: req
-            .tenant_id
-            .unwrap_or_else(|| format!("tenant_{}", uuid::Uuid::new_v4())),
-        organization_id: req
-            .organization_id
-            .unwrap_or_else(|| format!("org_{}", uuid::Uuid::new_v4())),
+        tenant_id: tenant_id.clone(),
+        organization_id: organization_id.clone(),
         organization_name,
+        admin_user_id: req.scope.management_user_id(),
         industry,
         workspace_id: req
             .workspace_id
@@ -1363,6 +1601,25 @@ async fn api_organizations_bootstrap(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     let result = persist_bootstrap_plan(&store, &plan)
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let workspace_id_for_audit = result.workspace_id.clone();
+    let _ = write_audit_log(
+        &state.workspace,
+        req.scope.to_audit_actor(
+            result.tenant_id.clone(),
+            Some(result.organization_id.clone()),
+            None,
+        ),
+        "organization.bootstrap",
+        "organization",
+        result.organization_id.clone(),
+        serde_json::json!({
+            "workspace_id": workspace_id_for_audit,
+            "industry": industry_template_code(industry),
+            "team_count": result.team_count,
+            "agent_template_count": result.agent_template_count,
+            "agent_instance_count": result.agent_instance_count
+        }),
+    );
 
     Ok((
         StatusCode::CREATED,
@@ -1387,6 +1644,13 @@ async fn api_agent_templates_list(
     let tenant_id = query
         .tenant_id
         .unwrap_or_else(|| "tenant-default".to_string());
+    require_management_access(
+        &state.workspace,
+        &query
+            .scope
+            .to_access_context(tenant_id.clone(), query.scope.management_organization_id(), None),
+        AccessRequirement::OrgAdmin,
+    )?;
     let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     let templates = list_team_templates(&store, &tenant_id)
@@ -1429,18 +1693,45 @@ async fn api_team_agent_instances_bootstrap(
     let tenant_id = req
         .tenant_id
         .unwrap_or_else(|| "tenant-default".to_string());
+    require_management_access(
+        &state.workspace,
+        &req.scope.to_access_context(
+            tenant_id.clone(),
+            Some(organization_id.clone()),
+            Some(team_id.clone()),
+        ),
+        AccessRequirement::TeamAdmin,
+    )?;
     let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let template_ids = req.template_ids.clone();
     let result = instantiate_team_templates(
         &store,
         &TeamTemplateInstantiationRequest {
             tenant_id: tenant_id.clone(),
             organization_id: organization_id.clone(),
             team_id: team_id.clone(),
-            template_ids: req.template_ids,
+            template_ids: template_ids.clone(),
         },
     )
     .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
+    let _ = write_audit_log(
+        &state.workspace,
+        req.scope.to_audit_actor(
+            tenant_id.clone(),
+            Some(organization_id.clone()),
+            Some(team_id.clone()),
+        ),
+        "team.agent_instances.bootstrap",
+        "team",
+        team_id.clone(),
+        serde_json::json!({
+            "template_ids": template_ids,
+            "created_count": result.created_count,
+            "existing_count": result.existing_count,
+            "instance_ids": result.instances.iter().map(|instance| instance.id.clone()).collect::<Vec<_>>()
+        }),
+    );
 
     Ok((
         StatusCode::CREATED,
@@ -1607,14 +1898,156 @@ async fn api_tools_list(
     Ok(Json(list))
 }
 
+/// GET /api/tool-policies：查询租户/组织/团队工具策略
+async fn api_tool_policies_list(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ToolPoliciesQuery>,
+) -> Result<Json<Vec<bee::saas::ToolAccessPolicy>>, (StatusCode, String)> {
+    let tenant_id = query
+        .tenant_id
+        .unwrap_or_else(|| query.scope.management_tenant_id());
+    let organization_id = query
+        .organization_id
+        .clone()
+        .or_else(|| query.scope.management_organization_id());
+    require_management_access(
+        &state.workspace,
+        &query
+            .scope
+            .to_access_context(tenant_id.clone(), organization_id.clone(), None),
+        AccessRequirement::OrgAdmin,
+    )?;
+
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let policies = list_tool_policies(&store, &tenant_id, organization_id.as_deref())
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Json(policies))
+}
+
+/// PUT /api/tool-policies：更新租户/组织/团队工具策略
+async fn api_tool_policies_put(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<UpdateToolPolicyRequest>,
+) -> Result<Json<bee::saas::ToolAccessPolicy>, (StatusCode, String)> {
+    let tenant_id = req
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| req.scope.management_tenant_id());
+    let organization_id = req
+        .organization_id
+        .clone()
+        .or_else(|| req.scope.management_organization_id());
+    let team_id = req.team_id.clone();
+    let requirement = if team_id.is_some() {
+        AccessRequirement::TeamAdmin
+    } else {
+        AccessRequirement::OrgAdmin
+    };
+    require_management_access(
+        &state.workspace,
+        &req.scope
+            .to_access_context(tenant_id.clone(), organization_id.clone(), team_id.clone()),
+        requirement,
+    )?;
+
+    let all_tools: std::collections::HashSet<_> = state
+        .tool_descriptions
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
+    let allowed_tool_ids: Vec<String> = req
+        .allowed_tool_ids
+        .into_iter()
+        .filter(|tool| all_tools.contains(tool.as_str()))
+        .collect();
+    let denied_tool_ids: Vec<String> = req
+        .denied_tool_ids
+        .into_iter()
+        .filter(|tool| all_tools.contains(tool.as_str()))
+        .collect();
+
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let policy = upsert_tool_policy(
+        &store,
+        ToolPolicyInput {
+            scope: ToolPolicyScope {
+                tenant_id: tenant_id.clone(),
+                organization_id: organization_id.clone(),
+                team_id: team_id.clone(),
+            },
+            allowed_tool_ids,
+            denied_tool_ids,
+        },
+    )
+    .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let _ = write_audit_log(
+        &state.workspace,
+        req.scope
+            .to_audit_actor(tenant_id, organization_id.clone(), team_id.clone()),
+        "tool.policy.update",
+        if team_id.is_some() {
+            "team_tool_policy"
+        } else if organization_id.is_some() {
+            "organization_tool_policy"
+        } else {
+            "tenant_tool_policy"
+        },
+        policy.id.clone(),
+        serde_json::json!({
+            "organization_id": organization_id,
+            "team_id": team_id,
+            "allowed_tool_ids": policy.allowed_tool_ids,
+            "denied_tool_ids": policy.denied_tool_ids
+        }),
+    );
+    Ok(Json(policy))
+}
+
+/// GET /api/audit-logs：查询租户/组织审计日志
+async fn api_audit_logs_list(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AuditLogsQuery>,
+) -> Result<Json<Vec<bee::saas::AuditLogRecord>>, (StatusCode, String)> {
+    let tenant_id = query
+        .tenant_id
+        .unwrap_or_else(|| "tenant-default".to_string());
+    require_management_access(
+        &state.workspace,
+        &query.scope.to_access_context(
+            tenant_id.clone(),
+            query.organization_id
+                .clone()
+                .or_else(|| query.scope.management_organization_id()),
+            None,
+        ),
+        AccessRequirement::OrgAdmin,
+    )?;
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let logs = list_audit_logs(
+        &store,
+        &tenant_id,
+        query.organization_id.as_deref(),
+        query.limit,
+    )
+    .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Json(logs))
+}
+
 #[derive(Debug, Deserialize)]
 struct UpdateSkillsRequest {
     skills: Vec<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
 }
 
 #[derive(Debug, Deserialize)]
 struct UpdateKnowledgeBasesRequest {
     knowledge_base_ids: Vec<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
 }
 
 /// PUT /api/assistant/:id/skills：更新该智能体的技能配置，持久化到 config/assistant_skills.json
@@ -1634,6 +2067,15 @@ async fn api_assistant_skills_put(
         .iter()
         .map(|(n, _)| n.as_str())
         .collect();
+    require_management_access(
+        &state.workspace,
+        &req.scope.to_access_context(
+            req.scope.management_tenant_id(),
+            req.scope.management_organization_id(),
+            None,
+        ),
+        AccessRequirement::OrgAdmin,
+    )?;
     let skills: Vec<String> = req
         .skills
         .into_iter()
@@ -1714,6 +2156,21 @@ async fn api_assistant_skills_put(
             format!("写入模板失败: {}", e),
         )
     })?;
+    let _ = write_audit_log(
+        &state.workspace,
+        req.scope.to_audit_actor(
+            req.scope.management_tenant_id(),
+            req.scope.management_organization_id(),
+            None,
+        ),
+        "assistant.skills.update",
+        "agent_template",
+        template_id,
+        serde_json::json!({
+            "assistant_id": id,
+            "skills": template.tool_ids
+        }),
+    );
     Ok(StatusCode::OK)
 }
 
@@ -1729,6 +2186,16 @@ async fn api_assistant_knowledge_bases_put(
             "无法配置自动分派助手的知识库".to_string(),
         ));
     }
+
+    require_management_access(
+        &state.workspace,
+        &req.scope.to_access_context(
+            req.scope.management_tenant_id(),
+            req.scope.management_organization_id(),
+            None,
+        ),
+        AccessRequirement::OrgAdmin,
+    )?;
 
     let knowledge_base_ids: Vec<String> = req
         .knowledge_base_ids
@@ -1792,6 +2259,21 @@ async fn api_assistant_knowledge_bases_put(
             format!("写入模板失败: {}", e),
         )
     })?;
+    let _ = write_audit_log(
+        &state.workspace,
+        req.scope.to_audit_actor(
+            req.scope.management_tenant_id(),
+            req.scope.management_organization_id(),
+            None,
+        ),
+        "assistant.knowledge_bases.update",
+        "agent_template",
+        template_id,
+        serde_json::json!({
+            "assistant_id": id,
+            "knowledge_base_ids": template.knowledge_base_ids
+        }),
+    );
     Ok(StatusCode::OK)
 }
 
@@ -2229,6 +2711,14 @@ async fn api_chat_stream_group(
         ));
 
         for assistant_id in &member_ids {
+            let group_scope = WebSessionScope {
+                tenant_id: Some("tenant-default".to_string()),
+                organization_id: Some("org-default".to_string()),
+                team_id: None,
+                agent_instance_id: Some(assistant_id.clone()),
+                user_id: Some(group_id_spawn.clone()),
+            };
+            audit_knowledge_access(&state_spawn, assistant_id, &group_scope, &group_id_spawn);
             let _ = line_tx.send(format!(
                 "{}\n",
                 serde_json::to_string(&serde_json::json!({
@@ -2263,21 +2753,42 @@ async fn api_chat_stream_group(
             let (event_tx, mut event_rx) = mpsc::unbounded_channel::<ReactEvent>();
             let line_tx_fwd = line_tx.clone();
             let event_bus_fwd = state_spawn.event_bus.clone();
+            let state_fwd = Arc::clone(&state_spawn);
+            let group_id_fwd = group_id_spawn.clone();
+            let assistant_id_fwd = assistant_id.clone();
             let forward_handle = tokio::spawn(async move {
                 while let Some(ev) = event_rx.recv().await {
-                    if let ReactEvent::Observation { tool, preview } = &ev {
-                        if tool == "create" {
-                            if let Some(agent) = parse_create_observation(preview) {
-                                emit_event(
-                                    &event_bus_fwd,
-                                    WorkspaceEvent::AgentCreated {
-                                        id: agent.id,
-                                        role: agent.role,
-                                        parent_id: agent.parent_id,
-                                    },
-                                );
+                    match &ev {
+                        ReactEvent::Observation { tool, preview } => {
+                            if tool == "create" {
+                                if let Some(agent) = parse_create_observation(preview) {
+                                    emit_event(
+                                        &event_bus_fwd,
+                                        WorkspaceEvent::AgentCreated {
+                                            id: agent.id,
+                                            role: agent.role,
+                                            parent_id: agent.parent_id,
+                                        },
+                                    );
+                                }
                             }
                         }
+                        ReactEvent::ToolFailure { tool, reason } => {
+                            audit_tool_failure(
+                                &state_fwd,
+                                &WebSessionScope {
+                                    tenant_id: Some("tenant-default".to_string()),
+                                    organization_id: Some("org-default".to_string()),
+                                    team_id: None,
+                                    agent_instance_id: Some(assistant_id_fwd.clone()),
+                                    user_id: Some(group_id_fwd.clone()),
+                                },
+                                &group_id_fwd,
+                                tool,
+                                reason,
+                            );
+                        }
+                        _ => {}
                     }
                     let _ = line_tx_fwd.send(format!("{}\n", serde_json::to_string(&ev).unwrap()));
                 }
@@ -2398,6 +2909,7 @@ async fn api_chat_stream(
         .cloned();
 
     let scope = req.scope.to_scope(&session_id, &assistant_id);
+    audit_knowledge_access(&state, &assistant_id, &scope, &session_id);
     let key = session_key(&session_id, &assistant_id, Some(&scope));
     let vector = get_or_create_vector_for_assistant(&state, &assistant_id).await;
     let context = {
@@ -2432,7 +2944,8 @@ async fn api_chat_stream(
     let session_id_clone = session_id.clone();
     let assistant_id_clone = assistant_id.clone();
     let session_key_clone = key.clone();
-    let scope_clone = scope.clone();
+    let scope_for_spawn = scope.clone();
+    let scope_for_stream = scope.clone();
     let state_spawn = Arc::clone(&state);
     let model_configs = state.model_configs.clone();
     tokio::spawn(async move {
@@ -2469,7 +2982,7 @@ async fn api_chat_stream(
             &session_id_clone,
             &assistant_id_clone,
             &ctx,
-            Some(&scope_clone),
+            Some(&scope_for_spawn),
         );
         let mut sessions = state_spawn.sessions.write().await;
         sessions.insert(session_key_clone.clone(), ctx);
@@ -2506,7 +3019,9 @@ async fn api_chat_stream(
             event_rx,
             Some(first_line),
         ),
-        move |(state_reinsert, session_id_reinsert, context_rx, mut event_rx, first_line_opt)| async move {
+        move |(state_reinsert, session_id_reinsert, context_rx, mut event_rx, first_line_opt)| {
+        let scope_for_stream = scope_for_stream.clone();
+        async move {
             if let Some(line) = first_line_opt {
                 return Ok(Some((
                     Bytes::from(line),
@@ -2525,6 +3040,13 @@ async fn api_chat_stream(
                     match &ev {
                         ReactEvent::ToolFailure { tool, reason } => {
                             learnings_record_error(&state_reinsert.workspace, tool, reason);
+                            audit_tool_failure(
+                                &state_reinsert,
+                                &scope_for_stream,
+                                &session_id_reinsert,
+                                tool,
+                                reason,
+                            );
                         }
                         ReactEvent::Recovery { action, detail } if action == "Critic" => {
                             learnings_record_learning(
@@ -2565,6 +3087,7 @@ async fn api_chat_stream(
                     Ok(None)
                 }
             }
+        }
         },
     );
 

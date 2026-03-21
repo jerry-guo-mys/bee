@@ -89,6 +89,40 @@ pub enum MembershipRole {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuditLogRecord {
+    pub id: String,
+    pub tenant_id: String,
+    #[serde(default)]
+    pub organization_id: Option<String>,
+    #[serde(default)]
+    pub team_id: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<String>,
+    pub action: String,
+    pub resource_type: String,
+    pub resource_id: String,
+    #[serde(default)]
+    pub detail_json: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolAccessPolicy {
+    pub id: String,
+    pub tenant_id: String,
+    #[serde(default)]
+    pub organization_id: Option<String>,
+    #[serde(default)]
+    pub team_id: Option<String>,
+    #[serde(default)]
+    pub allowed_tool_ids: Vec<String>,
+    #[serde(default)]
+    pub denied_tool_ids: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentTemplate {
     pub id: String,
     pub tenant_id: String,

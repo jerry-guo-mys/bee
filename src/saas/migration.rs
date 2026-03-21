@@ -119,6 +119,12 @@ impl<'a> LegacyWorkspaceImporter<'a> {
             params![now],
         )?;
         report.users_seeded += user_inserted as usize;
+        conn.execute(
+            "INSERT OR IGNORE INTO saas_memberships
+             (id, tenant_id, organization_id, user_id, team_id, role, created_at, updated_at)
+             VALUES ('legacy-user-default-membership', ?1, ?2, 'legacy-user', NULL, 'org_admin', ?3, ?3)",
+            params![tenant_id, organization_id, now],
+        )?;
 
         let template_inserted = conn.execute(
             "INSERT OR IGNORE INTO saas_agent_templates (id, tenant_id, name, description, prompt, tool_ids_json, model_id, created_at, updated_at)

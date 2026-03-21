@@ -4,7 +4,10 @@
 
 use rusqlite::params;
 
-use crate::saas::models::{AgentInstance, AgentTemplate, Organization, Team, Tenant, Workspace};
+use crate::saas::models::{
+    AgentInstance, AgentTemplate, Membership, MembershipRole, Organization, Team, Tenant,
+    UserAccount, Workspace,
+};
 use crate::saas::sqlite::SaasSqliteStore;
 
 pub struct SaasSeedRepository<'a> {
@@ -65,6 +68,42 @@ impl<'a> SaasSeedRepository<'a> {
                 team.parent_team_id,
                 team.created_at,
                 team.updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn create_user(&self, user: &UserAccount) -> anyhow::Result<()> {
+        self.store.connection().execute(
+            "INSERT OR REPLACE INTO saas_users
+             (id, external_user_id, display_name, email, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                user.id,
+                user.external_user_id,
+                user.display_name,
+                user.email,
+                user.created_at,
+                user.updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn create_membership(&self, membership: &Membership) -> anyhow::Result<()> {
+        self.store.connection().execute(
+            "INSERT OR REPLACE INTO saas_memberships
+             (id, tenant_id, organization_id, user_id, team_id, role, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                membership.id,
+                membership.tenant_id,
+                membership.organization_id,
+                membership.user_id,
+                membership.team_id,
+                serialize_membership_role(&membership.role),
+                membership.created_at,
+                membership.updated_at
             ],
         )?;
         Ok(())
@@ -148,5 +187,14 @@ fn serialize_agent_status(status: &crate::saas::models::AgentInstanceStatus) -> 
         crate::saas::models::AgentInstanceStatus::Active => "active",
         crate::saas::models::AgentInstanceStatus::Disabled => "disabled",
         crate::saas::models::AgentInstanceStatus::Archived => "archived",
+    }
+}
+
+fn serialize_membership_role(role: &MembershipRole) -> &'static str {
+    match role {
+        MembershipRole::PlatformAdmin => "platform_admin",
+        MembershipRole::OrgAdmin => "org_admin",
+        MembershipRole::TeamAdmin => "team_admin",
+        MembershipRole::Member => "member",
     }
 }

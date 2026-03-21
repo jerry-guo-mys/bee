@@ -14,6 +14,7 @@ use crate::agent::{create_agent_components, create_context_with_long_term_for_as
 use crate::config::AppConfig;
 use crate::core::{AgentComponents, AgentError};
 use crate::react::{react_loop, ReactEvent};
+use crate::saas::{default_low_risk_tools, resolve_effective_tool_allowlist, SaasSqliteStore, ToolPolicyScope};
 use crate::skills::SkillSelector;
 
 /// Runtime 配置
@@ -225,7 +226,7 @@ impl AgentRuntime {
             .get_scope(session_id)
             .await
             .unwrap_or_default();
-        let allowed_tools = resolve_allowed_tools_for_scope(&self.components, &scope);
+        let allowed_tools = resolve_allowed_tools_for_scope(&self.components, &self.config.workspace, &scope);
 
         let mut context = self
             .session_store
@@ -349,29 +350,38 @@ fn sanitize_scope_segment(value: &str) -> String {
 
 fn resolve_allowed_tools_for_scope(
     components: &AgentComponents,
+    workspace: &std::path::Path,
     scope: &SessionScope,
 ) -> Vec<String> {
     let tools = components.executor.tool_names();
-    let has_team_scope = scope
+    let default_tools = if scope
         .team_id
         .as_deref()
-        .is_some_and(|value| !value.trim().is_empty());
-    if has_team_scope {
-        return tools;
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        tools
+    } else {
+        default_low_risk_tools(&tools)
+    };
+    let db_path = workspace.join(".bee").join("saas.db");
+    if let Ok(store) = SaasSqliteStore::new(db_path) {
+        if let Ok(resolved) = resolve_effective_tool_allowlist(
+            &store,
+            &ToolPolicyScope {
+                tenant_id: scope
+                    .tenant_id
+                    .clone()
+                    .unwrap_or_else(|| "tenant-default".to_string()),
+                organization_id: scope
+                    .organization_id
+                    .clone()
+                    .or_else(|| Some("org-default".to_string())),
+                team_id: scope.team_id.clone(),
+            },
+            &default_tools,
+        ) {
+            return resolved;
+        }
     }
-
-    let high_risk = [
-        "shell",
-        "code_edit",
-        "code_write",
-        "git_commit",
-        "create",
-        "create_group",
-        "send",
-        "browser",
-    ];
-    tools
-        .into_iter()
-        .filter(|tool| !high_risk.contains(&tool.as_str()))
-        .collect()
+    default_tools
 }

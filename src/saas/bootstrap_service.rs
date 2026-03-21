@@ -3,7 +3,8 @@
 //! 当前阶段提供一键初始化编排与最小持久化落库能力。
 
 use crate::saas::models::{
-    AgentInstance, AgentInstanceStatus, AgentTemplate, Organization, Team, Tenant, Workspace,
+    AgentInstance, AgentInstanceStatus, AgentTemplate, Membership, MembershipRole, Organization,
+    Team, Tenant, UserAccount, Workspace,
 };
 use crate::saas::sqlite::SaasSqliteStore;
 use crate::saas::sqlite_seed_repository::SaasSeedRepository;
@@ -13,6 +14,7 @@ pub struct OrganizationBootstrapRequest {
     pub tenant_id: String,
     pub organization_id: String,
     pub organization_name: String,
+    pub admin_user_id: String,
     pub industry: IndustryTemplate,
     pub workspace_id: String,
 }
@@ -21,6 +23,8 @@ pub struct OrganizationBootstrapRequest {
 pub struct OrganizationBootstrapPlan {
     pub tenant: Tenant,
     pub organization: Organization,
+    pub admin_user: UserAccount,
+    pub admin_membership: Membership,
     pub workspace: Workspace,
     pub teams: Vec<Team>,
     pub agent_templates: Vec<AgentTemplate>,
@@ -86,6 +90,24 @@ pub fn build_bootstrap_plan(req: &OrganizationBootstrapRequest) -> OrganizationB
         created_at: now.clone(),
         updated_at: now.clone(),
     };
+    let admin_user = UserAccount {
+        id: req.admin_user_id.clone(),
+        external_user_id: None,
+        display_name: "Organization Admin".to_string(),
+        email: None,
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    };
+    let admin_membership = Membership {
+        id: format!("membership-{}-org-admin", req.organization_id),
+        tenant_id: req.tenant_id.clone(),
+        organization_id: req.organization_id.clone(),
+        user_id: req.admin_user_id.clone(),
+        team_id: None,
+        role: MembershipRole::OrgAdmin,
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    };
     let workspace = Workspace {
         id: req.workspace_id.clone(),
         tenant_id: req.tenant_id.clone(),
@@ -148,6 +170,8 @@ pub fn build_bootstrap_plan(req: &OrganizationBootstrapRequest) -> OrganizationB
     OrganizationBootstrapPlan {
         tenant,
         organization,
+        admin_user,
+        admin_membership,
         workspace,
         teams,
         agent_templates,
@@ -162,6 +186,8 @@ pub fn persist_bootstrap_plan(
     let repo = SaasSeedRepository::new(store);
     repo.create_tenant(&plan.tenant)?;
     repo.create_organization(&plan.organization)?;
+    repo.create_user(&plan.admin_user)?;
+    repo.create_membership(&plan.admin_membership)?;
     repo.create_workspace(&plan.workspace)?;
     for team in &plan.teams {
         repo.create_team(team)?;
@@ -382,11 +408,13 @@ mod tests {
             tenant_id: "tenant-1".to_string(),
             organization_id: "org-1".to_string(),
             organization_name: "Acme Org".to_string(),
+            admin_user_id: "user-1".to_string(),
             industry: IndustryTemplate::General,
             workspace_id: "ws-1".to_string(),
         });
 
         assert_eq!(plan.organization.name, "Acme Org");
+        assert_eq!(plan.admin_user.id, "user-1");
         assert_eq!(plan.teams.len(), 5);
         assert!(!plan.agent_templates.is_empty());
         assert!(!plan.agent_instances.is_empty());

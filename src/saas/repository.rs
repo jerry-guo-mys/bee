@@ -5,8 +5,8 @@
 use async_trait::async_trait;
 
 use crate::saas::models::{
-    AgentInstance, AgentTemplate, CollaborationGroup, Conversation, ConversationMessage,
-    Membership, Organization, TaskRecord, Team, Tenant, Workspace,
+    AgentInstance, AgentTemplate, AuditLogRecord, CollaborationGroup, Conversation,
+    ConversationMessage, Membership, Organization, TaskRecord, Team, Tenant, Workspace,
 };
 
 #[async_trait]
@@ -69,4 +69,14 @@ pub trait TaskRepository: Send + Sync {
         team_id: Option<&str>,
     ) -> Result<Vec<TaskRecord>, String>;
     async fn update_task(&self, task: TaskRecord) -> Result<TaskRecord, String>;
+}
+
+#[async_trait]
+pub trait AuditRepository: Send + Sync {
+    async fn append_audit_log(&self, log: AuditLogRecord) -> Result<AuditLogRecord, String>;
+    async fn list_audit_logs(
+        &self,
+        tenant_id: &str,
+        organization_id: Option<&str>,
+    ) -> Result<Vec<AuditLogRecord>, String>;
 }
