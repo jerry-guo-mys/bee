@@ -1,14 +1,11 @@
 //! 事件处理
-//!
-//! 轮询 crossterm 键盘事件，将 Ctrl+C/Ctrl+L/Esc/Ctrl+Q 转为 Command（Cancel/Clear/Quit），
-//! 其余按键交给 run_app 拼 input_buffer，Enter 时 send_submit。
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use tokio::sync::mpsc;
 
 use crate::core::Command;
 
-/// 应用事件：来自快捷键的 Command 或原始 KeyEvent
+/// 应用事件
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     Command(Command),
@@ -16,7 +13,7 @@ pub enum AppEvent {
     Tick,
 }
 
-/// 事件处理器：持有 cmd_tx，poll 时读键盘并返回 AppEvent，send_submit 发送用户输入
+/// 事件处理器
 pub struct EventHandler {
     cmd_tx: mpsc::UnboundedSender<Command>,
 }
@@ -57,5 +54,13 @@ impl EventHandler {
 
     pub fn send_submit(&self, input: String) {
         let _ = self.cmd_tx.send(Command::Submit(input));
+    }
+
+    pub fn send_clear(&self) {
+        let _ = self.cmd_tx.send(Command::Clear);
+    }
+
+    pub fn send_cancel(&self) {
+        let _ = self.cmd_tx.send(Command::Cancel);
     }
 }

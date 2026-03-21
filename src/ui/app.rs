@@ -1,31 +1,25 @@
-//! TUI 应用主循环
-//!
-//! 进入全屏/原始模式，轮询 state_rx 与键盘事件，将用户输入与快捷键转为 Command 发送给编排器，
-//! 每帧用 draw 渲染 UiState 与输入缓冲。
+//! 简化 TUI 主循环
 
 use std::io::{self, Stdout};
-
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::sync::watch;
 
 use crate::core::UiState;
-use crate::ui::render::{draw, InputFocus, InputState};
+use crate::ui::render::{draw, RenderContext};
+use crate::ui::widgets::{InputFocus, InputState, InputHistory, CommandPopup};
 
-/// 默认智能体列表（TUI 用，与 config/assistants.toml 可扩展）
 const DEFAULT_AGENTS: &[&str] = &["默认", "自动分派"];
-/// 默认模型列表（TUI 用，与 config/models.toml 可扩展）
 const DEFAULT_MODELS: &[&str] = &["默认", "DeepSeek", "GPT-4o", "Claude"];
 
-/// 运行 TUI：启用原始模式与全屏，循环 poll 事件 + 渲染，退出时恢复终端
 pub async fn run_app(
     state_rx: watch::Receiver<UiState>,
-    _stream_rx: tokio::sync::broadcast::Receiver<String>,
+    mut stream_rx: tokio::sync::broadcast::Receiver<String>,
     cmd_tx: tokio::sync::mpsc::UnboundedSender<crate::core::Command>,
 ) -> anyhow::Result<()> {
     enable_raw_mode()?;
@@ -35,15 +29,23 @@ pub async fn run_app(
     let mut terminal = Terminal::new(backend)?;
 
     let event_handler = super::event::EventHandler::new(cmd_tx);
+    let mut input_history = InputHistory::new(100);
+    let mut command_popup = CommandPopup::new();
     let mut input_buffer = String::new();
     let mut conversation_scroll = 0usize;
     let mut last_history_len = 0usize;
     let mut input_state = InputState::default();
     let agents: Vec<&str> = DEFAULT_AGENTS.to_vec();
     let models: Vec<&str> = DEFAULT_MODELS.to_vec();
+    let mut render_ctx = RenderContext::new();
 
     loop {
+        input_state.update_cursor();
         let state = state_rx.borrow().clone();
+
+        while let Ok(token) = stream_rx.try_recv() {
+            tracing::debug!("Stream: {}", token);
+        }
 
         if state.history.len() != last_history_len {
             last_history_len = state.history.len();
@@ -53,54 +55,60 @@ pub async fn run_app(
         if let Ok(Some(ev)) = event_handler.poll() {
             match ev {
                 super::event::AppEvent::Command(cmd) => {
-                    if matches!(cmd, crate::core::Command::Quit) {
-                        break;
-                    }
+                    if matches!(cmd, crate::core::Command::Quit) { break; }
                 }
                 super::event::AppEvent::Key(key) if !state.input_locked => {
+                    if command_popup.is_visible() {
+                        match key.code {
+                            KeyCode::Enter => {
+                                if let Some(cmd) = command_popup.confirm() {
+                                    input_buffer = cmd.to_string();
+                                    command_popup.hide();
+                                }
+                            }
+                            KeyCode::Up => command_popup.select_previous(),
+                            KeyCode::Down => command_popup.select_next(),
+                            KeyCode::Esc | KeyCode::Tab => command_popup.hide(),
+                            KeyCode::Char(c) => {
+                                input_buffer.push(c);
+                                if input_buffer.starts_with('/') {
+                                    command_popup.filter(&input_buffer[1..]);
+                                } else { command_popup.hide(); }
+                            }
+                            KeyCode::Backspace => {
+                                input_buffer.pop();
+                                if input_buffer.starts_with('/') {
+                                    command_popup.filter(&input_buffer[1..]);
+                                } else { command_popup.hide(); }
+                            }
+                            _ => {}
+                        }
+                        terminal.draw(|f| {
+                            draw(f, &state, &input_buffer, conversation_scroll,
+                                &mut (0, 0), &input_state, &agents, &models,
+                                &mut render_ctx, &mut command_popup);
+                        })?;
+                        continue;
+                    }
+
                     match key.code {
                         KeyCode::Enter => {
-                            if input_state.focus == InputFocus::Input
-                                || input_state.focus == InputFocus::Send
-                            {
+                            if input_state.focus == InputFocus::Input || input_state.focus == InputFocus::Send {
                                 let input = input_buffer.trim().to_string();
-                                input_buffer.clear();
                                 if !input.is_empty() {
-                                    if matches!(input.to_lowercase().as_str(), "/exit" | "exit" | "/quit" | "quit") {
-                                        break;
-                                    }
+                                    if matches!(input.to_lowercase().as_str(), "/exit" | "quit") { break; }
+                                    input_history.push(input.clone());
                                     event_handler.send_submit(input);
+                                    input_buffer.clear();
                                 }
                             }
                         }
-                        KeyCode::Tab => {
-                            input_state.focus = match input_state.focus {
-                                InputFocus::Input => InputFocus::Agent,
-                                InputFocus::Agent => InputFocus::Model,
-                                InputFocus::Model => InputFocus::Send,
-                                InputFocus::Send | InputFocus::Mode | InputFocus::Image => InputFocus::Input,
-                            };
-                        }
-                        KeyCode::BackTab => {
-                            input_state.focus = match input_state.focus {
-                                InputFocus::Input => InputFocus::Send,
-                                InputFocus::Agent => InputFocus::Input,
-                                InputFocus::Model => InputFocus::Agent,
-                                InputFocus::Send | InputFocus::Mode | InputFocus::Image => InputFocus::Model,
-                            };
-                        }
-                        KeyCode::Backspace => {
-                            if input_state.focus == InputFocus::Input {
-                                input_buffer.pop();
-                            }
-                        }
-                        KeyCode::Char(c) => {
-                            if input_state.focus == InputFocus::Input {
-                                input_buffer.push(c);
-                            }
-                        }
                         KeyCode::Up => {
-                            if input_state.focus == InputFocus::Agent {
+                            if input_state.focus == InputFocus::Input {
+                                if let Some(prev) = input_history.previous(&input_buffer) {
+                                    input_buffer = prev.clone();
+                                }
+                            } else if input_state.focus == InputFocus::Agent {
                                 input_state.agent_index = input_state.agent_index.saturating_sub(1);
                             } else if input_state.focus == InputFocus::Model {
                                 input_state.model_index = input_state.model_index.saturating_sub(1);
@@ -109,7 +117,13 @@ pub async fn run_app(
                             }
                         }
                         KeyCode::Down => {
-                            if input_state.focus == InputFocus::Agent {
+                            if input_state.focus == InputFocus::Input {
+                                if let Some(next) = input_history.next() {
+                                    input_buffer = next.clone();
+                                } else if let Some(cached) = input_history.cancel() {
+                                    input_buffer = cached;
+                                }
+                            } else if input_state.focus == InputFocus::Agent {
                                 input_state.agent_index = (input_state.agent_index + 1).min(agents.len().saturating_sub(1));
                             } else if input_state.focus == InputFocus::Model {
                                 input_state.model_index = (input_state.model_index + 1).min(models.len().saturating_sub(1));
@@ -117,17 +131,37 @@ pub async fn run_app(
                                 conversation_scroll = conversation_scroll.saturating_add(1);
                             }
                         }
-                        KeyCode::PageUp => {
-                            conversation_scroll = conversation_scroll.saturating_sub(10);
+                        KeyCode::Tab => {
+                            input_state.focus = match input_state.focus {
+                                InputFocus::Input => InputFocus::Agent,
+                                InputFocus::Agent => InputFocus::Model,
+                                InputFocus::Model => InputFocus::Send,
+                                InputFocus::Send => InputFocus::Input,
+                            };
                         }
-                        KeyCode::PageDown => {
-                            conversation_scroll = conversation_scroll.saturating_add(10);
+                        KeyCode::BackTab => {
+                            input_state.focus = match input_state.focus {
+                                InputFocus::Input => InputFocus::Send,
+                                InputFocus::Agent => InputFocus::Input,
+                                InputFocus::Model => InputFocus::Agent,
+                                InputFocus::Send => InputFocus::Model,
+                            };
                         }
-                        KeyCode::Home => {
-                            conversation_scroll = 0;
+                        KeyCode::Backspace if input_state.focus == InputFocus::Input => { input_buffer.pop(); }
+                        KeyCode::Char(c) if input_state.focus == InputFocus::Input => {
+                            input_buffer.push(c);
+                            if input_buffer == "/" { command_popup.filter(""); }
+                            else if input_buffer.starts_with('/') { command_popup.filter(&input_buffer[1..]); }
                         }
-                        KeyCode::End => {
-                            conversation_scroll = usize::MAX;
+                        KeyCode::PageUp => conversation_scroll = conversation_scroll.saturating_sub(10),
+                        KeyCode::PageDown => conversation_scroll = conversation_scroll.saturating_add(10),
+                        KeyCode::Home => conversation_scroll = 0,
+                        KeyCode::End => conversation_scroll = usize::MAX,
+                        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            event_handler.send_clear();
+                        }
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            event_handler.send_cancel();
                         }
                         _ => {}
                     }
@@ -138,35 +172,17 @@ pub async fn run_app(
 
         let mut scroll_info = (0usize, 0usize);
         terminal.draw(|f| {
-            draw(
-                f,
-                &state,
-                &input_buffer,
-                conversation_scroll,
-                &mut scroll_info,
-                &input_state,
-                &agents,
-                &models,
-            );
+            draw(f, &state, &input_buffer, conversation_scroll,
+                &mut scroll_info, &input_state, &agents, &models,
+                &mut render_ctx, &mut command_popup);
         })?;
         let (total_lines, viewport_height) = scroll_info;
-        let max_scroll = total_lines.saturating_sub(viewport_height);
-        conversation_scroll = conversation_scroll.min(max_scroll);
-
+        conversation_scroll = conversation_scroll.min(total_lines.saturating_sub(viewport_height));
         tokio::task::yield_now().await;
     }
 
-    restore_terminal(&mut terminal)?;
-    Ok(())
-}
-
-fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
     Ok(())
 }
