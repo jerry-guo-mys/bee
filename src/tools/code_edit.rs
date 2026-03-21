@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 /// 代码编辑工具
 pub struct CodeEditTool {
@@ -267,6 +270,24 @@ impl Tool for CodeEditTool {
 
 示例:
 {"file_path": "src/main.rs", "old_string": "fn old() {}", "new_string": "fn new() {}"}"#
+    }
+
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(
+            ToolScope::LocalWorkspace,
+            vec![ToolIntent::WriteFile, ToolIntent::ExecuteSideEffect],
+        )
+        .with_risk(ToolRisk::High)
+        .with_output_shape(ToolOutputShape::PlainText)
+        .with_side_effects(true)
+        .with_preferred_use_cases(vec![ToolUseCase::LocalWorkspaceInspection])
+        .with_disallowed_use_cases(vec![
+            ToolUseCase::DirectExplanation,
+            ToolUseCase::TimeSensitiveCurrent,
+            ToolUseCase::ExternalGitHubRepo,
+        ])
+        .with_requires_explicit_user_request(true)
+        .with_critic_mode(ToolCriticMode::Always)
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {

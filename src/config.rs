@@ -500,6 +500,12 @@ fn default_deep_research_trusted_domains() -> Vec<String> {
         "stackoverflow.com".into(),
         "docs.rs".into(),
         "developer.mozilla.org".into(),
+        "x.com".into(),
+        "twitter.com".into(),
+        "fixupx.com".into(),
+        "fxtwitter.com".into(),
+        "vxtwitter.com".into(),
+        "nitter.net".into(),
     ]
 }
 

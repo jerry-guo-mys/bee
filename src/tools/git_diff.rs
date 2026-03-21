@@ -3,7 +3,10 @@ use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 pub struct GitDiffTool;
 
@@ -53,6 +56,23 @@ impl Tool for GitDiffTool {
         "Show git diff. Args: {\"path\": \"repo path\", \"mode\": \"unstaged|staged|commit|branch\", \"target\": \"commit/branch\", \"base\": \"HEAD\", \"file\": \"specific file\", \"stat\": false}"
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ReadCode])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::PlainText)
+            .with_preferred_use_cases(vec![
+                ToolUseCase::LocalWorkspaceInspection,
+                ToolUseCase::Testing,
+            ])
+            .with_disallowed_use_cases(vec![
+                ToolUseCase::DirectExplanation,
+                ToolUseCase::TimeSensitiveCurrent,
+                ToolUseCase::ExternalGitHubRepo,
+            ])
+            .with_requires_explicit_user_request(true)
+            .with_critic_mode(ToolCriticMode::Conservative)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
         let path_str = args["path"].as_str().unwrap_or(".");
         let path = Path::new(path_str);
@@ -80,7 +100,7 @@ impl Tool for GitDiffTool {
             "commit" => {
                 let target = args["target"]
                     .as_str()
-                    .ok_or({ "'target' is required for commit mode" })?;
+                    .ok_or("'target' is required for commit mode")?;
                 let base = args["base"].as_str().unwrap_or("HEAD");
                 git_args.push(base);
                 git_args.push(target);
@@ -88,7 +108,7 @@ impl Tool for GitDiffTool {
             "branch" => {
                 let target = args["target"]
                     .as_str()
-                    .ok_or({ "'target' is required for branch mode" })?;
+                    .ok_or("'target' is required for branch mode")?;
                 let base = args["base"].as_str().unwrap_or("HEAD");
                 git_args.push(base);
                 git_args.push(target);

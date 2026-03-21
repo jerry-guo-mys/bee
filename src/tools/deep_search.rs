@@ -8,7 +8,10 @@ use serde_json::{json, Value};
 
 use crate::llm::LlmClient;
 use crate::memory::Message;
-use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
+use crate::tools::{
+    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
+    ToolScope, ToolUseCase,
+};
 
 pub struct DeepSearchTool {
     llm: Arc<dyn LlmClient>,
@@ -17,6 +20,11 @@ pub struct DeepSearchTool {
     max_results_per_round: usize,
     timeout_secs: u64,
     trusted_domains: Vec<String>,
+}
+
+fn mentions_x_or_twitter(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("twitter") || lower.contains("x.com") || lower.contains("x/twitter")
 }
 
 #[derive(Clone, Debug)]
@@ -201,7 +209,39 @@ impl DeepSearchTool {
         urls
     }
 
+    fn direct_status_urls(&self, text: &str) -> Vec<String> {
+        if !mentions_x_or_twitter(text) {
+            return Vec::new();
+        }
+
+        let Ok(id_re) = Regex::new(r"\b\d{12,}\b") else {
+            return Vec::new();
+        };
+        let Some(status_id) = id_re.find(text).map(|m| m.as_str()) else {
+            return Vec::new();
+        };
+
+        let candidates = [
+            format!("https://x.com/i/web/status/{status_id}"),
+            format!("https://twitter.com/i/web/status/{status_id}"),
+            format!("https://fixupx.com/i/web/status/{status_id}"),
+            format!("https://fxtwitter.com/i/web/status/{status_id}"),
+            format!("https://vxtwitter.com/i/web/status/{status_id}"),
+            format!("https://nitter.net/i/web/status/{status_id}"),
+        ];
+
+        candidates
+            .into_iter()
+            .filter(|url| self.is_trusted_domain(url))
+            .collect()
+    }
+
     async fn search_query_urls(&self, query: &str) -> Result<Vec<String>, String> {
+        let direct_urls = self.direct_status_urls(query);
+        if !direct_urls.is_empty() {
+            return Ok(direct_urls);
+        }
+
         let encoded = query.replace(' ', "+");
         let search_url = format!("https://www.bing.com/search?q={encoded}");
         let response = self
@@ -480,7 +520,12 @@ impl Tool for DeepSearchTool {
         )
         .with_risk(ToolRisk::Medium)
         .with_output_shape(ToolOutputShape::StructuredJson)
-        .with_freshness(true)
+        .with_freshness(ToolFreshness::BestEffort)
+        .with_preferred_use_cases(vec![
+            ToolUseCase::ExternalGitHubRepo,
+            ToolUseCase::TimeSensitiveCurrent,
+        ])
+        .with_critic_mode(ToolCriticMode::Conservative)
     }
 
     fn timeout_secs(&self) -> Option<u64> {
@@ -552,5 +597,46 @@ impl Tool for DeepSearchTool {
         });
 
         Ok(output.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::MockLlmClient;
+
+    fn tool() -> DeepSearchTool {
+        DeepSearchTool::new(
+            Arc::new(MockLlmClient),
+            3,
+            3,
+            60,
+            vec![
+                "x.com".into(),
+                "twitter.com".into(),
+                "fixupx.com".into(),
+                "fxtwitter.com".into(),
+                "vxtwitter.com".into(),
+                "nitter.net".into(),
+            ],
+        )
+    }
+
+    #[test]
+    fn test_direct_status_urls_from_query_with_status_id() {
+        let tool = tool();
+        let urls =
+            tool.direct_status_urls("HiTw93 X/Twitter 2032091246588518683 文章内容 观点总结");
+        assert!(!urls.is_empty());
+        assert!(urls.iter().any(|u| u.contains("2032091246588518683")));
+        assert!(urls.iter().any(|u| u.contains("fixupx.com")));
+        assert!(urls.iter().any(|u| u.contains("nitter.net")));
+    }
+
+    #[test]
+    fn test_direct_status_urls_requires_social_signal() {
+        let tool = tool();
+        let urls = tool.direct_status_urls("分析 2032091246588518683 这篇文章");
+        assert!(urls.is_empty());
     }
 }

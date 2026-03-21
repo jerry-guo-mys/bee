@@ -5,7 +5,10 @@ use serde_json::Value;
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 pub struct TestCheckTool {
     project_root: PathBuf,
@@ -43,6 +46,24 @@ impl Tool for TestCheckTool {
 
 示例:
 {"features": "web", "all_targets": true}"#
+    }
+
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(
+            ToolScope::LocalWorkspace,
+            vec![ToolIntent::RunCommand, ToolIntent::ExecuteSideEffect],
+        )
+        .with_risk(ToolRisk::High)
+        .with_output_shape(ToolOutputShape::PlainText)
+        .with_side_effects(true)
+        .with_preferred_use_cases(vec![ToolUseCase::Testing])
+        .with_disallowed_use_cases(vec![
+            ToolUseCase::DirectExplanation,
+            ToolUseCase::TimeSensitiveCurrent,
+            ToolUseCase::ExternalGitHubRepo,
+        ])
+        .with_requires_explicit_user_request(true)
+        .with_critic_mode(ToolCriticMode::Always)
     }
 
     fn timeout_secs(&self) -> Option<u64> {

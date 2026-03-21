@@ -5,7 +5,10 @@ use reqwest::Client;
 use serde_json::{json, Value};
 
 use crate::tools::output;
-use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
+use crate::tools::{
+    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
+    ToolScope, ToolUseCase,
+};
 
 pub struct GitHubRepoInspectTool {
     client: Client,
@@ -358,7 +361,10 @@ impl Tool for GitHubRepoInspectTool {
         )
         .with_risk(ToolRisk::Low)
         .with_output_shape(ToolOutputShape::StructuredJson)
-        .with_freshness(true)
+        .with_freshness(ToolFreshness::BestEffort)
+        .with_preferred_use_cases(vec![ToolUseCase::ExternalGitHubRepo])
+        .with_disallowed_use_cases(vec![ToolUseCase::TimeSensitiveCurrent])
+        .with_critic_mode(ToolCriticMode::Conservative)
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {

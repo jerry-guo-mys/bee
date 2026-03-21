@@ -9,10 +9,14 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use html2text::from_read;
 use reqwest::Client;
+use reqwest::Url;
 use serde_json::Value;
 
 use crate::tools::output;
-use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
+use crate::tools::{
+    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
+    ToolScope, ToolUseCase,
+};
 
 /// Search 工具：抓取 URL 内容，仅允许白名单域名；超时与最大字符数由配置决定
 pub struct SearchTool {
@@ -129,6 +133,48 @@ fn is_github_repo_url(url: &str) -> bool {
     true
 }
 
+fn is_x_or_twitter_url(url: &str) -> bool {
+    extract_domain(url)
+        .map(|domain| {
+            domain == "x.com"
+                || domain == "www.x.com"
+                || domain == "twitter.com"
+                || domain == "www.twitter.com"
+                || domain.ends_with(".x.com")
+                || domain.ends_with(".twitter.com")
+        })
+        .unwrap_or(false)
+}
+
+fn is_x_js_placeholder(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    (lower.contains("javascript is disabled") || lower.contains("enable javascript"))
+        && (lower.contains("x.com")
+            || lower.contains("twitter")
+            || lower.contains("x platform")
+            || lower.contains("switch to a supported browser"))
+}
+
+fn build_x_mirror_urls(url: &str) -> Vec<String> {
+    let Ok(parsed) = Url::parse(url) else {
+        return Vec::new();
+    };
+    let path = parsed.path().trim_start_matches('/');
+    let query = parsed.query();
+
+    ["fixupx.com", "fxtwitter.com", "vxtwitter.com", "nitter.net"]
+        .iter()
+        .filter_map(|host| {
+            let mut mirror = Url::parse(&format!("https://{host}/")).ok()?;
+            if !path.is_empty() {
+                mirror.set_path(path);
+            }
+            mirror.set_query(query);
+            Some(mirror.to_string())
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 struct SearchEngineTarget {
     engine: String,
@@ -241,6 +287,23 @@ impl SearchTool {
         Ok(text)
     }
 
+    async fn fetch_x_with_fallback(&self, url: &str) -> Result<String, String> {
+        let primary = self.fetch_page_text(url).await?;
+        if !is_x_js_placeholder(&primary) {
+            return Ok(primary);
+        }
+
+        for mirror_url in build_x_mirror_urls(url) {
+            if let Ok(text) = self.fetch_page_text(&mirror_url).await {
+                if !text.trim().is_empty() && !is_x_js_placeholder(&text) {
+                    return Ok(format!("[Fetched via mirror: {}]\n\n{}", mirror_url, text));
+                }
+            }
+        }
+
+        Ok(primary)
+    }
+
     fn extract_candidate_urls(&self, html: &str, engine_host: &str) -> Vec<String> {
         let Ok(regex) = regex::Regex::new(r#"https?://[^\s"'<>)]+"#) else {
             return Vec::new();
@@ -324,7 +387,11 @@ impl SearchTool {
             return self.fetch_search_engine_results(url, &target).await;
         }
 
-        let body = self.fetch_page_text(url).await?;
+        let body = if is_x_or_twitter_url(url) {
+            self.fetch_x_with_fallback(url).await?
+        } else {
+            self.fetch_page_text(url).await?
+        };
 
         let len = body.chars().count();
         if len > self.max_result_chars {
@@ -332,6 +399,36 @@ impl SearchTool {
         } else {
             Ok(body)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_x_or_twitter_url() {
+        assert!(is_x_or_twitter_url("https://x.com/foo/status/123"));
+        assert!(is_x_or_twitter_url("https://twitter.com/foo/status/123"));
+        assert!(!is_x_or_twitter_url("https://example.com/foo"));
+    }
+
+    #[test]
+    fn test_detect_x_js_placeholder() {
+        assert!(is_x_js_placeholder(
+            "JavaScript is disabled in this browser. Please enable JavaScript or switch to a supported browser to continue using x.com"
+        ));
+        assert!(!is_x_js_placeholder("regular readable page content"));
+    }
+
+    #[test]
+    fn test_build_x_mirror_urls() {
+        let urls = build_x_mirror_urls("https://x.com/HiTw93/status/2032091246588518683");
+        assert_eq!(urls.len(), 4);
+        assert!(urls[0].contains("fixupx.com/HiTw93/status/2032091246588518683"));
+        assert!(urls
+            .iter()
+            .any(|u| u.contains("nitter.net/HiTw93/status/2032091246588518683")));
     }
 }
 
@@ -349,7 +446,12 @@ impl Tool for SearchTool {
         ToolMetadata::new(ToolScope::RemoteWeb, vec![ToolIntent::FetchWebPage])
             .with_risk(ToolRisk::Low)
             .with_output_shape(ToolOutputShape::StructuredJson)
-            .with_freshness(true)
+            .with_freshness(ToolFreshness::BestEffort)
+            .with_preferred_use_cases(vec![
+                ToolUseCase::DirectExplanation,
+                ToolUseCase::TimeSensitiveCurrent,
+            ])
+            .with_critic_mode(ToolCriticMode::Conservative)
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {

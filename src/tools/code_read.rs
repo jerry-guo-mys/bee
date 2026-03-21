@@ -8,7 +8,10 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::tools::output;
-use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 /// 代码读取工具
 pub struct CodeReadTool {
@@ -154,6 +157,14 @@ impl Tool for CodeReadTool {
         ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ReadCode])
             .with_risk(ToolRisk::Low)
             .with_output_shape(ToolOutputShape::StructuredJson)
+            .with_preferred_use_cases(vec![ToolUseCase::LocalWorkspaceInspection])
+            .with_disallowed_use_cases(vec![
+                ToolUseCase::DirectExplanation,
+                ToolUseCase::TimeSensitiveCurrent,
+                ToolUseCase::ExternalGitHubRepo,
+            ])
+            .with_requires_explicit_user_request(true)
+            .with_critic_mode(ToolCriticMode::Skip)
     }
 
     fn parameters_schema(&self) -> Value {

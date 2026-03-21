@@ -18,7 +18,10 @@ use headless_chrome::{Browser, Tab};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
+    ToolScope, ToolUseCase,
+};
 
 /// 语义快照中的元素
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -396,6 +399,21 @@ The semantic snapshot shows interactive elements like:
   [2] textbox: "Search"
   [3] link: "About Us"
 Use ref IDs to interact with elements precisely."#
+    }
+
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(
+            ToolScope::RemoteWeb,
+            vec![ToolIntent::BrowseInteractive, ToolIntent::FetchWebPage],
+        )
+        .with_risk(ToolRisk::Medium)
+        .with_output_shape(ToolOutputShape::Mixed)
+        .with_freshness(ToolFreshness::BestEffort)
+        .with_preferred_use_cases(vec![
+            ToolUseCase::ExternalGitHubRepo,
+            ToolUseCase::TimeSensitiveCurrent,
+        ])
+        .with_critic_mode(ToolCriticMode::Conservative)
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {

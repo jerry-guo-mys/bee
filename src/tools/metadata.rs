@@ -39,10 +39,42 @@ pub enum ToolRisk {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ToolFreshness {
+    Static,
+    BestEffort,
+    Live,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ToolOutputShape {
     PlainText,
     StructuredJson,
     Mixed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolUseCase {
+    DirectExplanation,
+    TimeSensitiveCurrent,
+    ExternalGitHubRepo,
+    LocalWorkspaceInspection,
+    Weather,
+    News,
+    ExchangeRate,
+    MarketQuote,
+    SportsScore,
+    Testing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCriticMode {
+    Skip,
+    Conservative,
+    Normal,
+    Always,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -51,8 +83,12 @@ pub struct ToolMetadata {
     pub intents: Vec<ToolIntent>,
     pub risk: ToolRisk,
     pub output_shape: ToolOutputShape,
-    pub supports_freshness: bool,
+    pub freshness: ToolFreshness,
     pub supports_side_effects: bool,
+    pub preferred_use_cases: Vec<ToolUseCase>,
+    pub disallowed_use_cases: Vec<ToolUseCase>,
+    pub requires_explicit_user_request: bool,
+    pub critic_mode: ToolCriticMode,
 }
 
 impl ToolMetadata {
@@ -62,8 +98,12 @@ impl ToolMetadata {
             intents,
             risk: ToolRisk::Low,
             output_shape: ToolOutputShape::PlainText,
-            supports_freshness: false,
+            freshness: ToolFreshness::Static,
             supports_side_effects: false,
+            preferred_use_cases: Vec::new(),
+            disallowed_use_cases: Vec::new(),
+            requires_explicit_user_request: false,
+            critic_mode: ToolCriticMode::Normal,
         }
     }
 
@@ -77,13 +117,36 @@ impl ToolMetadata {
         self
     }
 
-    pub fn with_freshness(mut self, supports_freshness: bool) -> Self {
-        self.supports_freshness = supports_freshness;
+    pub fn with_freshness(mut self, freshness: ToolFreshness) -> Self {
+        self.freshness = freshness;
         self
     }
 
     pub fn with_side_effects(mut self, supports_side_effects: bool) -> Self {
         self.supports_side_effects = supports_side_effects;
+        self
+    }
+
+    pub fn with_preferred_use_cases(mut self, use_cases: Vec<ToolUseCase>) -> Self {
+        self.preferred_use_cases = use_cases;
+        self
+    }
+
+    pub fn with_disallowed_use_cases(mut self, use_cases: Vec<ToolUseCase>) -> Self {
+        self.disallowed_use_cases = use_cases;
+        self
+    }
+
+    pub fn with_requires_explicit_user_request(
+        mut self,
+        requires_explicit_user_request: bool,
+    ) -> Self {
+        self.requires_explicit_user_request = requires_explicit_user_request;
+        self
+    }
+
+    pub fn with_critic_mode(mut self, critic_mode: ToolCriticMode) -> Self {
+        self.critic_mode = critic_mode;
         self
     }
 }

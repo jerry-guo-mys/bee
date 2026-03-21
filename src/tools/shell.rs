@@ -10,7 +10,10 @@ use serde_json::Value;
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
-use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 /// 禁止的命令/子串（即使白名单中有同名，也不允许带这些参数）
 const FORBIDDEN_SUBSTR: &[&str] = &[
@@ -86,6 +89,13 @@ impl Tool for ShellTool {
         .with_risk(ToolRisk::High)
         .with_output_shape(ToolOutputShape::PlainText)
         .with_side_effects(true)
+        .with_disallowed_use_cases(vec![
+            ToolUseCase::DirectExplanation,
+            ToolUseCase::TimeSensitiveCurrent,
+            ToolUseCase::ExternalGitHubRepo,
+        ])
+        .with_requires_explicit_user_request(true)
+        .with_critic_mode(ToolCriticMode::Always)
     }
 
     fn timeout_secs(&self) -> Option<u64> {

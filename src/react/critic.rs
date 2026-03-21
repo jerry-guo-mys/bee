@@ -11,9 +11,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use serde_json::Value;
+
 use crate::config::CriticSection;
 use crate::llm::LlmClient;
 use crate::memory::Message;
+use crate::tools::{ToolCriticMode, ToolMetadata, ToolOutputShape, ToolRisk};
 
 /// Critic 评估结果：通过或需修正
 #[derive(Debug, Clone)]
@@ -81,6 +84,53 @@ impl Critic {
         self.evaluate_tools.contains(tool)
     }
 
+    fn observation_is_sufficient_structured(observation: &str) -> bool {
+        serde_json::from_str::<Value>(observation)
+            .ok()
+            .and_then(|value| value.get("sufficient_to_answer").and_then(|v| v.as_bool()))
+            .unwrap_or(false)
+    }
+
+    pub fn should_evaluate_with_metadata(
+        &self,
+        tool: &str,
+        metadata: Option<&ToolMetadata>,
+        observation: &str,
+    ) -> bool {
+        if !self.should_evaluate(tool) {
+            return false;
+        }
+
+        let Some(metadata) = metadata else {
+            return true;
+        };
+
+        match metadata.critic_mode {
+            ToolCriticMode::Skip => return false,
+            ToolCriticMode::Always => return true,
+            ToolCriticMode::Conservative => {
+                if Self::observation_is_sufficient_structured(observation) {
+                    return false;
+                }
+                if metadata.risk == ToolRisk::Low
+                    && metadata.output_shape == ToolOutputShape::StructuredJson
+                {
+                    return false;
+                }
+            }
+            ToolCriticMode::Normal => {
+                if metadata.risk == ToolRisk::Low
+                    && metadata.output_shape == ToolOutputShape::StructuredJson
+                    && Self::observation_is_sufficient_structured(observation)
+                {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
     pub async fn evaluate(
         &self,
         goal: &str,
@@ -117,6 +167,7 @@ impl Critic {
 mod tests {
     use super::*;
     use crate::llm::MockLlmClient;
+    use crate::tools::{ToolFreshness, ToolIntent, ToolScope};
 
     #[test]
     fn test_should_evaluate_all() {
@@ -131,5 +182,34 @@ mod tests {
         assert!(critic.should_evaluate("shell"));
         assert!(critic.should_evaluate("code_edit"));
         assert!(!critic.should_evaluate("cat"));
+    }
+
+    #[test]
+    fn test_should_skip_low_risk_structured_tool_when_sufficient() {
+        let critic = Critic::new(Arc::new(MockLlmClient), "test");
+        let metadata = ToolMetadata::new(ToolScope::RemoteWeb, vec![ToolIntent::FetchWebPage])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::StructuredJson)
+            .with_freshness(ToolFreshness::Live)
+            .with_critic_mode(ToolCriticMode::Conservative);
+
+        assert!(!critic.should_evaluate_with_metadata(
+            "weather",
+            Some(&metadata),
+            r#"{"tool":"weather","summary":"ok","sufficient_to_answer":true,"data":{}}"#,
+        ));
+    }
+
+    #[test]
+    fn test_should_keep_evaluating_high_risk_tool() {
+        let critic = Critic::new(Arc::new(MockLlmClient), "test");
+        let metadata = ToolMetadata::new(
+            ToolScope::System,
+            vec![ToolIntent::RunCommand, ToolIntent::ExecuteSideEffect],
+        )
+        .with_risk(ToolRisk::High)
+        .with_critic_mode(ToolCriticMode::Always);
+
+        assert!(critic.should_evaluate_with_metadata("shell", Some(&metadata), "command output",));
     }
 }

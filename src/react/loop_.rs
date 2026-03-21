@@ -494,9 +494,23 @@ async fn react_loop_impl(
                 });
             }
             Ok(crate::react::planner::PlannerOutput::ToolCall(tc)) => {
-                let rewritten = rewrite_tool_call(&tc.tool, &tc.args);
-                let tool_name = rewritten.tool_name.clone();
-                let tool_args = rewritten.args.clone();
+                let rewritten = rewrite_tool_call(user_input, &tc.tool, &tc.args);
+                let mut tool_name = rewritten.tool_name.clone();
+                let mut tool_args = rewritten.args.clone();
+                let browser_available = executor.tool_names().iter().any(|n| n == "browser");
+                let search_available = executor.tool_names().iter().any(|n| n == "search");
+                if tool_name == "browser" && !browser_available && search_available {
+                    if let Some(url) = tool_args.get("url").and_then(|v| v.as_str()) {
+                        tracing::info!(
+                            requested_tool = %tc.tool,
+                            fallback_tool = "search",
+                            url = %url,
+                            "browser unavailable; falling back to search"
+                        );
+                        tool_name = "search".to_string();
+                        tool_args = serde_json::json!({ "url": url });
+                    }
+                }
                 send_event(
                     &event_tx,
                     ReactEvent::ToolCall {
@@ -623,21 +637,27 @@ async fn react_loop_impl(
                     || obs_upper.contains("TIMEOUT");
                 if !is_tool_failure {
                     if let Some(c) = critic {
-                        if let Ok(CriticResult::Correction(suggestion)) =
-                            c.evaluate(user_input, &tool_name, &observation).await
-                        {
-                            send_event(
-                                &event_tx,
-                                ReactEvent::Recovery {
-                                    action: "Critic".to_string(),
-                                    detail: suggestion.clone(),
-                                },
-                            );
-                            context.append_critic_lesson(&suggestion);
-                            context.push_message(Message::user(format!(
-                                "Critic 建议：{}",
-                                suggestion
-                            )));
+                        if c.should_evaluate_with_metadata(
+                            &tool_name,
+                            tool_metadata.as_ref(),
+                            &observation,
+                        ) {
+                            if let Ok(CriticResult::Correction(suggestion)) =
+                                c.evaluate(user_input, &tool_name, &observation).await
+                            {
+                                send_event(
+                                    &event_tx,
+                                    ReactEvent::Recovery {
+                                        action: "Critic".to_string(),
+                                        detail: suggestion.clone(),
+                                    },
+                                );
+                                context.append_critic_lesson(&suggestion);
+                                context.push_message(Message::user(format!(
+                                    "Critic 建议：{}",
+                                    suggestion
+                                )));
+                            }
                         }
                     }
                 }

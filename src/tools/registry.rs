@@ -11,7 +11,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::tools::metadata::ToolMetadata;
-use crate::tools::{ToolIntent, ToolOutputShape, ToolRisk, ToolScope};
+use crate::tools::{ToolCriticMode, ToolIntent, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase};
 
 /// 工具 trait：名称、描述（供 LLM 理解）、参数 schema、异步执行（args 为 JSON）
 /// 解决问题 6.2：添加 parameters_schema 方法
@@ -28,6 +28,8 @@ pub trait Tool: Send + Sync {
         ToolMetadata::new(ToolScope::Mixed, vec![ToolIntent::Other])
             .with_risk(ToolRisk::Low)
             .with_output_shape(ToolOutputShape::PlainText)
+            .with_preferred_use_cases(vec![ToolUseCase::DirectExplanation])
+            .with_critic_mode(ToolCriticMode::Conservative)
     }
 
     /// 可选的工具级超时覆盖（秒）；未设置时由 ToolExecutor 使用全局默认值

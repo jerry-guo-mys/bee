@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokio::process::Command;
 
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 pub struct GitCommitTool {
     project_root: PathBuf,
@@ -35,6 +38,23 @@ impl Tool for GitCommitTool {
 
 示例:
 {"message": "Fix bug in parser", "files": ["src/parser.rs"]}"#
+    }
+
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(
+            ToolScope::System,
+            vec![ToolIntent::RunCommand, ToolIntent::ExecuteSideEffect],
+        )
+        .with_risk(ToolRisk::High)
+        .with_output_shape(ToolOutputShape::PlainText)
+        .with_side_effects(true)
+        .with_disallowed_use_cases(vec![
+            ToolUseCase::DirectExplanation,
+            ToolUseCase::TimeSensitiveCurrent,
+            ToolUseCase::ExternalGitHubRepo,
+        ])
+        .with_requires_explicit_user_request(true)
+        .with_critic_mode(ToolCriticMode::Always)
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {

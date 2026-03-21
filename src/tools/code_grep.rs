@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 /// 代码搜索工具
 pub struct CodeGrepTool {
@@ -180,6 +183,20 @@ impl Tool for CodeGrepTool {
 
 示例:
 {"pattern": "fn main", "include": "*.rs", "use_regex": false}"#
+    }
+
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ReadCode])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::PlainText)
+            .with_preferred_use_cases(vec![ToolUseCase::LocalWorkspaceInspection])
+            .with_disallowed_use_cases(vec![
+                ToolUseCase::DirectExplanation,
+                ToolUseCase::TimeSensitiveCurrent,
+                ToolUseCase::ExternalGitHubRepo,
+            ])
+            .with_requires_explicit_user_request(true)
+            .with_critic_mode(ToolCriticMode::Skip)
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {

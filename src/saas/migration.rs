@@ -133,6 +133,54 @@ impl<'a> LegacyWorkspaceImporter<'a> {
         )?;
         report.agent_templates_seeded += template_inserted as usize;
 
+        let default_template_inserted = conn.execute(
+            "INSERT OR IGNORE INTO saas_agent_templates (id, tenant_id, name, description, prompt, tool_ids_json, model_id, created_at, updated_at)
+             VALUES ('default', ?1, 'Default Assistant Template', 'Seeded for legacy session imports', NULL, '[]', NULL, ?2, ?2)",
+            params![tenant_id, now],
+        )?;
+        report.agent_templates_seeded += default_template_inserted as usize;
+
+        conn.execute(
+            "INSERT OR IGNORE INTO saas_agent_instances
+             (id, tenant_id, organization_id, team_id, template_id, name, status, prompt_override, tool_ids_override_json, model_id_override, knowledge_base_ids_override_json, created_at, updated_at)
+             VALUES ('default', ?1, ?2, NULL, 'default', 'Default Assistant', 'active', NULL, '[]', NULL, '[]', ?3, ?3)",
+            params![tenant_id, organization_id, now],
+        )?;
+
+        Ok(())
+    }
+
+    fn ensure_agent_instance_exists(
+        &self,
+        tenant_id: &str,
+        organization_id: &str,
+        agent_instance_id: &str,
+        now: &str,
+    ) -> anyhow::Result<()> {
+        let conn = self.store.connection();
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM saas_agent_instances WHERE id = ?1",
+            params![agent_instance_id],
+            |row| row.get(0),
+        )?;
+        if exists > 0 {
+            return Ok(());
+        }
+
+        let display_name = if agent_instance_id == "default" {
+            "Default Assistant".to_string()
+        } else if agent_instance_id == "auto" {
+            "Auto Router".to_string()
+        } else {
+            format!("Legacy Agent {}", agent_instance_id)
+        };
+
+        conn.execute(
+            "INSERT OR IGNORE INTO saas_agent_instances
+             (id, tenant_id, organization_id, team_id, template_id, name, status, prompt_override, tool_ids_override_json, model_id_override, knowledge_base_ids_override_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, NULL, 'legacy-dynamic-agent', ?4, 'active', NULL, '[]', NULL, '[]', ?5, ?5)",
+            params![agent_instance_id, tenant_id, organization_id, display_name, now],
+        )?;
         Ok(())
     }
 
@@ -284,6 +332,14 @@ impl<'a> LegacyWorkspaceImporter<'a> {
 
         let conn = self.store.connection();
         for task in tasks {
+            if let Some(agent_id) = task.coordinator_id.as_deref() {
+                self.ensure_agent_instance_exists(
+                    tenant_id,
+                    organization_id,
+                    agent_id,
+                    &task.created_at,
+                )?;
+            }
             let inserted = conn.execute(
                 "INSERT OR IGNORE INTO saas_tasks
                  (id, tenant_id, organization_id, team_id, workspace_id, title, description, assignee_agent_id, creator_user_id, status, created_at, updated_at)
@@ -351,6 +407,9 @@ impl<'a> LegacyWorkspaceImporter<'a> {
             .with_context(|| format!("parse {}", path.display()))?;
 
             let now = chrono::Utc::now().to_rfc3339();
+            if let Some(agent_id) = agent_instance_id.as_deref() {
+                self.ensure_agent_instance_exists(tenant_id, organization_id, agent_id, &now)?;
+            }
             let inserted = conn.execute(
                 "INSERT OR IGNORE INTO saas_conversations
                  (id, tenant_id, organization_id, team_id, user_id, agent_instance_id, title, status, created_at, updated_at)
@@ -501,7 +560,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             workspace.join("sessions").join("session-1---default.json"),
-            r#"{"messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"world"}],"max_turns":20}"#,
+            r#"{"messages":[{"role":"User","content":"hello"},{"role":"Assistant","content":"world"}],"max_turns":20}"#,
         )
         .unwrap();
 
@@ -517,5 +576,45 @@ mod tests {
         assert_eq!(report.tasks_imported, 1);
         assert_eq!(report.conversations_imported, 1);
         assert_eq!(report.conversation_messages_imported, 2);
+
+        let conn = store.connection();
+        let default_agent_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM saas_agent_instances WHERE id = 'default'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(default_agent_count, 1);
+    }
+
+    #[test]
+    fn test_import_workspace_creates_placeholder_agent_for_unknown_session_scope() {
+        let dir = tempdir().unwrap();
+        let workspace = dir.path().join("workspace");
+        std::fs::create_dir_all(workspace.join("sessions")).unwrap();
+
+        std::fs::write(
+            workspace.join("sessions").join("session-1---auto.json"),
+            r#"{"messages":[{"role":"User","content":"hello"}],"max_turns":20}"#,
+        )
+        .unwrap();
+
+        let store =
+            SaasSqliteStore::new(dir.path().join("saas.db")).expect("sqlite store should init");
+        let importer = LegacyWorkspaceImporter::new(&store);
+        importer
+            .import_workspace(&workspace, "tenant-1", "org-1", "ws-1")
+            .expect("import should succeed");
+
+        let conn = store.connection();
+        let auto_agent_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM saas_agent_instances WHERE id = 'auto'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(auto_agent_count, 1);
     }
 }

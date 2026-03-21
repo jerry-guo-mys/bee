@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 /// 代码写入工具
 pub struct CodeWriteTool {
@@ -80,6 +83,24 @@ impl Tool for CodeWriteTool {
 
 示例:
 {"file_path": "src/new_module.rs", "content": "pub fn hello() {}", "overwrite": false}"#
+    }
+
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(
+            ToolScope::LocalWorkspace,
+            vec![ToolIntent::WriteFile, ToolIntent::ExecuteSideEffect],
+        )
+        .with_risk(ToolRisk::High)
+        .with_output_shape(ToolOutputShape::PlainText)
+        .with_side_effects(true)
+        .with_preferred_use_cases(vec![ToolUseCase::LocalWorkspaceInspection])
+        .with_disallowed_use_cases(vec![
+            ToolUseCase::DirectExplanation,
+            ToolUseCase::TimeSensitiveCurrent,
+            ToolUseCase::ExternalGitHubRepo,
+        ])
+        .with_requires_explicit_user_request(true)
+        .with_critic_mode(ToolCriticMode::Always)
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {

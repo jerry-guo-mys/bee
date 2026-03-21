@@ -241,11 +241,17 @@ mod tests {
     use super::*;
     #[cfg(feature = "gateway")]
     use crate::gateway::{BackgroundTask, TaskQueue};
+    #[cfg(feature = "gateway")]
     use crate::workflow::WorkflowBuilder;
+    #[cfg(feature = "gateway")]
+    use async_trait::async_trait;
+    #[cfg(feature = "gateway")]
     use std::sync::Arc;
 
+    #[cfg(feature = "gateway")]
     struct MockExecutor;
 
+    #[cfg(feature = "gateway")]
     #[async_trait]
     impl WorkflowTaskExecutor for MockExecutor {
         async fn execute(&self, _task: &BackgroundTask) -> Result<String, String> {

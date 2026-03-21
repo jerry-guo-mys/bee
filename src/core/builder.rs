@@ -14,9 +14,10 @@ use crate::skills::{SkillCache, SkillLoader};
 use crate::tools::BrowserTool;
 use crate::tools::{
     CatTool, CodeEditTool, CodeGrepTool, CodeReadTool, CodeWriteTool, DeepSearchTool, EchoTool,
-    GitCommitTool, GitHubRepoInspectTool, KnowledgeGraphBuilder, LsTool, PluginTool,
-    ReportGeneratorTool, SearchTool, ShellTool, SourceValidatorTool, TestCheckTool, TestRunTool,
-    ToolExecutor, ToolRegistry, WeatherTool,
+    ExchangeRateTool, GitCommitTool, GitHubRepoInspectTool, KnowledgeGraphBuilder, LsTool,
+    MarketQuoteTool, NewsTool, PluginTool, ReportGeneratorTool, SearchTool, ShellTool,
+    SourceValidatorTool, SportsScoreTool, TestCheckTool, TestRunTool, ToolExecutor, ToolRegistry,
+    WeatherTool,
 };
 #[cfg(feature = "web")]
 use crate::tools::{CreateGroupTool, CreateTool, ListAgentsTool, SendTool};
@@ -59,7 +60,7 @@ impl AgentBuilder {
         .into_iter()
         .find_map(|p| std::fs::read_to_string(p).ok())
         .unwrap_or_else(|| {
-            "You are Bee, a helpful AI assistant with access to various tools. If the user asks for an open-source address, repository link, GitHub URL, download page, homepage, or similar locator-style information, answer directly when possible or ask a short clarification question; do not call a tool first unless a tool is truly necessary to discover or verify the link. If the user asks a direct explanation question such as what a product or service is, what it does, or what its core functions are, answer directly from the conversation and available context unless the user explicitly asks for verification or browsing. For external GitHub repository architecture or stack questions, prefer github_repo_inspect, and after it returns structured fields like repo_summary, detected_stack, top_level_directories, key_files_found, or file_snippets, answer directly instead of inspecting the local workspace.".to_string()
+            "You are Bee, a helpful AI assistant with access to various tools. If the user asks for an open-source address, repository link, GitHub URL, download page, homepage, or similar locator-style information, answer directly when possible or ask a short clarification question; do not call a tool first unless a tool is truly necessary to discover or verify the link. If the user asks a direct explanation question such as what a product or service is, what it does, or what its core functions are, answer directly from the conversation and available context unless the user explicitly asks for verification or browsing. For time-sensitive requests, prefer specialized fresh tools: weather for forecasts, news for headlines, exchange_rate for FX, market_quote for stock/index/crypto prices, and sports_score for live scores. For external GitHub repository architecture or stack questions, prefer github_repo_inspect, and after it returns structured fields like repo_summary, detected_stack, top_level_directories, key_files_found, or file_snippets, answer directly instead of inspecting the local workspace.".to_string()
         });
         self
     }
@@ -95,6 +96,10 @@ impl AgentBuilder {
             self.config.tools.search.max_result_chars,
         ));
         tools.register(WeatherTool::new(self.config.tools.search.timeout_secs));
+        tools.register(NewsTool::new(self.config.tools.search.timeout_secs));
+        tools.register(ExchangeRateTool::new(self.config.tools.search.timeout_secs));
+        tools.register(MarketQuoteTool::new(self.config.tools.search.timeout_secs));
+        tools.register(SportsScoreTool::new(self.config.tools.search.timeout_secs));
         tools.register(GitHubRepoInspectTool::new(
             self.config.tools.search.max_result_chars,
         ));
@@ -218,13 +223,23 @@ impl AgentBuilder {
 
     /// 构建完整系统提示词（包含工具 schema）
     pub fn build_full_system_prompt(&self, tool_registry: &ToolRegistry) -> String {
+        let has_browser = tool_registry.get("browser").is_some();
+        let system_prompt = if has_browser {
+            self.system_prompt.clone()
+        } else {
+            self.system_prompt
+                .lines()
+                .filter(|line| !line.contains("`browser`") && !line.contains("- browser:"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         let tool_schema = tool_registry.to_schema_json();
         if tool_schema.is_empty() || tool_schema == "[]" {
-            self.system_prompt.clone()
+            system_prompt
         } else {
             format!(
                 "{}\n\n## Tool call JSON Schema (you must output valid JSON matching this)\n```json\n{}\n```",
-                self.system_prompt, tool_schema
+                system_prompt, tool_schema
             )
         }
     }

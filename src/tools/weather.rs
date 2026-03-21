@@ -3,7 +3,10 @@ use reqwest::Client;
 use serde_json::Value;
 
 use crate::tools::output;
-use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
+use crate::tools::{
+    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
+    ToolScope, ToolUseCase,
+};
 
 pub struct WeatherTool {
     client: Client,
@@ -153,7 +156,12 @@ impl Tool for WeatherTool {
         )
         .with_risk(ToolRisk::Low)
         .with_output_shape(ToolOutputShape::StructuredJson)
-        .with_freshness(true)
+        .with_freshness(ToolFreshness::Live)
+        .with_preferred_use_cases(vec![
+            ToolUseCase::Weather,
+            ToolUseCase::TimeSensitiveCurrent,
+        ])
+        .with_critic_mode(ToolCriticMode::Skip)
     }
 
     fn timeout_secs(&self) -> Option<u64> {

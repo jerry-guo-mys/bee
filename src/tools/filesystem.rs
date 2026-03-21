@@ -10,7 +10,10 @@ use serde_json::Value;
 
 use crate::core::AgentError;
 use crate::tools::output;
-use crate::tools::{Tool, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope};
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 /// 沙箱文件系统：绑定根目录，resolve 校验路径在根下，防止路径逃逸
 #[derive(Debug, Clone)]
@@ -124,6 +127,14 @@ impl Tool for CatTool {
         ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ReadFile])
             .with_risk(ToolRisk::Low)
             .with_output_shape(ToolOutputShape::StructuredJson)
+            .with_preferred_use_cases(vec![ToolUseCase::LocalWorkspaceInspection])
+            .with_disallowed_use_cases(vec![
+                ToolUseCase::DirectExplanation,
+                ToolUseCase::TimeSensitiveCurrent,
+                ToolUseCase::ExternalGitHubRepo,
+            ])
+            .with_requires_explicit_user_request(true)
+            .with_critic_mode(ToolCriticMode::Skip)
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {
@@ -169,6 +180,14 @@ impl Tool for LsTool {
         ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ListDirectory])
             .with_risk(ToolRisk::Low)
             .with_output_shape(ToolOutputShape::StructuredJson)
+            .with_preferred_use_cases(vec![ToolUseCase::LocalWorkspaceInspection])
+            .with_disallowed_use_cases(vec![
+                ToolUseCase::DirectExplanation,
+                ToolUseCase::TimeSensitiveCurrent,
+                ToolUseCase::ExternalGitHubRepo,
+            ])
+            .with_requires_explicit_user_request(true)
+            .with_critic_mode(ToolCriticMode::Skip)
     }
 
     async fn execute(&self, args: Value) -> Result<String, String> {
