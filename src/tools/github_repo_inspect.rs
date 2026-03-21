@@ -5,8 +5,9 @@ use reqwest::Client;
 use serde_json::{json, Value};
 
 use crate::tools::output;
+use crate::tools::source_adapter::classify_url_source;
 use crate::tools::{
-    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode,
+    SourceKind, Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode,
     ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
@@ -366,7 +367,7 @@ impl Tool for GitHubRepoInspectTool {
         .with_disallowed_use_cases(vec![ToolUseCase::TimeSensitiveCurrent])
         .with_capability(
             ToolCapabilityGroup::RepositoryAnalysis,
-            ToolCapabilitySubgroup::GitHubRepo,
+            ToolCapabilitySubgroup::RepositoryFile,
         )
         .with_costs(
             ToolCostClass::Low,
@@ -387,6 +388,12 @@ impl Tool for GitHubRepoInspectTool {
             .trim();
         if url.is_empty() {
             return Err("Missing url".to_string());
+        }
+        if !matches!(
+            classify_url_source(url),
+            SourceKind::GitHub | SourceKind::RepositoryFile
+        ) {
+            return Err("URL is not a GitHub repository target".to_string());
         }
 
         let result = match Self::parse_target(url) {

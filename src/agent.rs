@@ -22,6 +22,17 @@ use crate::tool_policy::refine_allowed_tools_for_input;
 use crate::tool_router::{deterministic_route, execute_direct_route};
 use tokio::sync::mpsc;
 
+fn allowed_tools_hint(allowed_tools: &[String]) -> Option<String> {
+    if allowed_tools.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "For this conversation, you may use only these tools: {}. Do not call any other tool.",
+            allowed_tools.join(", ")
+        ))
+    }
+}
+
 /// 创建 Agent 组件：使用统一的 AgentBuilder（解决问题 1.1）
 ///
 /// 现在接受配置参数而非内部加载（解决问题 1.2）
@@ -266,6 +277,9 @@ pub async fn process_message(
         let metadata = components.executor.tool_metadata_for_names(tools);
         refine_allowed_tools_for_input(user_input, &metadata)
     });
+    let allowed_tools_hint = policy_decision
+        .as_ref()
+        .and_then(|decision| allowed_tools_hint(&decision.allowed_tools));
     let result = react_loop(
         &components.planner,
         &components.executor,
@@ -277,9 +291,20 @@ pub async fn process_message(
         cancel_token,
         components.critic.as_ref(),
         Some(&components.task_scheduler),
-        policy_decision
-            .as_ref()
-            .and_then(|decision| decision.system_hint.as_deref()),
+        match (
+            policy_decision
+                .as_ref()
+                .and_then(|decision| decision.system_hint.as_deref()),
+            allowed_tools_hint.as_deref(),
+        ) {
+            (Some(policy_hint), Some(allowed_hint)) => {
+                Some(format!("{policy_hint}\n{allowed_hint}"))
+            }
+            (Some(policy_hint), None) => Some(policy_hint.to_string()),
+            (None, Some(allowed_hint)) => Some(allowed_hint.to_string()),
+            (None, None) => None,
+        }
+        .as_deref(),
         policy_decision
             .as_ref()
             .map(|decision| decision.allowed_tools.as_slice()),
@@ -352,16 +377,28 @@ pub async fn process_message_stream_with_cancel(
         let metadata = components.executor.tool_metadata_for_names(tools);
         refine_allowed_tools_for_input(user_input, &metadata)
     });
+    let allowed_tools_hint = policy_decision
+        .as_ref()
+        .and_then(|decision| allowed_tools_hint(&decision.allowed_tools));
     let combined_system_prompt = match (
         system_prompt_override,
         policy_decision
             .as_ref()
             .and_then(|decision| decision.system_hint.as_deref()),
+        allowed_tools_hint.as_deref(),
     ) {
-        (Some(base), Some(hint)) => Some(format!("{base}\n\n{hint}")),
-        (Some(base), None) => Some(base.to_string()),
-        (None, Some(hint)) => Some(hint.to_string()),
-        (None, None) => None,
+        (Some(base), Some(policy_hint), Some(allowed_hint)) => {
+            Some(format!("{base}\n\n{policy_hint}\n{allowed_hint}"))
+        }
+        (Some(base), Some(policy_hint), None) => Some(format!("{base}\n\n{policy_hint}")),
+        (Some(base), None, Some(allowed_hint)) => Some(format!("{base}\n\n{allowed_hint}")),
+        (Some(base), None, None) => Some(base.to_string()),
+        (None, Some(policy_hint), Some(allowed_hint)) => {
+            Some(format!("{policy_hint}\n{allowed_hint}"))
+        }
+        (None, Some(policy_hint), None) => Some(policy_hint.to_string()),
+        (None, None, Some(allowed_hint)) => Some(allowed_hint.to_string()),
+        (None, None, None) => None,
     };
 
     let result = {

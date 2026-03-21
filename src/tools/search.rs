@@ -9,13 +9,15 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use html2text::from_read;
 use reqwest::Client;
-use reqwest::Url;
+use serde_json::json;
 use serde_json::Value;
 
 use crate::tools::output;
+use crate::tools::source_adapter::{classify_url_source, social_mirror_urls, SearchEngineTarget};
 use crate::tools::{
-    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode,
-    ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
+    search_engine_target, SourceKind, Tool, ToolCapabilityGroup, ToolCapabilitySubgroup,
+    ToolCostClass, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape,
+    ToolRisk, ToolScope, ToolUseCase,
 };
 
 /// Search 工具：抓取 URL 内容，仅允许白名单域名；超时与最大字符数由配置决定
@@ -112,40 +114,6 @@ fn is_blocked_host(domain: &str) -> bool {
     false
 }
 
-fn is_github_repo_url(url: &str) -> bool {
-    let Some(url) = url
-        .trim()
-        .strip_prefix("https://github.com/")
-        .or_else(|| url.trim().strip_prefix("http://github.com/"))
-    else {
-        return false;
-    };
-    let mut parts = url.split('/').filter(|part| !part.is_empty());
-    let Some(owner) = parts.next().map(str::trim) else {
-        return false;
-    };
-    let Some(repo) = parts.next().map(str::trim) else {
-        return false;
-    };
-    if owner.is_empty() || repo.is_empty() {
-        return false;
-    }
-    true
-}
-
-fn is_x_or_twitter_url(url: &str) -> bool {
-    extract_domain(url)
-        .map(|domain| {
-            domain == "x.com"
-                || domain == "www.x.com"
-                || domain == "twitter.com"
-                || domain == "www.twitter.com"
-                || domain.ends_with(".x.com")
-                || domain.ends_with(".twitter.com")
-        })
-        .unwrap_or(false)
-}
-
 fn is_x_js_placeholder(text: &str) -> bool {
     let lower = text.to_lowercase();
     (lower.contains("javascript is disabled") || lower.contains("enable javascript"))
@@ -155,55 +123,41 @@ fn is_x_js_placeholder(text: &str) -> bool {
             || lower.contains("switch to a supported browser"))
 }
 
-fn build_x_mirror_urls(url: &str) -> Vec<String> {
-    let Ok(parsed) = Url::parse(url) else {
-        return Vec::new();
-    };
-    let path = parsed.path().trim_start_matches('/');
-    let query = parsed.query();
-
-    ["fixupx.com", "fxtwitter.com", "vxtwitter.com", "nitter.net"]
-        .iter()
-        .filter_map(|host| {
-            let mut mirror = Url::parse(&format!("https://{host}/")).ok()?;
-            if !path.is_empty() {
-                mirror.set_path(path);
-            }
-            mirror.set_query(query);
-            Some(mirror.to_string())
-        })
-        .collect()
+fn source_kind_label(kind: SourceKind) -> &'static str {
+    match kind {
+        SourceKind::GitHub => "github",
+        SourceKind::RepositoryFile => "repository_file",
+        SourceKind::SocialContent => "social_content",
+        SourceKind::SearchResultsPage => "search_results_page",
+        SourceKind::DynamicWebPage => "dynamic_web_page",
+        SourceKind::ArticlePage => "article_page",
+        SourceKind::Unknown => "unknown",
+    }
 }
 
-#[derive(Clone, Debug)]
-struct SearchEngineTarget {
-    engine: String,
-    query: String,
+fn is_recoverable_fetch_error(error: &str) -> bool {
+    error.starts_with("HTTP 404")
+        || error.starts_with("HTTP 410")
+        || error.starts_with("HTTP 451")
 }
 
-fn search_engine_target(url: &str) -> Option<SearchEngineTarget> {
-    let parsed = reqwest::Url::parse(url).ok()?;
-    let host = parsed.host_str()?.to_lowercase();
-    let path = parsed.path().to_lowercase();
-    let query_pairs: std::collections::HashMap<String, String> = parsed
-        .query_pairs()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-
-    let query = if host.contains("baidu.com") && path == "/s" {
-        query_pairs.get("wd").cloned()
-    } else if host.contains("google.") && path == "/search" {
-        query_pairs.get("q").cloned()
-    } else if host.contains("bing.com") && path == "/search" {
-        query_pairs.get("q").cloned()
-    } else {
-        None
-    }?;
-
-    Some(SearchEngineTarget {
-        engine: host,
-        query,
-    })
+fn suggested_next_steps(kind: SourceKind, url: &str) -> Vec<String> {
+    match kind {
+        SourceKind::ArticlePage | SourceKind::DynamicWebPage => vec![
+            "Try the site homepage or category page instead of the dead deep link.".to_string(),
+            "Search by article title, topic, or site name to find the updated page.".to_string(),
+            format!("Verify whether the article at {} has moved or been removed.", url),
+        ],
+        SourceKind::SocialContent => vec![
+            "Try a readable mirror or another source that quotes the same post.".to_string(),
+            "Search by author handle plus post ID or quoted text.".to_string(),
+        ],
+        SourceKind::SearchResultsPage => vec![
+            "Refine the search query and fetch a landing page instead of the search results page."
+                .to_string(),
+        ],
+        _ => vec!["Try a broader search or a higher-level page for the same source.".to_string()],
+    }
 }
 
 impl SearchTool {
@@ -293,7 +247,7 @@ impl SearchTool {
             return Ok(primary);
         }
 
-        for mirror_url in build_x_mirror_urls(url) {
+        for mirror_url in social_mirror_urls(url) {
             if let Ok(text) = self.fetch_page_text(&mirror_url).await {
                 if !text.trim().is_empty() && !is_x_js_placeholder(&text) {
                     return Ok(format!("[Fetched via mirror: {}]\n\n{}", mirror_url, text));
@@ -378,19 +332,21 @@ impl SearchTool {
 
     async fn fetch(&self, url: &str) -> Result<String, String> {
         self.is_allowed(url)?;
-        if is_github_repo_url(url) {
-            return Err(
-                "GitHub repository URLs should use github_repo_inspect, not search".to_string(),
-            );
-        }
-        if let Some(target) = search_engine_target(url) {
-            return self.fetch_search_engine_results(url, &target).await;
-        }
-
-        let body = if is_x_or_twitter_url(url) {
-            self.fetch_x_with_fallback(url).await?
-        } else {
-            self.fetch_page_text(url).await?
+        let body = match classify_url_source(url) {
+            SourceKind::GitHub | SourceKind::RepositoryFile => {
+                return Err(
+                    "GitHub repository URLs should use github_repo_inspect, not search".to_string(),
+                );
+            }
+            SourceKind::SearchResultsPage => {
+                let target = search_engine_target(url)
+                    .ok_or_else(|| "Invalid search results page".to_string())?;
+                return self.fetch_search_engine_results(url, &target).await;
+            }
+            SourceKind::SocialContent => self.fetch_x_with_fallback(url).await?,
+            SourceKind::DynamicWebPage | SourceKind::ArticlePage | SourceKind::Unknown => {
+                self.fetch_page_text(url).await?
+            }
         };
 
         let len = body.chars().count();
@@ -400,17 +356,43 @@ impl SearchTool {
             Ok(body)
         }
     }
+
+    fn build_recoverable_error_output(&self, url: &str, error: &str) -> Result<String, String> {
+        let kind = classify_url_source(url);
+        output::structured(
+            self.name(),
+            format!("Page fetch failed for {}: {}", url, error),
+            false,
+            json!({
+                "url": url,
+                "error": error,
+                "recoverable": true,
+                "source_kind": source_kind_label(kind),
+                "suggested_next_steps": suggested_next_steps(kind, url),
+            }),
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::source_adapter::{classify_url_source, social_mirror_urls, SourceKind};
 
     #[test]
     fn test_detect_x_or_twitter_url() {
-        assert!(is_x_or_twitter_url("https://x.com/foo/status/123"));
-        assert!(is_x_or_twitter_url("https://twitter.com/foo/status/123"));
-        assert!(!is_x_or_twitter_url("https://example.com/foo"));
+        assert_eq!(
+            classify_url_source("https://x.com/foo/status/123"),
+            SourceKind::SocialContent
+        );
+        assert_eq!(
+            classify_url_source("https://twitter.com/foo/status/123"),
+            SourceKind::SocialContent
+        );
+        assert_eq!(
+            classify_url_source("https://example.com/foo"),
+            SourceKind::ArticlePage
+        );
     }
 
     #[test]
@@ -423,12 +405,20 @@ mod tests {
 
     #[test]
     fn test_build_x_mirror_urls() {
-        let urls = build_x_mirror_urls("https://x.com/HiTw93/status/2032091246588518683");
+        let urls = social_mirror_urls("https://x.com/HiTw93/status/2032091246588518683");
         assert_eq!(urls.len(), 4);
         assert!(urls[0].contains("fixupx.com/HiTw93/status/2032091246588518683"));
         assert!(urls
             .iter()
             .any(|u| u.contains("nitter.net/HiTw93/status/2032091246588518683")));
+    }
+
+    #[test]
+    fn test_detect_recoverable_fetch_error() {
+        assert!(is_recoverable_fetch_error("HTTP 404 Not Found"));
+        assert!(is_recoverable_fetch_error("HTTP 410 Gone"));
+        assert!(!is_recoverable_fetch_error("HTTP 403 Forbidden"));
+        assert!(!is_recoverable_fetch_error("Request failed: timeout"));
     }
 }
 
@@ -453,7 +443,7 @@ impl Tool for SearchTool {
             ])
             .with_capability(
                 ToolCapabilityGroup::WebResearch,
-                ToolCapabilitySubgroup::WebFetch,
+                ToolCapabilitySubgroup::ArticlePage,
             )
             .with_costs(
                 ToolCostClass::Low,
@@ -478,7 +468,13 @@ impl Tool for SearchTool {
         if search_engine_target(url).is_some() {
             return self.fetch(url).await;
         }
-        let content = self.fetch(url).await?;
+        let content = match self.fetch(url).await {
+            Ok(content) => content,
+            Err(error) if is_recoverable_fetch_error(&error) => {
+                return self.build_recoverable_error_output(url, &error);
+            }
+            Err(error) => return Err(error),
+        };
         output::structured(
             self.name(),
             format!("Fetched web content from {}", url),

@@ -127,6 +127,7 @@ impl WorkflowGraph {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "gateway")]
     use super::*;
     #[cfg(feature = "gateway")]
     use crate::gateway::BackgroundTask;

@@ -9,8 +9,9 @@ use serde_json::{json, Value};
 use crate::llm::LlmClient;
 use crate::memory::Message;
 use crate::tools::{
-    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode,
-    ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
+    social_status_urls_from_text, Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass,
+    ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
 };
 
 pub struct DeepSearchTool {
@@ -20,11 +21,6 @@ pub struct DeepSearchTool {
     max_results_per_round: usize,
     timeout_secs: u64,
     trusted_domains: Vec<String>,
-}
-
-fn mentions_x_or_twitter(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains("twitter") || lower.contains("x.com") || lower.contains("x/twitter")
 }
 
 #[derive(Clone, Debug)]
@@ -210,27 +206,7 @@ impl DeepSearchTool {
     }
 
     fn direct_status_urls(&self, text: &str) -> Vec<String> {
-        if !mentions_x_or_twitter(text) {
-            return Vec::new();
-        }
-
-        let Ok(id_re) = Regex::new(r"\b\d{12,}\b") else {
-            return Vec::new();
-        };
-        let Some(status_id) = id_re.find(text).map(|m| m.as_str()) else {
-            return Vec::new();
-        };
-
-        let candidates = [
-            format!("https://x.com/i/web/status/{status_id}"),
-            format!("https://twitter.com/i/web/status/{status_id}"),
-            format!("https://fixupx.com/i/web/status/{status_id}"),
-            format!("https://fxtwitter.com/i/web/status/{status_id}"),
-            format!("https://vxtwitter.com/i/web/status/{status_id}"),
-            format!("https://nitter.net/i/web/status/{status_id}"),
-        ];
-
-        candidates
+        social_status_urls_from_text(text)
             .into_iter()
             .filter(|url| self.is_trusted_domain(url))
             .collect()
@@ -527,7 +503,7 @@ impl Tool for DeepSearchTool {
         ])
         .with_capability(
             ToolCapabilityGroup::WebResearch,
-            ToolCapabilitySubgroup::WebFetch,
+            ToolCapabilitySubgroup::SearchResultsPage,
         )
         .with_costs(
             ToolCostClass::High,

@@ -16,6 +16,7 @@ pub enum QueryKind {
     MarketQuote,
     SportsScore,
     TimeSensitiveCurrent,
+    WebPageAnalysis,
     DirectExplanation,
     ExternalGitHubRepo,
     General,
@@ -164,6 +165,28 @@ fn is_direct_explanation_query(input_lower: &str) -> bool {
     asks_for_explanation && !asks_for_inspection
 }
 
+fn is_web_page_analysis_query(input_lower: &str) -> bool {
+    let asks_for_web_analysis = contains_any(
+        input_lower,
+        &[
+            "网站",
+            "网页",
+            "页面",
+            "前端",
+            "ui",
+            "web ui",
+            "landing page",
+            "frontend",
+            "web",
+        ],
+    ) && contains_any(
+        input_lower,
+        &["分析", "看看", "review", "analyze", "inspect"],
+    );
+
+    asks_for_web_analysis && !contains_local_workspace_signal(input_lower)
+}
+
 fn is_time_sensitive_current_query(input_lower: &str) -> bool {
     let recency = contains_any(
         input_lower,
@@ -275,6 +298,7 @@ fn query_use_cases(kind: QueryKind) -> Vec<ToolUseCase> {
             vec![ToolUseCase::SportsScore, ToolUseCase::TimeSensitiveCurrent]
         }
         QueryKind::TimeSensitiveCurrent => vec![ToolUseCase::TimeSensitiveCurrent],
+        QueryKind::WebPageAnalysis => vec![ToolUseCase::DirectExplanation],
         QueryKind::DirectExplanation => vec![ToolUseCase::DirectExplanation],
         QueryKind::ExternalGitHubRepo => vec![ToolUseCase::ExternalGitHubRepo],
         QueryKind::General => Vec::new(),
@@ -316,6 +340,10 @@ fn metadata_supports_query(metadata: &ToolMetadata, kind: QueryKind) -> bool {
         QueryKind::ExternalGitHubRepo => {
             matches!(metadata.scope, ToolScope::GitHub | ToolScope::RemoteWeb)
         }
+        QueryKind::WebPageAnalysis => {
+            matches!(metadata.scope, ToolScope::RemoteWeb | ToolScope::GitHub)
+                && !metadata.requires_explicit_user_request
+        }
         QueryKind::DirectExplanation => {
             !matches!(
                 metadata.scope,
@@ -334,6 +362,7 @@ fn preferred_capability_group(kind: QueryKind) -> Option<ToolCapabilityGroup> {
         | QueryKind::MarketQuote
         | QueryKind::SportsScore
         | QueryKind::TimeSensitiveCurrent => Some(ToolCapabilityGroup::RealtimeData),
+        QueryKind::WebPageAnalysis => Some(ToolCapabilityGroup::WebResearch),
         QueryKind::ExternalGitHubRepo => Some(ToolCapabilityGroup::RepositoryAnalysis),
         QueryKind::DirectExplanation => Some(ToolCapabilityGroup::DirectAnswer),
         QueryKind::General => None,
@@ -560,6 +589,10 @@ fn query_kind_system_hint(kind: QueryKind) -> Option<String> {
         QueryKind::TimeSensitiveCurrent => Some(format!(
             "This is a time-sensitive current-information request. Today's date is {today}. Use fresh tools and prioritize results from {today}. Do not rely on stale memory or older summaries. If you answer with dates, mention exact dates explicitly."
         )),
+        QueryKind::WebPageAnalysis => Some(
+            "This request is about analyzing a website, web page, or frontend UI. Prefer remote web tools like search or browser. Do not inspect the local workspace with ls, cat, code_read, or shell unless the user explicitly asks about local files. If no URL or target site is provided, ask a short clarification question instead of probing the local workspace."
+                .to_string(),
+        ),
         QueryKind::ExternalGitHubRepo => Some(
             "This request is about an external GitHub repository. Prefer github_repo_inspect. Do not use local workspace tools like ls, cat, code_read, or shell unless the user explicitly asks about local files."
                 .to_string(),
@@ -592,6 +625,9 @@ pub fn classify_query(user_input: &str) -> QueryKind {
     }
     if is_time_sensitive_current_query(&input_lower) {
         return QueryKind::TimeSensitiveCurrent;
+    }
+    if is_web_page_analysis_query(&input_lower) {
+        return QueryKind::WebPageAnalysis;
     }
     if let Some(url) = extract_url(user_input) {
         if is_github_repo_url(&url)
@@ -662,6 +698,7 @@ pub fn should_use_long_term_memory(user_input: &str) -> bool {
             | QueryKind::ExchangeRate
             | QueryKind::MarketQuote
             | QueryKind::SportsScore
+            | QueryKind::WebPageAnalysis
             | QueryKind::TimeSensitiveCurrent
     )
 }
@@ -802,6 +839,18 @@ pub fn guard_tool_call(
         ));
     }
 
+    if kind == QueryKind::WebPageAnalysis
+        && matches!(
+            metadata.scope,
+            ToolScope::LocalWorkspace | ToolScope::System
+        )
+    {
+        return Err(format!(
+            "This request targets a website or web page; do not use local tool {}.",
+            tool_name
+        ));
+    }
+
     if kind == QueryKind::DirectExplanation
         && (matches!(
             metadata.scope,
@@ -822,6 +871,7 @@ pub fn guard_tool_call(
                 | QueryKind::ExchangeRate
                 | QueryKind::MarketQuote
                 | QueryKind::SportsScore
+                | QueryKind::WebPageAnalysis
                 | QueryKind::TimeSensitiveCurrent
                 | QueryKind::ExternalGitHubRepo
         )
@@ -892,6 +942,14 @@ mod tests {
     #[test]
     fn test_classify_time_sensitive_current_query() {
         assert_eq!(classify_query("今天有什么新闻，推荐5条"), QueryKind::News);
+    }
+
+    #[test]
+    fn test_classify_web_page_analysis_query() {
+        assert_eq!(
+            classify_query("分析这个 web 页面"),
+            QueryKind::WebPageAnalysis
+        );
     }
 
     #[test]

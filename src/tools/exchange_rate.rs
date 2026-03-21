@@ -50,7 +50,7 @@ impl Tool for ExchangeRateTool {
         ])
         .with_capability(
             ToolCapabilityGroup::RealtimeData,
-            ToolCapabilitySubgroup::ExchangeRate,
+            ToolCapabilitySubgroup::FinancialRealtime,
         )
         .with_costs(
             ToolCostClass::Low,

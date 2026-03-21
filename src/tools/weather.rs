@@ -53,12 +53,75 @@ impl WeatherTool {
         if location.ends_with('的') {
             location.pop();
         }
-        let location = location.trim().to_string();
+        let location = Self::sanitize_location(&location);
         if location.is_empty() {
             None
         } else {
             Some(location)
         }
+    }
+
+    fn sanitize_location(location: &str) -> String {
+        location
+            .trim()
+            .trim_matches(|c: char| {
+                c.is_whitespace()
+                    || matches!(
+                        c,
+                        '？'
+                            | '?'
+                            | '。'
+                            | '.'
+                            | '！'
+                            | '!'
+                            | '，'
+                            | ','
+                            | '、'
+                            | '；'
+                            | ';'
+                            | '：'
+                            | ':'
+                            | '的'
+                    )
+            })
+            .trim()
+            .to_string()
+    }
+
+    fn day_label(day: &str) -> &'static str {
+        if Self::normalize_day(day) == "tomorrow" {
+            "明天"
+        } else {
+            "今天"
+        }
+    }
+
+    fn build_brief(location: &str, day: &str, current: &Value, forecast: &Value) -> String {
+        let current_temp = current
+            .get("temp_C")
+            .and_then(|v| v.as_str())
+            .filter(|v| !v.is_empty());
+        let desc = current
+            .get("weatherDesc")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.get("value"))
+            .and_then(|v| v.as_str())
+            .filter(|v| !v.is_empty());
+        let max_temp = forecast.get("maxtempC").and_then(|v| v.as_str());
+        let min_temp = forecast.get("mintempC").and_then(|v| v.as_str());
+
+        let mut parts = vec![format!("{}{}天气", location, Self::day_label(day))];
+        if let Some(desc) = desc {
+            parts.push(desc.to_string());
+        }
+        if let Some(current_temp) = current_temp {
+            parts.push(format!("当前约{}°C", current_temp));
+        }
+        if let (Some(min_temp), Some(max_temp)) = (min_temp, max_temp) {
+            parts.push(format!("{}~{}°C", min_temp, max_temp));
+        }
+        parts.join("，")
     }
 
     async fn fetch_weather(&self, location: &str, day: &str) -> Result<String, String> {
@@ -105,11 +168,9 @@ impl WeatherTool {
                 })
                 .unwrap_or(Value::Null);
 
-            let summary = format!(
-                "{} weather for {}",
-                if index == 1 { "Tomorrow" } else { "Today" },
-                location
-            );
+            let day_key = if index == 1 { "tomorrow" } else { "today" };
+            let brief = Self::build_brief(location, day_key, &current, &selected);
+            let summary = format!("{}天气：{}", location, Self::day_label(day_key));
 
             return output::structured(
                 self.name(),
@@ -117,7 +178,8 @@ impl WeatherTool {
                 true,
                 serde_json::json!({
                     "location": location,
-                    "day": if index == 1 { "tomorrow" } else { "today" },
+                    "day": day_key,
+                    "brief": brief,
                     "current_condition": current,
                     "forecast": selected,
                     "source": "wttr.in"
@@ -127,15 +189,35 @@ impl WeatherTool {
 
         output::structured(
             self.name(),
-            format!("Weather fallback for {}", location),
-            true,
+            format!("Weather fetch failed for {}", location),
+            false,
             serde_json::json!({
                 "location": location,
                 "day": Self::normalize_day(day),
                 "status_code": response.status().as_u16(),
-                "source": "wttr.in"
+                "source": "wttr.in",
+                "recoverable": true
             }),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_location_trims_punctuation() {
+        assert_eq!(WeatherTool::sanitize_location("吉隆坡？"), "吉隆坡");
+        assert_eq!(WeatherTool::sanitize_location("  Kuala Lumpur?! "), "Kuala Lumpur");
+    }
+
+    #[test]
+    fn test_infer_location_from_text_strips_weather_noise() {
+        assert_eq!(
+            WeatherTool::infer_location_from_text("吉隆坡明天天气怎么样？").as_deref(),
+            Some("吉隆坡")
+        );
     }
 }
 
@@ -201,7 +283,7 @@ impl Tool for WeatherTool {
         let location = args
             .get("location")
             .and_then(|v| v.as_str())
-            .map(|s| s.trim().to_string())
+            .map(Self::sanitize_location)
             .or_else(|| {
                 args.get("topic")
                     .and_then(|v| v.as_str())

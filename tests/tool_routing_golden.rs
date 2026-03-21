@@ -53,7 +53,7 @@ fn github_tool() -> ToolMetadata {
         .with_preferred_use_cases(vec![ToolUseCase::ExternalGitHubRepo])
         .with_capability(
             ToolCapabilityGroup::RepositoryAnalysis,
-            ToolCapabilitySubgroup::GitHubRepo,
+            ToolCapabilitySubgroup::RepositoryFile,
         )
         .with_costs(
             ToolCostClass::Low,
@@ -117,7 +117,7 @@ fn search_tool() -> ToolMetadata {
         ])
         .with_capability(
             ToolCapabilityGroup::WebResearch,
-            ToolCapabilitySubgroup::WebFetch,
+            ToolCapabilitySubgroup::ArticlePage,
         )
         .with_costs(
             ToolCostClass::Low,
@@ -138,6 +138,52 @@ fn all_tools() -> Vec<(String, ToolMetadata)> {
             local_file_tool().with_risk(ToolRisk::High),
         ),
         ("search".to_string(), search_tool()),
+        (
+            "exchange_rate".to_string(),
+            ToolMetadata::new(
+                ToolScope::RemoteWeb,
+                vec![ToolIntent::FetchWebPage, ToolIntent::Research],
+            )
+            .with_freshness(ToolFreshness::Live)
+            .with_preferred_use_cases(vec![
+                ToolUseCase::ExchangeRate,
+                ToolUseCase::TimeSensitiveCurrent,
+            ])
+            .with_capability(
+                ToolCapabilityGroup::RealtimeData,
+                ToolCapabilitySubgroup::FinancialRealtime,
+            )
+            .with_costs(
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+            )
+            .with_preferred_rank(1),
+        ),
+        (
+            "market_quote".to_string(),
+            ToolMetadata::new(
+                ToolScope::RemoteWeb,
+                vec![ToolIntent::FetchWebPage, ToolIntent::Research],
+            )
+            .with_freshness(ToolFreshness::Live)
+            .with_preferred_use_cases(vec![
+                ToolUseCase::MarketQuote,
+                ToolUseCase::TimeSensitiveCurrent,
+            ])
+            .with_capability(
+                ToolCapabilityGroup::RealtimeData,
+                ToolCapabilitySubgroup::FinancialRealtime,
+            )
+            .with_costs(
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+            )
+            .with_preferred_rank(1),
+        ),
         ("github_repo_inspect".to_string(), github_tool()),
         ("news".to_string(), news_tool()),
         ("weather".to_string(), weather_tool()),

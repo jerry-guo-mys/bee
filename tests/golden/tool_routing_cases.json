@@ -34,5 +34,50 @@
     "expected_allowed_tools": ["search"],
     "forbidden_tools": ["ls", "cat", "code_read", "shell"],
     "should_use_memory": true
+  },
+  {
+    "name": "direct_answer_should_not_probe_local_workspace",
+    "input": "Paperclip 是什么产品，核心功能是什么？",
+    "expected_query_kind": "DirectExplanation",
+    "expected_direct_tool": null,
+    "expected_allowed_tools": ["search"],
+    "forbidden_tools": ["ls", "cat", "code_read", "shell"],
+    "should_use_memory": true
+  },
+  {
+    "name": "web_page_analysis_should_not_probe_local_workspace",
+    "input": "分析这个 web 页面",
+    "expected_query_kind": "WebPageAnalysis",
+    "expected_direct_tool": null,
+    "expected_allowed_tools": ["search"],
+    "forbidden_tools": ["ls", "cat", "code_read", "shell"],
+    "should_use_memory": false
+  },
+  {
+    "name": "external_repo_should_not_fall_back_to_local_files",
+    "input": "分析 https://github.com/openai/codex.git 的技术栈和目录结构",
+    "expected_query_kind": "ExternalGitHubRepo",
+    "expected_direct_tool": null,
+    "expected_allowed_tools": ["github_repo_inspect"],
+    "forbidden_tools": ["ls", "cat", "code_read", "shell"],
+    "should_use_memory": true
+  },
+  {
+    "name": "time_sensitive_request_should_skip_memory",
+    "input": "今天美元兑人民币汇率是多少",
+    "expected_query_kind": "ExchangeRate",
+    "expected_direct_tool": "exchange_rate",
+    "expected_allowed_tools": ["exchange_rate"],
+    "forbidden_tools": ["ls", "cat", "code_read", "shell"],
+    "should_use_memory": false
+  },
+  {
+    "name": "specialized_tool_should_win_over_general_search",
+    "input": "比特币现在价格",
+    "expected_query_kind": "MarketQuote",
+    "expected_direct_tool": "market_quote",
+    "expected_allowed_tools": ["market_quote"],
+    "forbidden_tools": ["ls", "shell"],
+    "should_use_memory": false
   }
 ]

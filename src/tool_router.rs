@@ -37,7 +37,8 @@ fn infer_weather_day(input_lower: &str) -> &'static str {
 }
 
 fn clean_location_text(text: &str) -> String {
-    text.replace("今天天气", "")
+    let mut cleaned = text
+        .replace("今天天气", "")
         .replace("明天天气", "")
         .replace("天气", "")
         .replace("weather", "")
@@ -51,8 +52,37 @@ fn clean_location_text(text: &str) -> String {
         .replace("如何", "")
         .replace("查询", "")
         .replace("推荐", "")
+        .to_string();
+
+    for marker in ["？", "?", "，", ",", "。", ".", "；", ";", "\n", "给出", "请", "并且", "并", "顺便"] {
+        if let Some(idx) = cleaned.find(marker) {
+            cleaned.truncate(idx);
+            break;
+        }
+    }
+
+    cleaned
         .trim()
-        .trim_end_matches('的')
+        .trim_matches(|c: char| {
+            c.is_whitespace()
+                || matches!(
+                    c,
+                    '？'
+                        | '?'
+                        | '。'
+                        | '.'
+                        | '！'
+                        | '!'
+                        | '，'
+                        | ','
+                        | '、'
+                        | '；'
+                        | ';'
+                        | '：'
+                        | ':'
+                        | '的'
+                )
+        })
         .trim()
         .to_string()
 }
@@ -254,21 +284,56 @@ fn render_direct_response(tool: &str, raw_output: &str) -> String {
     let data = value.get("data").cloned().unwrap_or(Value::Null);
     match tool {
         "weather" => {
+            if let Some(brief) = data.get("brief").and_then(Value::as_str) {
+                if !brief.trim().is_empty() {
+                    return brief.to_string();
+                }
+            }
             let location = data.get("location").and_then(Value::as_str).unwrap_or("");
             let day = data.get("day").and_then(Value::as_str).unwrap_or("today");
-            let forecast = data
-                .get("forecast")
+            let day_label = if day == "tomorrow" { "明天" } else { "今天" };
+            let desc = data
+                .get("current_condition")
+                .and_then(|value| value.get("weatherDesc"))
+                .and_then(Value::as_array)
+                .and_then(|arr| arr.first())
+                .and_then(|value| value.get("value"))
                 .and_then(Value::as_str)
-                .or_else(|| data.get("summary").and_then(Value::as_str))
                 .unwrap_or("");
-            if forecast.is_empty() {
+            let current_temp = data
+                .get("current_condition")
+                .and_then(|value| value.get("temp_C"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let min_temp = data
+                .get("forecast")
+                .and_then(|value| value.get("mintempC"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let max_temp = data
+                .get("forecast")
+                .and_then(|value| value.get("maxtempC"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+
+            let mut parts = vec![format!("{location}{day_label}天气")];
+            if !desc.is_empty() {
+                parts.push(desc.to_string());
+            }
+            if !current_temp.is_empty() {
+                parts.push(format!("当前约{}°C", current_temp));
+            }
+            if !min_temp.is_empty() && !max_temp.is_empty() {
+                parts.push(format!("{}~{}°C", min_temp, max_temp));
+            }
+            if parts.len() == 1 {
                 value
                     .get("summary")
                     .and_then(Value::as_str)
-                    .unwrap_or("Weather fetched")
+                    .unwrap_or("天气已获取")
                     .to_string()
             } else {
-                format!("{location} {day}: {forecast}")
+                parts.join("，")
             }
         }
         "news" => {
@@ -435,6 +500,45 @@ mod tests {
     fn test_direct_route_skips_when_tool_not_allowed() {
         assert!(
             deterministic_route("今天有什么新闻，推荐5条", Some(&["search".to_string()])).is_none()
+        );
+    }
+
+    #[test]
+    fn test_clean_location_text_ignores_followup_style_request() {
+        assert_eq!(
+            clean_location_text("吉隆坡今天天气如何？给出更详细一点的回答，语气温情一点"),
+            "吉隆坡"
+        );
+    }
+
+    #[test]
+    fn test_direct_route_weather_ignores_followup_style_request() {
+        let route = deterministic_route(
+            "吉隆坡今天天气如何？给出更详细一点的回答，语气温情一点",
+            None,
+        )
+        .unwrap();
+        assert_eq!(route.tool_name, "weather");
+        assert_eq!(route.args["location"], "吉隆坡");
+        assert_eq!(route.args["day"], "today");
+    }
+
+    #[test]
+    fn test_render_direct_response_weather_prefers_brief() {
+        let raw = serde_json::json!({
+            "tool": "weather",
+            "summary": "吉隆坡天气：今天",
+            "sufficient_to_answer": true,
+            "data": {
+                "location": "吉隆坡",
+                "day": "today",
+                "brief": "吉隆坡今天天气，晴，当前约24°C，22~32°C"
+            }
+        })
+        .to_string();
+        assert_eq!(
+            render_direct_response("weather", &raw),
+            "吉隆坡今天天气，晴，当前约24°C，22~32°C"
         );
     }
 }

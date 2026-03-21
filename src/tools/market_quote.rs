@@ -50,7 +50,7 @@ impl Tool for MarketQuoteTool {
         ])
         .with_capability(
             ToolCapabilityGroup::RealtimeData,
-            ToolCapabilitySubgroup::MarketQuote,
+            ToolCapabilitySubgroup::FinancialRealtime,
         )
         .with_costs(
             ToolCostClass::Low,

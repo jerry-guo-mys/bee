@@ -5,7 +5,9 @@
 //! - 工具执行时间
 //! - 请求完整生命周期追踪
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -82,6 +84,12 @@ impl Metrics {
                 "policy_blocks": self.tools.policy_blocks.load(Ordering::Relaxed),
                 "direct_route_hits": self.tools.direct_route_hits.load(Ordering::Relaxed),
                 "route_drift_count": self.tools.route_drift_count.load(Ordering::Relaxed),
+                "critic_score_count": self.tools.critic_score_count.load(Ordering::Relaxed),
+                "critic_score_avg": self.tools.average_critic_score(),
+                "critic_low_score_count": self.tools.critic_low_score_count.load(Ordering::Relaxed),
+                "critic_score_buckets": self.tools.critic_score_buckets_snapshot(),
+                "critic_low_score_query_kind": self.tools.critic_low_score_query_kind_snapshot(),
+                "critic_low_score_tool_pairs": self.tools.critic_low_score_tool_pairs_snapshot(),
                 "total_execution_time_ms": self.tools.total_execution_time_ms.load(Ordering::Relaxed),
                 "average_execution_time_ms": self.tools.average_execution_time_ms(),
             },
@@ -162,6 +170,18 @@ impl Metrics {
         output.push_str(&format!(
             "# TYPE bee_tool_route_drift_count counter\nbee_tool_route_drift_count {}\n",
             self.tools.route_drift_count.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "# TYPE bee_tool_critic_score_count counter\nbee_tool_critic_score_count {}\n",
+            self.tools.critic_score_count.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "# TYPE bee_tool_critic_low_score_count counter\nbee_tool_critic_low_score_count {}\n",
+            self.tools.critic_low_score_count.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "# TYPE bee_tool_critic_score_avg gauge\nbee_tool_critic_score_avg {}\n",
+            self.tools.average_critic_score()
         ));
         output.push_str(&format!(
             "# TYPE bee_tool_execution_time_ms_total counter\nbee_tool_execution_time_ms_total {}\n",
@@ -284,6 +304,12 @@ pub struct ToolMetrics {
     pub policy_blocks: AtomicU64,
     pub direct_route_hits: AtomicU64,
     pub route_drift_count: AtomicU64,
+    pub critic_score_count: AtomicU64,
+    pub critic_score_sum_milli: AtomicU64,
+    pub critic_low_score_count: AtomicU64,
+    pub critic_score_buckets: Mutex<HashMap<String, u64>>,
+    pub critic_low_score_query_kind: Mutex<HashMap<String, u64>>,
+    pub critic_low_score_tool_pairs: Mutex<HashMap<String, u64>>,
     pub total_execution_time_ms: AtomicU64,
 }
 
@@ -323,6 +349,76 @@ impl ToolMetrics {
 
     pub fn record_route_drift(&self) {
         self.route_drift_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_critic_score(
+        &self,
+        score: f32,
+        query_kind: &str,
+        tool_name: &str,
+        threshold: f32,
+    ) {
+        let clamped = score.clamp(0.0, 1.0);
+        self.critic_score_count.fetch_add(1, Ordering::Relaxed);
+        self.critic_score_sum_milli
+            .fetch_add((clamped * 1000.0) as u64, Ordering::Relaxed);
+
+        let bucket = if clamped < 0.2 {
+            "lt_0_2"
+        } else if clamped < 0.4 {
+            "lt_0_4"
+        } else if clamped < 0.6 {
+            "lt_0_6"
+        } else if clamped < 0.8 {
+            "lt_0_8"
+        } else {
+            "gte_0_8"
+        };
+        if let Ok(mut buckets) = self.critic_score_buckets.lock() {
+            *buckets.entry(bucket.to_string()).or_insert(0) += 1;
+        }
+
+        if clamped < threshold {
+            self.critic_low_score_count.fetch_add(1, Ordering::Relaxed);
+            if let Ok(mut kinds) = self.critic_low_score_query_kind.lock() {
+                *kinds.entry(query_kind.to_string()).or_insert(0) += 1;
+            }
+            if let Ok(mut pairs) = self.critic_low_score_tool_pairs.lock() {
+                let key = format!("{query_kind}::{tool_name}");
+                *pairs.entry(key).or_insert(0) += 1;
+            }
+        }
+    }
+
+    pub fn average_critic_score(&self) -> f64 {
+        let total = self.critic_score_sum_milli.load(Ordering::Relaxed);
+        let count = self.critic_score_count.load(Ordering::Relaxed);
+        if count == 0 {
+            0.0
+        } else {
+            total as f64 / count as f64 / 1000.0
+        }
+    }
+
+    pub fn critic_score_buckets_snapshot(&self) -> HashMap<String, u64> {
+        self.critic_score_buckets
+            .lock()
+            .map(|map| map.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn critic_low_score_query_kind_snapshot(&self) -> HashMap<String, u64> {
+        self.critic_low_score_query_kind
+            .lock()
+            .map(|map| map.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn critic_low_score_tool_pairs_snapshot(&self) -> HashMap<String, u64> {
+        self.critic_low_score_tool_pairs
+            .lock()
+            .map(|map| map.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -515,6 +611,7 @@ mod tests {
         metrics.record_policy_block();
         metrics.record_direct_route_hit();
         metrics.record_route_drift();
+        metrics.record_critic_score(0.3, "News", "search", 0.45);
 
         assert_eq!(metrics.total_executions.load(Ordering::Relaxed), 2);
         assert_eq!(metrics.average_execution_time_ms(), 75.0);
@@ -522,6 +619,8 @@ mod tests {
         assert_eq!(metrics.policy_blocks.load(Ordering::Relaxed), 1);
         assert_eq!(metrics.direct_route_hits.load(Ordering::Relaxed), 1);
         assert_eq!(metrics.route_drift_count.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.critic_score_count.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.critic_low_score_count.load(Ordering::Relaxed), 1);
     }
 
     #[test]

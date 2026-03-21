@@ -1292,6 +1292,7 @@
       });
       
       if (filteredSessions.length === 0) {
+        list.innerHTML = '';
         empty.classList.remove('hidden');
         return;
       }
@@ -1318,7 +1319,7 @@
                       <span class="text-xs text-text-sub-light dark:text-text-sub-dark">${session.updated_at}</span>
                     </div>
                   </div>
-                  <button class="delete-session-btn opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded transition-all" onclick="event.stopPropagation(); deleteSession('${safeId}')">
+                  <button class="delete-session-btn opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded transition-all" onclick="event.preventDefault(); event.stopPropagation(); deleteSession('${safeId}')">
                     <span class="material-icons-outlined text-sm text-red-500">delete</span>
                   </button>
                 </a>
@@ -2047,13 +2048,18 @@
         
         if (currentSessionId === sid && selectedAssistant === (aid || 'default')) {
           currentSessionId = null;
+          currentSessionCompositeId = null;
           document.getElementById('messages').innerHTML = '';
           document.getElementById('messages').classList.add('hidden');
           document.getElementById('welcome-screen').classList.remove('hidden');
           document.getElementById('current-session-title').textContent = 'New Chat';
         }
-        
-        loadSessions();
+
+        sessionIndex.delete(sessionIdOrComposite);
+        const sessionItem = document.querySelector(`.session-item[data-id="${CSS.escape(sessionIdOrComposite)}"]`);
+        sessionItem?.remove();
+        highlightCurrentSession();
+        await loadSessions();
         showToast('Conversation deleted', 'success');
       } catch (e) {
         showToast('Failed to delete conversation', 'error');

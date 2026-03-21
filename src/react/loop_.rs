@@ -8,7 +8,9 @@ use tokio::sync::broadcast;
 use crate::core::{AgentError, RecoveryAction, RecoveryEngine, TaskScheduler};
 use crate::memory::Message;
 use crate::react::{parse_llm_output, ContextManager, Critic, CriticResult, Planner, ReactEvent};
-use crate::tool_policy::{guard_tool_call, rewrite_tool_call, should_use_long_term_memory};
+use crate::tool_policy::{
+    classify_query, guard_tool_call, rewrite_tool_call, should_use_long_term_memory,
+};
 use crate::tools::ToolExecutor;
 
 /// 单次对话内最大 ReAct 步数，防止死循环
@@ -261,6 +263,7 @@ async fn react_loop_impl(
     let mut step = 0;
     let mut critic_retry_budget = critic.map(|c| c.max_self_corrections()).unwrap_or(0);
     let mut last_llm_output = String::new();
+    let query_kind_label = format!("{:?}", classify_query(user_input));
 
     loop {
         send_event(
@@ -523,17 +526,36 @@ async fn react_loop_impl(
                     Some(a) if !a.is_empty() => a,
                     _ => &[], // 空 slice 表示用 executor 全部工具
                 };
+                let executor_names = executor.tool_names();
+                let exists_in_executor = executor_names.iter().any(|n| n == &tool_name);
                 let is_allowed = if valid_names.is_empty() {
-                    executor.tool_names().iter().any(|n| n == &tool_name)
+                    exists_in_executor
                 } else {
                     valid_names.iter().any(|n| n == &tool_name)
                 };
                 if !is_allowed {
                     let ref_names: Vec<String> = if valid_names.is_empty() {
-                        executor.tool_names()
+                        executor_names.clone()
                     } else {
                         valid_names.to_vec()
                     };
+                    if exists_in_executor && !valid_names.is_empty() {
+                        let detail = format!(
+                            "Tool {} is not allowed in this conversation. Allowed tools: {}.",
+                            tool_name,
+                            ref_names.join(", ")
+                        );
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Recovery {
+                                action: "AllowedTools".to_string(),
+                                detail: detail.clone(),
+                            },
+                        );
+                        context.push_message(Message::user(detail));
+                        step += 1;
+                        continue;
+                    }
                     send_event(
                         &event_tx,
                         ReactEvent::Error {
@@ -645,10 +667,24 @@ async fn react_loop_impl(
                         ) {
                             match c.evaluate(user_input, &tool_name, &observation).await {
                                 Ok(CriticResult::Approved { score }) => {
+                                    crate::observability::Metrics::global()
+                                        .tools
+                                        .record_critic_score(
+                                            score,
+                                            &query_kind_label,
+                                            &tool_name,
+                                            c.score_threshold(),
+                                        );
                                     tracing::debug!(tool = %tool_name, critic_score = score, "critic approved observation");
                                 }
                                 Ok(CriticResult::Review(review)) => {
                                     let metrics = crate::observability::Metrics::global();
+                                    metrics.tools.record_critic_score(
+                                        review.score,
+                                        &query_kind_label,
+                                        &tool_name,
+                                        c.score_threshold(),
+                                    );
                                     metrics.tools.record_route_drift();
                                     if review.score < c.score_threshold()
                                         && review.retry_recommended
