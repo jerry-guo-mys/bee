@@ -44,13 +44,15 @@ mod task_queue;
 
 pub use hub::{Hub, HubConfig};
 pub use intent::{Intent, IntentRecognizer};
-pub use message::{GatewayMessage, MessageType, ClientInfo, SpokeType};
+pub use message::{ClientInfo, GatewayMessage, MessageType, SpokeType};
 #[cfg(feature = "async-sqlite")]
 pub use persistent_session::PersistentSessionManager;
 pub use runtime::{AgentRuntime, RuntimeConfig};
-pub use session::{Session, SessionManager, SessionId};
-pub use session_store::{SessionStore, MemorySessionStore, create_session_store};
+pub use session::{Session, SessionId, SessionManager, SessionScope};
 #[cfg(feature = "async-sqlite")]
 pub use session_store::PersistentSessionStore;
-pub use spoke::{SpokeAdapter, CommunicationSpoke, CapabilitySpoke, WebSocketSpoke, HttpSpoke};
-pub use task_queue::{BackgroundTask, TaskQueue, TaskExecutor, TaskId, TaskNotification, TaskPriority, TaskStatus};
+pub use session_store::{create_session_store, MemorySessionStore, SessionStore};
+pub use spoke::{CapabilitySpoke, CommunicationSpoke, HttpSpoke, SpokeAdapter, WebSocketSpoke};
+pub use task_queue::{
+    BackgroundTask, TaskExecutor, TaskId, TaskNotification, TaskPriority, TaskQueue, TaskStatus,
+};

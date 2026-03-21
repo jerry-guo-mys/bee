@@ -18,7 +18,10 @@ use headless_chrome::{Browser, Tab};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolFreshness, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk,
+    ToolScope, ToolUseCase,
+};
 
 /// 语义快照中的元素
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +55,9 @@ pub struct BrowserSession {
 /// 从 URL 提取域名（小写）
 fn extract_domain(url: &str) -> Option<String> {
     let url = url.trim();
-    let url = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let url = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
     let host = url.split('/').next()?;
     let host = host.split(':').next()?;
     Some(host.to_lowercase())
@@ -85,7 +90,7 @@ fn is_interactive_role(role: &str) -> bool {
 /// 构建语义快照的文本表示
 fn build_text_representation(elements: &[SemanticElement]) -> String {
     let mut lines = Vec::new();
-    
+
     for elem in elements {
         let indent = "  ".repeat(elem.depth);
         let ref_marker = if elem.is_interactive {
@@ -93,24 +98,24 @@ fn build_text_representation(elements: &[SemanticElement]) -> String {
         } else {
             String::new()
         };
-        
+
         let mut line = format!("{}{}{}", indent, ref_marker, elem.role);
-        
+
         if !elem.name.is_empty() {
             line.push_str(&format!(": \"{}\"", elem.name));
         }
-        
+
         if let Some(ref val) = elem.value {
             line.push_str(&format!(" = \"{}\"", val));
         }
-        
+
         if let Some(ref desc) = elem.description {
             line.push_str(&format!(" ({})", desc));
         }
-        
+
         lines.push(line);
     }
-    
+
     lines.join("\n")
 }
 
@@ -141,8 +146,23 @@ impl BrowserTool {
     }
 
     fn is_allowed(&self, url: &str) -> Result<(), String> {
-        let domain = extract_domain(url)
-            .ok_or_else(|| "Invalid or missing URL".to_string())?;
+        let domain = extract_domain(url).ok_or_else(|| "Invalid or missing URL".to_string())?;
+        let is_blocked = matches!(domain.as_str(), "localhost" | "0.0.0.0")
+            || domain.ends_with(".local")
+            || domain.starts_with("127.")
+            || domain.starts_with("10.")
+            || domain.starts_with("192.168.")
+            || domain
+                .strip_prefix("172.")
+                .and_then(|rest| rest.split('.').next())
+                .and_then(|octet| octet.parse::<u8>().ok())
+                .is_some_and(|value| (16..=31).contains(&value));
+        if is_blocked {
+            return Err(format!("Blocked internal domain: {}", domain));
+        }
+        if self.allowed_domains.is_empty() || self.allowed_domains.contains("*") {
+            return Ok(());
+        }
         if self.allowed_domains.contains(&domain) {
             return Ok(());
         }
@@ -157,10 +177,12 @@ impl BrowserTool {
             .map_err(|e| format!("Get title failed: {}", e))?;
 
         let ax_tree = tab
-            .call_method(headless_chrome::protocol::cdp::Accessibility::GetFullAXTree {
-                depth: Some(10),
-                frame_id: None,
-            })
+            .call_method(
+                headless_chrome::protocol::cdp::Accessibility::GetFullAXTree {
+                    depth: Some(10),
+                    frame_id: None,
+                },
+            )
             .map_err(|e| format!("Get accessibility tree failed: {}", e))?;
 
         let mut elements = Vec::new();
@@ -168,57 +190,65 @@ impl BrowserTool {
         let mut ref_id = 1usize;
 
         for node in &ax_tree.nodes {
-                let role = node.role.as_ref()
-                    .and_then(|r| r.value.as_ref())
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
+            let role = node
+                .role
+                .as_ref()
+                .and_then(|r| r.value.as_ref())
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
 
-                if role == "none" || role == "unknown" || role == "generic" {
-                    continue;
+            if role == "none" || role == "unknown" || role == "generic" {
+                continue;
+            }
+
+            let name = node
+                .name
+                .as_ref()
+                .and_then(|n| n.value.as_ref())
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let value = node
+                .value
+                .as_ref()
+                .and_then(|v| v.value.as_ref())
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let description = node
+                .description
+                .as_ref()
+                .and_then(|d| d.value.as_ref())
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let backend_node_id = node.backend_dom_node_id.map(|id| id as i64);
+            let is_interactive = is_interactive_role(&role);
+
+            let depth = 0;
+
+            if is_interactive {
+                if let Some(id) = backend_node_id {
+                    element_map.insert(ref_id, id);
                 }
+            }
 
-                let name = node.name.as_ref()
-                    .and_then(|n| n.value.as_ref())
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+            elements.push(SemanticElement {
+                ref_id: if is_interactive { ref_id } else { 0 },
+                role,
+                name,
+                value,
+                description,
+                backend_node_id,
+                is_interactive,
+                depth,
+            });
 
-                let value = node.value.as_ref()
-                    .and_then(|v| v.value.as_ref())
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let description = node.description.as_ref()
-                    .and_then(|d| d.value.as_ref())
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let backend_node_id = node.backend_dom_node_id.map(|id| id as i64);
-                let is_interactive = is_interactive_role(&role);
-
-                let depth = 0;
-
-                if is_interactive {
-                    if let Some(id) = backend_node_id {
-                        element_map.insert(ref_id, id);
-                    }
-                }
-
-                elements.push(SemanticElement {
-                    ref_id: if is_interactive { ref_id } else { 0 },
-                    role,
-                    name,
-                    value,
-                    description,
-                    backend_node_id,
-                    is_interactive,
-                    depth,
-                });
-
-                if is_interactive {
-                    ref_id += 1;
-                }
+            if is_interactive {
+                ref_id += 1;
+            }
         }
 
         let text_representation = build_text_representation(&elements);
@@ -232,7 +262,11 @@ impl BrowserTool {
     }
 
     /// 通过引用 ID 点击元素（使用 JavaScript 执行）
-    pub fn click_by_ref(tab: &Arc<Tab>, ref_id: usize, element_map: &HashMap<usize, i64>) -> Result<String, String> {
+    pub fn click_by_ref(
+        tab: &Arc<Tab>,
+        ref_id: usize,
+        element_map: &HashMap<usize, i64>,
+    ) -> Result<String, String> {
         let _backend_node_id = element_map
             .get(&ref_id)
             .ok_or_else(|| format!("Element ref [{}] not found", ref_id))?;
@@ -291,7 +325,10 @@ impl BrowserTool {
             .get(&ref_id)
             .ok_or_else(|| format!("Element ref [{}] not found", ref_id))?;
 
-        let escaped_text = text.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
+        let escaped_text = text
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n");
 
         let js = format!(
             r#"
@@ -364,6 +401,21 @@ The semantic snapshot shows interactive elements like:
 Use ref IDs to interact with elements precisely."#
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(
+            ToolScope::RemoteWeb,
+            vec![ToolIntent::BrowseInteractive, ToolIntent::FetchWebPage],
+        )
+        .with_risk(ToolRisk::Medium)
+        .with_output_shape(ToolOutputShape::Mixed)
+        .with_freshness(ToolFreshness::BestEffort)
+        .with_preferred_use_cases(vec![
+            ToolUseCase::ExternalGitHubRepo,
+            ToolUseCase::TimeSensitiveCurrent,
+        ])
+        .with_critic_mode(ToolCriticMode::Conservative)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
         let action = args
             .get("action")
@@ -428,13 +480,13 @@ Use ref IDs to interact with elements precisely."#
 
                     let output = format!(
                         "# {}\nURL: {}\n\n## Semantic Snapshot\n{}",
-                        snapshot.title,
-                        snapshot.url,
-                        snapshot.text_representation
+                        snapshot.title, snapshot.url, snapshot.text_representation
                     );
 
                     if output.len() > max_chars {
-                        Ok::<_, String>(output.chars().take(max_chars).collect::<String>() + "\n...[truncated]")
+                        Ok::<_, String>(
+                            output.chars().take(max_chars).collect::<String>() + "\n...[truncated]",
+                        )
                     } else {
                         Ok(output)
                     }
@@ -451,21 +503,21 @@ Use ref IDs to interact with elements precisely."#
 
                 let result = tokio::task::spawn_blocking(move || {
                     let session_guard = session_arc.read().map_err(|e| e.to_string())?;
-                    let session = session_guard
-                        .as_ref()
-                        .ok_or_else(|| "No active browser session. Use navigate first.".to_string())?;
+                    let session = session_guard.as_ref().ok_or_else(|| {
+                        "No active browser session. Use navigate first.".to_string()
+                    })?;
 
                     let snapshot = Self::get_semantic_snapshot(&session.tab)?;
 
                     let output = format!(
                         "# {}\nURL: {}\n\n## Semantic Snapshot\n{}",
-                        snapshot.title,
-                        snapshot.url,
-                        snapshot.text_representation
+                        snapshot.title, snapshot.url, snapshot.text_representation
                     );
 
                     if output.len() > max_chars {
-                        Ok::<_, String>(output.chars().take(max_chars).collect::<String>() + "\n...[truncated]")
+                        Ok::<_, String>(
+                            output.chars().take(max_chars).collect::<String>() + "\n...[truncated]",
+                        )
                     } else {
                         Ok(output)
                     }
@@ -487,9 +539,9 @@ Use ref IDs to interact with elements precisely."#
 
                 let result = tokio::task::spawn_blocking(move || {
                     let session_guard = session_arc.read().map_err(|e| e.to_string())?;
-                    let session = session_guard
-                        .as_ref()
-                        .ok_or_else(|| "No active browser session. Use navigate first.".to_string())?;
+                    let session = session_guard.as_ref().ok_or_else(|| {
+                        "No active browser session. Use navigate first.".to_string()
+                    })?;
 
                     Self::click_by_ref(&session.tab, ref_id, &session.element_map)
                 })
@@ -505,19 +557,16 @@ Use ref IDs to interact with elements precisely."#
                     .and_then(|v| v.as_u64())
                     .ok_or_else(|| "Missing ref (element reference ID)".to_string())?
                     as usize;
-                let text = args
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
 
                 let session_arc = Arc::clone(&self.session);
                 let text = text.to_string();
 
                 let result = tokio::task::spawn_blocking(move || {
                     let session_guard = session_arc.read().map_err(|e| e.to_string())?;
-                    let session = session_guard
-                        .as_ref()
-                        .ok_or_else(|| "No active browser session. Use navigate first.".to_string())?;
+                    let session = session_guard.as_ref().ok_or_else(|| {
+                        "No active browser session. Use navigate first.".to_string()
+                    })?;
 
                     Self::type_text_by_ref(&session.tab, ref_id, &text, &session.element_map)
                 })
@@ -538,13 +587,14 @@ Use ref IDs to interact with elements precisely."#
 
                 let result = tokio::task::spawn_blocking(move || {
                     let session_guard = session_arc.read().map_err(|e| e.to_string())?;
-                    let session = session_guard
-                        .as_ref()
-                        .ok_or_else(|| "No active browser session. Use navigate first.".to_string())?;
+                    let session = session_guard.as_ref().ok_or_else(|| {
+                        "No active browser session. Use navigate first.".to_string()
+                    })?;
 
                     let scroll_amount = if direction == "up" { -500 } else { 500 };
                     let js = format!("window.scrollBy(0, {})", scroll_amount);
-                    session.tab
+                    session
+                        .tab
                         .evaluate(&js, false)
                         .map_err(|e| format!("Scroll failed: {}", e))?;
 
@@ -567,15 +617,19 @@ Use ref IDs to interact with elements precisely."#
                 }
                 self.is_allowed(url)?;
 
-                let selector = args.get("selector").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let selector = args
+                    .get("selector")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 let max_chars = self.max_result_chars;
                 let url = url.to_string();
 
                 tracing::info!(url = %url, selector = ?selector, "browser tool fetch content");
 
                 let text = tokio::task::spawn_blocking(move || {
-                    let browser = Browser::default()
-                        .map_err(|e| format!("Chrome launch failed: {}. Install Chrome/Chromium.", e))?;
+                    let browser = Browser::default().map_err(|e| {
+                        format!("Chrome launch failed: {}. Install Chrome/Chromium.", e)
+                    })?;
                     let tab = browser
                         .new_tab()
                         .map_err(|e| format!("Browser tab failed: {}", e))?;
@@ -599,7 +653,9 @@ Use ref IDs to interact with elements precisely."#
 
                     let len = text.chars().count();
                     if len > max_chars {
-                        Ok::<_, String>(text.chars().take(max_chars).collect::<String>() + "\n...[truncated]")
+                        Ok::<_, String>(
+                            text.chars().take(max_chars).collect::<String>() + "\n...[truncated]",
+                        )
                     } else {
                         Ok(text)
                     }

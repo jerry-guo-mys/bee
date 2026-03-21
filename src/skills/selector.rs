@@ -57,16 +57,9 @@ impl SkillSelector {
 
         let user_msg = format!("User query: {}", query);
 
-        let messages = vec![
-            Message::system(system),
-            Message::user(user_msg),
-        ];
+        let messages = vec![Message::system(system), Message::user(user_msg)];
 
-        let result = self
-            .llm
-            .complete(&messages)
-            .await
-            .unwrap_or_default();
+        let result = self.llm.complete(&messages).await.unwrap_or_default();
 
         let selected_ids: Vec<&str> = result
             .trim()
@@ -80,8 +73,7 @@ impl SkillSelector {
         for id in selected_ids {
             let id_lower = id.to_lowercase();
             if let Some(skill) = skills.iter().find(|s| {
-                s.meta.id.to_lowercase() == id_lower
-                    || s.meta.id.to_lowercase().contains(&id_lower)
+                s.meta.id.to_lowercase() == id_lower || s.meta.id.to_lowercase().contains(&id_lower)
             }) {
                 selected.push((*skill).clone());
             }

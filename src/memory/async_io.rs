@@ -40,7 +40,7 @@ pub async fn append_preference_async(path: &Path, content: &str) -> std::io::Res
         fs::create_dir_all(p).await?;
     }
     let line = format!("- {}\n", content.trim());
-    
+
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -58,7 +58,7 @@ pub async fn append_lesson_async(path: &Path, line: &str) -> std::io::Result<()>
         fs::create_dir_all(p).await?;
     }
     let content = format!("{}\n", line.trim());
-    
+
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -79,7 +79,7 @@ pub async fn append_procedural_async(
     }
     let status = if success { "ok" } else { "fail" };
     let line = format!("- {} {}: {}\n", tool, status, detail);
-    
+
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -98,7 +98,7 @@ pub async fn append_heartbeat_log_async(path: &Path, reply: &str) -> std::io::Re
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
         reply.trim()
     );
-    
+
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -112,7 +112,7 @@ pub async fn append_daily_log_async(path: &Path, content: &str) -> std::io::Resu
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).await?;
     }
-    
+
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -202,8 +202,12 @@ mod tests {
             let dir = TempDir::new().unwrap();
             let path = dir.path().join("procedural.md");
 
-            append_procedural_async(&path, "shell", true, "executed successfully").await.unwrap();
-            append_procedural_async(&path, "cat", false, "file not found").await.unwrap();
+            append_procedural_async(&path, "shell", true, "executed successfully")
+                .await
+                .unwrap();
+            append_procedural_async(&path, "cat", false, "file not found")
+                .await
+                .unwrap();
 
             let content = fs::read_to_string(&path).await.unwrap();
             assert!(content.contains("shell ok"));

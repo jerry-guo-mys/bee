@@ -112,7 +112,10 @@ impl BackgroundTask {
     }
 
     pub fn is_finished(&self) -> bool {
-        matches!(self.status, TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled)
+        matches!(
+            self.status,
+            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
+        )
     }
 }
 
@@ -143,10 +146,14 @@ pub struct TaskQueue {
 
 impl TaskQueue {
     /// 创建内存版任务队列
-    pub fn new() -> (Self, mpsc::UnboundedReceiver<TaskId>, mpsc::UnboundedReceiver<TaskNotification>) {
+    pub fn new() -> (
+        Self,
+        mpsc::UnboundedReceiver<TaskId>,
+        mpsc::UnboundedReceiver<TaskNotification>,
+    ) {
         let (pending_tx, pending_rx) = mpsc::unbounded_channel();
         let (notification_tx, notification_rx) = mpsc::unbounded_channel();
-        
+
         (
             Self {
                 tasks: RwLock::new(HashMap::new()),
@@ -165,14 +172,21 @@ impl TaskQueue {
     #[cfg(feature = "async-sqlite")]
     pub async fn with_persistence(
         db_path: impl AsRef<Path>,
-    ) -> Result<(Self, mpsc::UnboundedReceiver<TaskId>, mpsc::UnboundedReceiver<TaskNotification>), sqlx::Error> {
+    ) -> Result<
+        (
+            Self,
+            mpsc::UnboundedReceiver<TaskId>,
+            mpsc::UnboundedReceiver<TaskNotification>,
+        ),
+        sqlx::Error,
+    > {
         let db_url = format!("sqlite:{}?mode=rwc", db_path.as_ref().display());
-        
+
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(3)
             .connect(&db_url)
             .await?;
-        
+
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS background_tasks (
                 id TEXT PRIMARY KEY,
@@ -189,7 +203,7 @@ impl TaskQueue {
                 estimated_duration INTEGER,
                 progress INTEGER NOT NULL DEFAULT 0,
                 metadata TEXT
-            )"
+            )",
         )
         .execute(&pool)
         .await?;
@@ -230,7 +244,7 @@ impl TaskQueue {
                     created_at, started_at, completed_at, estimated_duration, progress, metadata
              FROM background_tasks
              WHERE status IN ('Pending', 'Running')
-             ORDER BY priority DESC, created_at ASC"
+             ORDER BY priority DESC, created_at ASC",
         )
         .fetch_all(pool)
         .await?;
@@ -240,7 +254,7 @@ impl TaskQueue {
 
         for row in rows {
             use sqlx::Row;
-            
+
             let task = BackgroundTask {
                 id: row.get("id"),
                 user_id: row.get("user_id"),
@@ -253,15 +267,18 @@ impl TaskQueue {
                 created_at: row.get("created_at"),
                 started_at: row.get("started_at"),
                 completed_at: row.get("completed_at"),
-                estimated_duration: row.get::<Option<i64>, _>("estimated_duration").map(|v| v as u64),
+                estimated_duration: row
+                    .get::<Option<i64>, _>("estimated_duration")
+                    .map(|v| v as u64),
                 progress: row.get::<i32, _>("progress") as u8,
-                metadata: row.get::<Option<String>, _>("metadata")
+                metadata: row
+                    .get::<Option<String>, _>("metadata")
                     .and_then(|s| serde_json::from_str(&s).ok()),
             };
 
             let task_id = task.id.clone();
             let user_id = task.user_id.clone();
-            
+
             if task.status == TaskStatus::Pending {
                 let _ = self.pending_tx.send(task_id.clone());
             }
@@ -289,7 +306,12 @@ impl TaskQueue {
         }
 
         self.tasks.write().await.insert(task_id.clone(), task);
-        self.user_tasks.write().await.entry(user_id).or_default().push(task_id.clone());
+        self.user_tasks
+            .write()
+            .await
+            .entry(user_id)
+            .or_default()
+            .push(task_id.clone());
 
         let _ = self.pending_tx.send(task_id.clone());
 
@@ -298,7 +320,11 @@ impl TaskQueue {
 
     /// 保存任务到数据库
     #[cfg(feature = "async-sqlite")]
-    async fn save_task_to_db(&self, pool: &sqlx::sqlite::SqlitePool, task: &BackgroundTask) -> Result<(), sqlx::Error> {
+    async fn save_task_to_db(
+        &self,
+        pool: &sqlx::sqlite::SqlitePool,
+        task: &BackgroundTask,
+    ) -> Result<(), sqlx::Error> {
         let status_str = format!("{:?}", task.status);
         let metadata_str = task.metadata.as_ref().map(|v| v.to_string());
 
@@ -306,7 +332,7 @@ impl TaskQueue {
             "INSERT OR REPLACE INTO background_tasks 
              (id, user_id, session_id, instruction, status, priority, result, error,
               created_at, started_at, completed_at, estimated_duration, progress, metadata)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&task.id)
         .bind(&task.user_id)
@@ -333,7 +359,7 @@ impl TaskQueue {
         let mut tasks = self.tasks.write().await;
         if let Some(task) = tasks.get_mut(task_id) {
             task.status = status;
-            
+
             match status {
                 TaskStatus::Running => {
                     task.started_at = Some(chrono::Utc::now().timestamp_millis());
@@ -341,7 +367,7 @@ impl TaskQueue {
                 TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled => {
                     task.completed_at = Some(chrono::Utc::now().timestamp_millis());
                     task.progress = 100;
-                    
+
                     let notification = TaskNotification {
                         task_id: task.id.clone(),
                         user_id: task.user_id.clone(),
@@ -466,11 +492,7 @@ impl TaskQueue {
 
         user_tasks
             .get(user_id)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| tasks.get(id).cloned())
-                    .collect()
-            })
+            .map(|ids| ids.iter().filter_map(|id| tasks.get(id).cloned()).collect())
             .unwrap_or_default()
     }
 
@@ -499,7 +521,7 @@ impl TaskQueue {
     /// 清理已完成的旧任务
     pub async fn cleanup_old_tasks(&self, max_age_hours: u64) -> usize {
         let cutoff = chrono::Utc::now().timestamp_millis() - (max_age_hours as i64 * 3600 * 1000);
-        
+
         let mut tasks = self.tasks.write().await;
         let mut user_tasks = self.user_tasks.write().await;
 
@@ -563,14 +585,23 @@ pub struct TaskExecutor {
 
 impl TaskExecutor {
     pub fn new(queue: Arc<TaskQueue>, max_concurrent: usize) -> Self {
-        Self { queue, max_concurrent }
+        Self {
+            queue,
+            max_concurrent,
+        }
     }
 
     /// 启动执行器
     pub async fn start(
         self,
         mut pending_rx: mpsc::UnboundedReceiver<TaskId>,
-        process_fn: impl Fn(BackgroundTask) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send>> + Send + Sync + 'static,
+        process_fn: impl Fn(
+                BackgroundTask,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<String, String>> + Send>,
+            > + Send
+            + Sync
+            + 'static,
     ) {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_concurrent));
         let process_fn = Arc::new(process_fn);
@@ -625,7 +656,9 @@ mod tests {
         let task = queue.get(&task_id).await.unwrap();
         assert_eq!(task.status, TaskStatus::Pending);
 
-        queue.set_result(&task_id, "Report completed".to_string()).await;
+        queue
+            .set_result(&task_id, "Report completed".to_string())
+            .await;
 
         let task = queue.get(&task_id).await.unwrap();
         assert_eq!(task.status, TaskStatus::Completed);

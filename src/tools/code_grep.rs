@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 /// 代码搜索工具
 pub struct CodeGrepTool {
@@ -102,9 +105,8 @@ impl CodeGrepTool {
         use_regex: bool,
     ) -> Result<Vec<SearchResult>, String> {
         let mut results = Vec::new();
-        let include_pattern = include.map(|p| {
-            glob::Pattern::new(p).unwrap_or_else(|_| glob::Pattern::new("*").unwrap())
-        });
+        let include_pattern = include
+            .map(|p| glob::Pattern::new(p).unwrap_or_else(|_| glob::Pattern::new("*").unwrap()));
 
         for entry in walkdir::WalkDir::new(dir)
             .max_depth(10)
@@ -183,16 +185,27 @@ impl Tool for CodeGrepTool {
 {"pattern": "fn main", "include": "*.rs", "use_regex": false}"#
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ReadCode])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::PlainText)
+            .with_preferred_use_cases(vec![ToolUseCase::LocalWorkspaceInspection])
+            .with_disallowed_use_cases(vec![
+                ToolUseCase::DirectExplanation,
+                ToolUseCase::TimeSensitiveCurrent,
+                ToolUseCase::ExternalGitHubRepo,
+            ])
+            .with_requires_explicit_user_request(true)
+            .with_critic_mode(ToolCriticMode::Skip)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
         let pattern = args
             .get("pattern")
             .and_then(|v| v.as_str())
             .ok_or("Missing required parameter: pattern")?;
 
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
         let include = args.get("include").and_then(|v| v.as_str());
 
@@ -243,7 +256,10 @@ impl Tool for CodeGrepTool {
                 output.push_str(&format!("  {:4}: {}\n", line_num, truncated));
             }
             if result.matches.len() > 10 {
-                output.push_str(&format!("  ... ({} more matches)\n", result.matches.len() - 10));
+                output.push_str(&format!(
+                    "  ... ({} more matches)\n",
+                    result.matches.len() - 10
+                ));
             }
         }
 

@@ -36,22 +36,15 @@ allowed_commands = ["ls", "grep", "cat", "head", "tail", "wc", "find", "cargo", 
 [tools.search]
 timeout_secs = 15
 max_result_chars = 8000
-allowed_domains = [
-  "en.wikipedia.org", "zh.wikipedia.org", "ja.wikipedia.org",
-  "www.baidu.com", "baike.baidu.com",
-  "www.jd.com", "item.jd.com",
-  "docs.rs", "github.com", "stackoverflow.com",
-  "www.google.com", "google.com", "news.google.com",
-  "www.bing.com", "bing.com",
-  "developer.mozilla.org", "arxiv.org"
-]
+allowed_domains = ["*"]
 
 [tools.deep_research]
 max_rounds = 5
 max_results_per_round = 3
 trusted_domains = [
   "wikipedia.org", "arxiv.org", "pubmed.gov", "scholar.google.com",
-  "github.com", "stackoverflow.com", "docs.rs", "developer.mozilla.org"
+  "github.com", "stackoverflow.com", "docs.rs", "developer.mozilla.org",
+  "x.com", "twitter.com", "fixupx.com", "fxtwitter.com", "vxtwitter.com", "nitter.net"
 ]
 
 # 技能插件（白皮书：Agent 动态注册新工具）。每项运行「程序 + 参数模板」，{{workspace}} 替换为沙箱根路径，{{key}} 从 LLM 传入的 args 取 key
@@ -134,6 +127,12 @@ backup_before_edit = true
 # bee-web 服务（端口可由环境变量 BEE_WEB_PORT 覆盖）
 [web]
 port = 8080
+
+[critic]
+enabled = false
+evaluate_all_tools = false
+score_threshold = 0.45
+max_self_corrections = 2
 
 # 心跳机制（仅 bee-web：后台自主循环，思考现状 → 检查待办 → 反思）
 [heartbeat]

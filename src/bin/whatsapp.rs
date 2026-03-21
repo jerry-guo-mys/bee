@@ -29,10 +29,10 @@ async fn main() -> anyhow::Result<()> {
         .with(fmt::layer())
         .init();
 
-    let access_token = std::env::var("WHATSAPP_ACCESS_TOKEN")
-        .expect("WHATSAPP_ACCESS_TOKEN must be set");
-    let phone_number_id = std::env::var("WHATSAPP_PHONE_NUMBER_ID")
-        .expect("WHATSAPP_PHONE_NUMBER_ID must be set");
+    let access_token =
+        std::env::var("WHATSAPP_ACCESS_TOKEN").expect("WHATSAPP_ACCESS_TOKEN must be set");
+    let phone_number_id =
+        std::env::var("WHATSAPP_PHONE_NUMBER_ID").expect("WHATSAPP_PHONE_NUMBER_ID must be set");
 
     let cfg = load_config(None).unwrap_or_default();
     let workspace = cfg

@@ -3,8 +3,12 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::process::Command;
+use tokio_util::sync::CancellationToken;
 
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 pub struct TestRunTool {
     project_root: PathBuf,
@@ -45,7 +49,38 @@ impl Tool for TestRunTool {
 {"package": "bee", "test_name": "test_agent", "features": ""}"#
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(
+            ToolScope::LocalWorkspace,
+            vec![ToolIntent::RunCommand, ToolIntent::ExecuteSideEffect],
+        )
+        .with_risk(ToolRisk::High)
+        .with_output_shape(ToolOutputShape::PlainText)
+        .with_side_effects(true)
+        .with_preferred_use_cases(vec![ToolUseCase::Testing])
+        .with_disallowed_use_cases(vec![
+            ToolUseCase::DirectExplanation,
+            ToolUseCase::TimeSensitiveCurrent,
+            ToolUseCase::ExternalGitHubRepo,
+        ])
+        .with_requires_explicit_user_request(true)
+        .with_critic_mode(ToolCriticMode::Always)
+    }
+
+    fn timeout_secs(&self) -> Option<u64> {
+        Some(self.timeout_secs)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
+        self.execute_with_cancel(args, CancellationToken::new())
+            .await
+    }
+
+    async fn execute_with_cancel(
+        &self,
+        args: Value,
+        cancel_token: CancellationToken,
+    ) -> Result<String, String> {
         let package = args.get("package").and_then(|v| v.as_str());
         let test_name = args.get("test_name").and_then(|v| v.as_str());
         let features = args.get("features").and_then(|v| v.as_str());
@@ -70,14 +105,19 @@ impl Tool for TestRunTool {
 
         cmd.arg("--");
         cmd.arg("--nocapture");
+        cmd.kill_on_drop(true);
 
-        let output = tokio::time::timeout(
-            tokio::time::Duration::from_secs(self.timeout_secs),
-            cmd.output(),
-        )
-        .await
-        .map_err(|_| "Test execution timed out")?
-        .map_err(|e| format!("Failed to run tests: {}", e))?;
+        let output = tokio::select! {
+            _ = cancel_token.cancelled() => {
+                return Err("Cancelled by user".to_string());
+            }
+            result = tokio::time::timeout(
+                tokio::time::Duration::from_secs(self.timeout_secs),
+                cmd.output(),
+            ) => result
+                .map_err(|_| "Test execution timed out")?
+                .map_err(|e| format!("Failed to run tests: {}", e))?,
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);

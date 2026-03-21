@@ -10,14 +10,15 @@ use crate::core::{RecoveryEngine, TaskScheduler};
 use crate::llm::LlmClient;
 use crate::react::{Critic, Planner};
 use crate::skills::{SkillCache, SkillLoader};
-use crate::tools::{
-    CatTool, CodeEditTool, CodeGrepTool, CodeReadTool, CodeWriteTool,
-    DeepSearchTool, EchoTool, GitCommitTool, KnowledgeGraphBuilder, LsTool, PluginTool,
-    ReportGeneratorTool, SearchTool, ShellTool, SourceValidatorTool, TestCheckTool, TestRunTool,
-    ToolExecutor, ToolRegistry,
-};
 #[cfg(feature = "browser")]
 use crate::tools::BrowserTool;
+use crate::tools::{
+    CatTool, CodeEditTool, CodeGrepTool, CodeReadTool, CodeWriteTool, DeepSearchTool, EchoTool,
+    ExchangeRateTool, GitCommitTool, GitHubRepoInspectTool, KnowledgeGraphBuilder, LsTool,
+    MarketQuoteTool, NewsTool, PluginTool, ReportGeneratorTool, SearchTool, ShellTool,
+    SourceValidatorTool, SportsScoreTool, TestCheckTool, TestRunTool, ToolExecutor, ToolRegistry,
+    WeatherTool,
+};
 #[cfg(feature = "web")]
 use crate::tools::{CreateGroupTool, CreateTool, ListAgentsTool, SendTool};
 
@@ -59,7 +60,7 @@ impl AgentBuilder {
         .into_iter()
         .find_map(|p| std::fs::read_to_string(p).ok())
         .unwrap_or_else(|| {
-            "You are Bee, a helpful AI assistant with access to various tools.".to_string()
+            "You are Bee, a helpful AI assistant with access to various tools. If the user asks for an open-source address, repository link, GitHub URL, download page, homepage, or similar locator-style information, answer directly when possible or ask a short clarification question; do not call a tool first unless a tool is truly necessary to discover or verify the link. If the user asks a direct explanation question such as what a product or service is, what it does, or what its core functions are, answer directly from the conversation and available context unless the user explicitly asks for verification or browsing. For time-sensitive requests, prefer specialized fresh tools: weather for forecasts, news for headlines, exchange_rate for FX, market_quote for stock/index/crypto prices, and sports_score for live scores. For external GitHub repository architecture or stack questions, prefer github_repo_inspect, and after it returns structured fields like repo_summary, detected_stack, top_level_directories, key_files_found, or file_snippets, answer directly instead of inspecting the local workspace.".to_string()
         });
         self
     }
@@ -77,7 +78,7 @@ impl AgentBuilder {
     }
 
     /// 构建统一的工具注册表（所有接入方式共享同一套工具）
-    /// 
+    ///
     /// 需要传入共享的 LLM 客户端供深度研究等工具使用
     pub fn build_tool_registry(&self, llm: Arc<dyn LlmClient>) -> ToolRegistry {
         let mut tools = ToolRegistry::new();
@@ -92,6 +93,14 @@ impl AgentBuilder {
         tools.register(SearchTool::new(
             self.config.tools.search.allowed_domains.clone(),
             self.config.tools.search.timeout_secs,
+            self.config.tools.search.max_result_chars,
+        ));
+        tools.register(WeatherTool::new(self.config.tools.search.timeout_secs));
+        tools.register(NewsTool::new(self.config.tools.search.timeout_secs));
+        tools.register(ExchangeRateTool::new(self.config.tools.search.timeout_secs));
+        tools.register(MarketQuoteTool::new(self.config.tools.search.timeout_secs));
+        tools.register(SportsScoreTool::new(self.config.tools.search.timeout_secs));
+        tools.register(GitHubRepoInspectTool::new(
             self.config.tools.search.max_result_chars,
         ));
 
@@ -116,7 +125,13 @@ impl AgentBuilder {
         tools.register(TestRunTool::new(&self.workspace));
         tools.register(TestCheckTool::new(&self.workspace));
         tools.register(GitCommitTool::new(&self.workspace));
-        tools.register(DeepSearchTool::new(llm.clone()));
+        tools.register(DeepSearchTool::new(
+            llm.clone(),
+            self.config.tools.deep_research.max_rounds,
+            self.config.tools.deep_research.max_results_per_round,
+            self.config.tools.deep_research.timeout_secs,
+            self.config.tools.deep_research.trusted_domains.clone(),
+        ));
         tools.register(SourceValidatorTool::new(
             self.config.tools.search.allowed_domains.clone(),
         ));
@@ -153,28 +168,33 @@ impl AgentBuilder {
 
         // 如果配置了独立的 Critic 模型，使用独立的 LLM 实例
         let critic_llm: Arc<dyn LlmClient> = if let Some(ref model) = self.config.critic.model {
-            let provider = self.config.critic.provider.as_deref()
+            let provider = self
+                .config
+                .critic
+                .provider
+                .as_deref()
                 .unwrap_or(&self.config.llm.provider);
-            
+
             if provider.to_lowercase() == "deepseek" {
                 Arc::new(crate::llm::create_deepseek_client(Some(model)))
             } else {
                 let base_url = self.config.llm.base_url.as_deref();
                 let api_key = std::env::var("OPENAI_API_KEY").ok();
-                Arc::new(crate::llm::OpenAiClient::new(base_url, model, api_key.as_deref()))
+                Arc::new(crate::llm::OpenAiClient::new(
+                    base_url,
+                    model,
+                    api_key.as_deref(),
+                ))
             }
         } else {
             planner_llm
         };
 
         // 尝试从文件加载 prompt，否则使用配置中的模板
-        let critic_prompt = [
-            "config/prompts/critic.md",
-            "../config/prompts/critic.md",
-        ]
-        .into_iter()
-        .find_map(|p| std::fs::read_to_string(p).ok())
-        .unwrap_or_else(|| self.config.critic.prompt_template.clone());
+        let critic_prompt = ["config/prompts/critic.md", "../config/prompts/critic.md"]
+            .into_iter()
+            .find_map(|p| std::fs::read_to_string(p).ok())
+            .unwrap_or_else(|| self.config.critic.prompt_template.clone());
 
         // 创建修改后的配置副本，使用文件中的 prompt
         let mut critic_config = self.config.critic.clone();
@@ -203,13 +223,23 @@ impl AgentBuilder {
 
     /// 构建完整系统提示词（包含工具 schema）
     pub fn build_full_system_prompt(&self, tool_registry: &ToolRegistry) -> String {
+        let has_browser = tool_registry.get("browser").is_some();
+        let system_prompt = if has_browser {
+            self.system_prompt.clone()
+        } else {
+            self.system_prompt
+                .lines()
+                .filter(|line| !line.contains("`browser`") && !line.contains("- browser:"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         let tool_schema = tool_registry.to_schema_json();
         if tool_schema.is_empty() || tool_schema == "[]" {
-            self.system_prompt.clone()
+            system_prompt
         } else {
             format!(
                 "{}\n\n## Tool call JSON Schema (you must output valid JSON matching this)\n```json\n{}\n```",
-                self.system_prompt, tool_schema
+                system_prompt, tool_schema
             )
         }
     }

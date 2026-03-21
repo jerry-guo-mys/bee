@@ -18,7 +18,7 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use super::intent::IntentRecognizer;
 use super::message::{ClientInfo, GatewayMessage, HistoryMessage, MessageType};
 use super::runtime::{AgentRuntime, RuntimeConfig};
-use super::session_store::{SessionStore, create_session_store};
+use super::session_store::{create_session_store, SessionStore};
 use super::spoke::SpokeAdapter;
 use super::task_queue::{TaskNotification, TaskQueue};
 use crate::llm::{create_embedder_from_config, EmbeddingProvider};
@@ -96,29 +96,33 @@ impl Hub {
             config.runtime.session_db_path.as_deref(),
             config.max_context_turns,
             config.session_timeout,
-        ).await;
-        
+        )
+        .await;
+
         let runtime = Arc::new(AgentRuntime::new(
             config.runtime.clone(),
             Arc::clone(&session_store),
         ));
-        let intent_recognizer = Arc::new(IntentRecognizer::new(
-            Arc::clone(&runtime.components().llm),
-        ));
+        let intent_recognizer =
+            Arc::new(IntentRecognizer::new(Arc::clone(&runtime.components().llm)));
         let (shutdown_tx, _) = tokio::sync::watch::channel(false);
 
         #[cfg(feature = "async-sqlite")]
-        let (task_queue, _pending_rx, notification_rx) = if let Some(ref db_path) = config.runtime.task_db_path {
-            match TaskQueue::with_persistence(db_path).await {
-                Ok(q) => q,
-                Err(e) => {
-                    tracing::warn!("Failed to create persistent task queue: {}, using in-memory", e);
-                    TaskQueue::new()
+        let (task_queue, _pending_rx, notification_rx) =
+            if let Some(ref db_path) = config.runtime.task_db_path {
+                match TaskQueue::with_persistence(db_path).await {
+                    Ok(q) => q,
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to create persistent task queue: {}, using in-memory",
+                            e
+                        );
+                        TaskQueue::new()
+                    }
                 }
-            }
-        } else {
-            TaskQueue::new()
-        };
+            } else {
+                TaskQueue::new()
+            };
 
         #[cfg(not(feature = "async-sqlite"))]
         let (task_queue, _pending_rx, notification_rx) = TaskQueue::new();
@@ -133,11 +137,17 @@ impl Hub {
             .or_else(|_| std::env::var("DEEPSEEK_API_KEY"))
             .ok();
         let embedder: Arc<dyn EmbeddingProvider> = create_embedder_from_config(
-            config.runtime.app_config.memory.embedding_base_url.as_deref()
+            config
+                .runtime
+                .app_config
+                .memory
+                .embedding_base_url
+                .as_deref()
                 .or(config.runtime.app_config.llm.base_url.as_deref()),
             &config.runtime.app_config.memory.embedding_model,
             api_key.as_deref(),
-        ).unwrap_or_else(|| Arc::new(NoopEmbedder));
+        )
+        .unwrap_or_else(|| Arc::new(NoopEmbedder));
         let user_memory = Arc::new(UserMemoryManager::new(user_memory_config, embedder));
 
         Self {
@@ -240,11 +250,15 @@ impl Hub {
     }
 
     /// 向指定客户端发送消息
-    pub async fn send_to_client(&self, client_id: &str, message: GatewayMessage) -> Result<(), String> {
+    pub async fn send_to_client(
+        &self,
+        client_id: &str,
+        message: GatewayMessage,
+    ) -> Result<(), String> {
         let connections = self.connections.read().await;
         if let Some(conn) = connections.get(client_id) {
-            let json = serde_json::to_string(&message)
-                .map_err(|e| format!("Serialize error: {}", e))?;
+            let json =
+                serde_json::to_string(&message).map_err(|e| format!("Serialize error: {}", e))?;
             conn.tx
                 .send(json)
                 .map_err(|e| format!("Send error: {}", e))?;
@@ -292,12 +306,12 @@ impl Hub {
     /// 启动任务完成通知处理
     pub async fn start_notification_handler(&self) {
         let connections = Arc::clone(&self.connections);
-        
+
         let notification_rx = {
             let mut guard = self.notification_rx.write().await;
             guard.take()
         };
-        
+
         if let Some(mut rx) = notification_rx {
             tokio::spawn(async move {
                 while let Some(notification) = rx.recv().await {
@@ -306,7 +320,8 @@ impl Hub {
                         MessageType::TaskComplete {
                             task_id: notification.task_id.clone(),
                             user_id: notification.user_id.clone(),
-                            success: notification.status == super::task_queue::TaskStatus::Completed,
+                            success: notification.status
+                                == super::task_queue::TaskStatus::Completed,
                             result: notification.result,
                             error: notification.error,
                         },
@@ -389,7 +404,10 @@ async fn handle_connection(
                 };
 
                 match gateway_msg.message {
-                    MessageType::Auth { token: _, client_info: info } => {
+                    MessageType::Auth {
+                        token: _,
+                        client_info: info,
+                    } => {
                         let sid = session_store
                             .get_or_create(&info.client_id, info.clone())
                             .await;
@@ -425,7 +443,10 @@ async fn handle_connection(
                         let sid = match &session_id {
                             Some(s) => s.clone(),
                             None => {
-                                let error = GatewayMessage::error("not_authenticated", "Please authenticate first");
+                                let error = GatewayMessage::error(
+                                    "not_authenticated",
+                                    "Please authenticate first",
+                                );
                                 let _ = tx.send(serde_json::to_string(&error).unwrap_or_default());
                                 continue;
                             }

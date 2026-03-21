@@ -51,10 +51,7 @@ impl Skill {
     pub fn full_capability(&self) -> String {
         format!(
             "# {} ({})\n\n{}\n\n{}",
-            self.meta.name,
-            self.meta.id,
-            self.meta.description,
-            self.capability
+            self.meta.name, self.meta.id, self.meta.description, self.capability
         )
     }
 

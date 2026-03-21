@@ -1,17 +1,16 @@
 pub mod analyzer;
 pub mod engine;
 pub mod executor;
-pub mod planner;
 pub mod loop_;
+pub mod planner;
 pub mod types;
 
 pub use analyzer::SelfAnalyzer;
-pub use engine::{EvolutionEngine, EvolutionConfig};
+pub use engine::{EvolutionConfig, EvolutionEngine};
 pub use executor::ExecutionEngine;
-pub use planner::ImprovementPlanner;
 pub use loop_::EvolutionLoop;
+pub use planner::ImprovementPlanner;
 pub use types::{
-    ImprovementPlan, ImprovementType, Priority,
-    CodeAnalysis, Issue, Severity, CodeMetrics,
-    IterationResult,
+    CodeAnalysis, CodeMetrics, ImprovementPlan, ImprovementType, Issue, IterationResult, Priority,
+    Severity,
 };

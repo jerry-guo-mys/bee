@@ -1,7 +1,7 @@
 //! 短期记忆：对话历史
 //!
 //! 保留最近 N 轮对话（user/assistant 对），超出时智能剪枝，供 LLM 上下文与 UI 渲染使用。
-//! 
+//!
 //! 智能剪枝策略（解决问题 5.3）：
 //! - 保留 System 消息不被剪枝
 //! - 按重要性评分决定保留哪些（用户消息 > 助手回复 > 工具结果）
@@ -174,7 +174,7 @@ impl ConversationMemory {
     /// 智能剪枝：返回被剪枝的消息（可用于写入长期记忆）
     pub fn prune(&mut self) -> PruneResult {
         let max_messages = self.max_turns * 2;
-        
+
         if self.messages.len() <= max_messages {
             return PruneResult {
                 pruned_messages: Vec::new(),
@@ -215,14 +215,13 @@ impl ConversationMemory {
         // 如果非 System 消息超出目标，进行剪枝
         if other_msgs.len() > target_non_system {
             // 按重要性排序（高重要性在前），同等重要性按时间倒序（新的在前）
-            other_msgs.sort_by(|a, b| {
-                b.2.cmp(&a.2).then_with(|| b.0.cmp(&a.0))
-            });
+            other_msgs.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| b.0.cmp(&a.0)));
 
             // 限制工具结果数量
-            let tool_limit = (target_non_system as f32 * self.prune_config.tool_result_ratio) as usize;
+            let tool_limit =
+                (target_non_system as f32 * self.prune_config.tool_result_ratio) as usize;
             let mut tool_count = 0;
-            
+
             other_msgs.retain(|(_, _, imp)| {
                 if *imp == MessageImportance::Tool {
                     tool_count += 1;
@@ -275,7 +274,7 @@ impl ConversationMemory {
         if pruned.is_empty() {
             return String::new();
         }
-        
+
         let mut summary = String::from("Pruned conversation context:\n");
         for msg in pruned {
             let role = match msg.role {
@@ -310,20 +309,20 @@ mod tests {
     #[test]
     fn test_simple_prune() {
         let mut mem = ConversationMemory::new(2); // 最多 4 条消息
-        
+
         mem.push(Message::user("msg1"));
         mem.push(Message::assistant("reply1"));
         mem.push(Message::user("msg2"));
         mem.push(Message::assistant("reply2"));
         mem.push(Message::user("msg3")); // 触发剪枝
-        
+
         assert!(mem.len() <= 4);
     }
 
     #[test]
     fn test_preserve_system_messages() {
         let mut mem = ConversationMemory::new(2);
-        
+
         mem.push(Message::system("System prompt"));
         mem.push(Message::user("msg1"));
         mem.push(Message::assistant("reply1"));
@@ -331,7 +330,7 @@ mod tests {
         mem.push(Message::assistant("reply2"));
         mem.push(Message::user("msg3"));
         mem.push(Message::assistant("reply3"));
-        
+
         // System 消息应该被保留
         assert!(mem.messages().iter().any(|m| m.role == Role::System));
     }
@@ -344,7 +343,7 @@ mod tests {
             smart_prune: true,
         };
         let mut mem = ConversationMemory::with_config(3, config); // 最多 6 条
-        
+
         mem.push(Message::user("msg1"));
         mem.push(Message::tool("tool result 1"));
         mem.push(Message::tool("tool result 2"));
@@ -353,35 +352,40 @@ mod tests {
         mem.push(Message::user("msg2"));
         mem.push(Message::assistant("reply2"));
         mem.push(Message::user("msg3")); // 触发剪枝
-        
+
         // 工具消息应该被优先剪枝
-        let tool_count = mem.messages().iter().filter(|m| m.role == Role::Tool).count();
-        assert!(tool_count <= 2, "Should have at most 2 tool messages, got {}", tool_count);
+        let tool_count = mem
+            .messages()
+            .iter()
+            .filter(|m| m.role == Role::Tool)
+            .count();
+        assert!(
+            tool_count <= 2,
+            "Should have at most 2 tool messages, got {}",
+            tool_count
+        );
     }
 
     #[test]
     fn test_prune_result() {
         let mut mem = ConversationMemory::new(2);
-        
+
         mem.push(Message::user("msg1"));
         mem.push(Message::assistant("reply1"));
         mem.push(Message::user("msg2"));
         mem.push(Message::assistant("reply2"));
-        
+
         // 手动触发剪枝
         mem.push(Message::user("msg3"));
         let result = mem.prune();
-        
+
         assert!(result.pruned_messages.len() + result.retained_count >= 4);
     }
 
     #[test]
     fn test_summarize_pruned() {
-        let pruned = vec![
-            Message::user("Hello"),
-            Message::assistant("Hi there!"),
-        ];
-        
+        let pruned = vec![Message::user("Hello"), Message::assistant("Hi there!")];
+
         let summary = ConversationMemory::summarize_pruned(&pruned);
         assert!(summary.contains("User"));
         assert!(summary.contains("Assistant"));

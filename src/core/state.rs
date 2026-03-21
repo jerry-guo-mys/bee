@@ -51,7 +51,12 @@ pub struct InternalStateSnapshot {
 
 impl InternalStateSnapshot {
     /// 将内部快照与最新历史/锁/错误合并，得到 UI 可渲染的 UiState
-    pub fn project(&self, history: Vec<Message>, input_locked: bool, error_message: Option<String>) -> UiState {
+    pub fn project(
+        &self,
+        history: Vec<Message>,
+        input_locked: bool,
+        error_message: Option<String>,
+    ) -> UiState {
         UiState {
             phase: self.phase.clone(),
             history,

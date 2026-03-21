@@ -84,20 +84,22 @@ pub fn weighted_similarity(tokens1: &[String], tokens2: &[String]) -> f32 {
     if tokens1.is_empty() || tokens2.is_empty() {
         return 0.0;
     }
-    
+
     let set1: HashSet<_> = tokens1.iter().collect();
     let set2: HashSet<_> = tokens2.iter().collect();
-    
+
     let mut score = 0.0;
     for token in set1.intersection(&set2) {
         // 较长的词权重更高
         score += (token.chars().count() as f32).sqrt();
     }
-    
-    let max_possible = tokens1.iter().chain(tokens2.iter())
+
+    let max_possible = tokens1
+        .iter()
+        .chain(tokens2.iter())
         .map(|t| (t.chars().count() as f32).sqrt())
         .sum::<f32>();
-    
+
     if max_possible > 0.0 {
         score / max_possible * 2.0 // 乘2是因为相同词在两边各算一次
     } else {
@@ -114,7 +116,9 @@ mod tests {
         let tokens = tokenize("我喜欢编程和人工智能");
         assert!(!tokens.is_empty());
         // jieba 会将中文正确分词
-        assert!(tokens.iter().any(|t| t.contains("编程") || t.contains("人工") || t.contains("智能")));
+        assert!(tokens
+            .iter()
+            .any(|t| t.contains("编程") || t.contains("人工") || t.contains("智能")));
     }
 
     #[test]
@@ -161,6 +165,9 @@ mod tests {
         let tokens1 = tokenize("人工智能是未来的趋势");
         let tokens2 = tokenize("人工智能改变世界");
         let sim = weighted_similarity(&tokens1, &tokens2);
-        assert!(sim > 0.0, "Similar texts should have positive weighted similarity");
+        assert!(
+            sim > 0.0,
+            "Similar texts should have positive weighted similarity"
+        );
     }
 }

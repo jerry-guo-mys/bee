@@ -4,9 +4,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::tools::Tool;
 use crate::llm::LlmClient;
 use crate::memory::Message;
+use crate::tools::Tool;
 
 pub struct KnowledgeGraphBuilder {
     llm: Arc<dyn LlmClient>,
@@ -95,16 +95,18 @@ Output format (JSON):
 }}
 
 Knowledge graph:"#,
-            topic,
-            information
+            topic, information
         );
 
         let messages = vec![Message::user(&prompt)];
-        let response = self.llm.complete(&messages).await
+        let response = self
+            .llm
+            .complete(&messages)
+            .await
             .map_err(|e| format!("LLM error: {}", e))?;
 
-        let graph_data: Value = serde_json::from_str(&response)
-            .map_err(|e| format!("Failed to parse graph: {}", e))?;
+        let graph_data: Value =
+            serde_json::from_str(&response).map_err(|e| format!("Failed to parse graph: {}", e))?;
 
         let output = serde_json::json!({
             "topic": topic,

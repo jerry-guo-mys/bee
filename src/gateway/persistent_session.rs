@@ -13,11 +13,11 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use super::message::{ClientInfo, SessionStatus, SpokeType};
-use super::session::{Session, SessionId};
+use super::session::{Session, SessionId, SessionScope};
 use crate::react::ContextManager;
 
 /// 持久化会话管理器
-/// 
+///
 /// 与内存版 SessionManager 的区别：
 /// - 会话元数据持久化到 SQLite
 /// - 消息历史持久化到 SQLite
@@ -43,12 +43,12 @@ impl PersistentSessionManager {
         session_timeout_secs: u64,
     ) -> Result<Self, sqlx::Error> {
         let db_url = format!("sqlite:{}?mode=rwc", db_path.as_ref().display());
-        
+
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(5)
             .connect(&db_url)
             .await?;
-        
+
         let manager = Self {
             sessions: RwLock::new(HashMap::new()),
             user_sessions: RwLock::new(HashMap::new()),
@@ -56,10 +56,10 @@ impl PersistentSessionManager {
             max_context_turns,
             session_timeout: Duration::from_secs(session_timeout_secs),
         };
-        
+
         manager.init_tables().await?;
         manager.restore_sessions().await?;
-        
+
         Ok(manager)
     }
 
@@ -69,11 +69,15 @@ impl PersistentSessionManager {
             "CREATE TABLE IF NOT EXISTS gateway_sessions (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
+                tenant_id TEXT,
+                organization_id TEXT,
+                team_id TEXT,
+                agent_instance_id TEXT,
                 assistant_id TEXT,
                 model_id TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
-            )"
+            )",
         )
         .execute(&self.pool)
         .await?;
@@ -86,16 +90,18 @@ impl PersistentSessionManager {
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES gateway_sessions(id) ON DELETE CASCADE
-            )"
+            )",
         )
         .execute(&self.pool)
         .await?;
 
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_gateway_sessions_user ON gateway_sessions(user_id)"
+            "CREATE INDEX IF NOT EXISTS idx_gateway_sessions_user ON gateway_sessions(user_id)",
         )
         .execute(&self.pool)
         .await?;
+
+        self.ensure_session_scope_columns().await?;
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_gateway_messages_session ON gateway_messages(session_id)"
@@ -106,15 +112,34 @@ impl PersistentSessionManager {
         Ok(())
     }
 
+    async fn ensure_session_scope_columns(&self) -> Result<(), sqlx::Error> {
+        for column in [
+            "tenant_id TEXT",
+            "organization_id TEXT",
+            "team_id TEXT",
+            "agent_instance_id TEXT",
+        ] {
+            let statement = format!("ALTER TABLE gateway_sessions ADD COLUMN {}", column);
+            match sqlx::query(&statement).execute(&self.pool).await {
+                Ok(_) => {}
+                Err(sqlx::Error::Database(db_err))
+                    if db_err.message().contains("duplicate column name") => {}
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(())
+    }
+
     /// 从数据库恢复活跃会话
     async fn restore_sessions(&self) -> Result<(), sqlx::Error> {
-        let cutoff = chrono::Utc::now() - chrono::Duration::seconds(self.session_timeout.as_secs() as i64);
+        let cutoff =
+            chrono::Utc::now() - chrono::Duration::seconds(self.session_timeout.as_secs() as i64);
         let cutoff_str = cutoff.to_rfc3339();
 
         let rows = sqlx::query(
-            "SELECT id, user_id, assistant_id, model_id, created_at, updated_at 
+            "SELECT id, user_id, tenant_id, organization_id, team_id, agent_instance_id, assistant_id, model_id, created_at, updated_at 
              FROM gateway_sessions 
-             WHERE updated_at > ?"
+             WHERE updated_at > ?",
         )
         .bind(&cutoff_str)
         .fetch_all(&self.pool)
@@ -126,11 +151,15 @@ impl PersistentSessionManager {
         for row in rows {
             let session_id: String = row.get("id");
             let user_id: String = row.get("user_id");
+            let tenant_id: Option<String> = row.get("tenant_id");
+            let organization_id: Option<String> = row.get("organization_id");
+            let team_id: Option<String> = row.get("team_id");
+            let agent_instance_id: Option<String> = row.get("agent_instance_id");
             let assistant_id: Option<String> = row.get("assistant_id");
             let model_id: Option<String> = row.get("model_id");
 
             let messages = self.load_messages(&session_id).await?;
-            
+
             let mut session = Session {
                 id: session_id.clone(),
                 user_id: user_id.clone(),
@@ -142,6 +171,13 @@ impl PersistentSessionManager {
                 created_at: Instant::now(),
                 assistant_id,
                 model_id,
+                scope: SessionScope {
+                    tenant_id,
+                    organization_id,
+                    team_id,
+                    agent_instance_id,
+                    user_id: Some(user_id.clone()),
+                },
             };
 
             for msg in messages {
@@ -161,9 +197,12 @@ impl PersistentSessionManager {
     }
 
     /// 加载会话消息
-    async fn load_messages(&self, session_id: &str) -> Result<Vec<crate::memory::Message>, sqlx::Error> {
+    async fn load_messages(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::memory::Message>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT role, content FROM gateway_messages WHERE session_id = ? ORDER BY id ASC"
+            "SELECT role, content FROM gateway_messages WHERE session_id = ? ORDER BY id ASC",
         )
         .bind(session_id)
         .fetch_all(&self.pool)
@@ -173,7 +212,7 @@ impl PersistentSessionManager {
         for row in rows {
             let role_str: String = row.get("role");
             let content: String = row.get("content");
-            
+
             let role = match role_str.as_str() {
                 "user" => crate::memory::Role::User,
                 "assistant" => crate::memory::Role::Assistant,
@@ -181,7 +220,7 @@ impl PersistentSessionManager {
                 "tool" => crate::memory::Role::Tool,
                 _ => continue,
             };
-            
+
             messages.push(crate::memory::Message { role, content });
         }
 
@@ -189,7 +228,11 @@ impl PersistentSessionManager {
     }
 
     /// 保存消息到数据库
-    async fn save_message(&self, session_id: &str, message: &crate::memory::Message) -> Result<(), sqlx::Error> {
+    async fn save_message(
+        &self,
+        session_id: &str,
+        message: &crate::memory::Message,
+    ) -> Result<(), sqlx::Error> {
         let role_str = match message.role {
             crate::memory::Role::User => "user",
             crate::memory::Role::Assistant => "assistant",
@@ -222,11 +265,16 @@ impl PersistentSessionManager {
         let now = chrono::Utc::now().to_rfc3339();
 
         sqlx::query(
-            "INSERT OR REPLACE INTO gateway_sessions (id, user_id, assistant_id, model_id, created_at, updated_at) 
-             VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT OR REPLACE INTO gateway_sessions
+             (id, user_id, tenant_id, organization_id, team_id, agent_instance_id, assistant_id, model_id, created_at, updated_at) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&session.id)
         .bind(&session.user_id)
+        .bind(&session.scope.tenant_id)
+        .bind(&session.scope.organization_id)
+        .bind(&session.scope.team_id)
+        .bind(&session.scope.agent_instance_id)
         .bind(&session.assistant_id)
         .bind(&session.model_id)
         .bind(&now)
@@ -240,7 +288,7 @@ impl PersistentSessionManager {
     /// 获取或创建用户的会话
     pub async fn get_or_create(&self, user_id: &str, client: ClientInfo) -> SessionId {
         let user_sessions = self.user_sessions.read().await;
-        
+
         if let Some(session_id) = user_sessions.get(user_id) {
             let mut sessions = self.sessions.write().await;
             if let Some(session) = sessions.get_mut(session_id) {
@@ -251,6 +299,7 @@ impl PersistentSessionManager {
         drop(user_sessions);
 
         let mut session = Session::new(user_id.to_string(), self.max_context_turns);
+        session.apply_client_scope(&client);
         session.add_client(client);
         let session_id = session.id.clone();
 
@@ -258,8 +307,14 @@ impl PersistentSessionManager {
             tracing::error!("Failed to persist session: {}", e);
         }
 
-        self.sessions.write().await.insert(session_id.clone(), session);
-        self.user_sessions.write().await.insert(user_id.to_string(), session_id.clone());
+        self.sessions
+            .write()
+            .await
+            .insert(session_id.clone(), session);
+        self.user_sessions
+            .write()
+            .await
+            .insert(user_id.to_string(), session_id.clone());
 
         session_id
     }
@@ -299,7 +354,7 @@ impl PersistentSessionManager {
     pub async fn cleanup_expired(&self) -> usize {
         let mut sessions = self.sessions.write().await;
         let mut user_sessions = self.user_sessions.write().await;
-        
+
         let expired: Vec<_> = sessions
             .iter()
             .filter(|(_, s)| s.is_expired(self.session_timeout))
@@ -326,7 +381,11 @@ impl PersistentSessionManager {
 
     /// 获取会话上下文
     pub async fn get_context(&self, session_id: &str) -> Option<ContextManager> {
-        self.sessions.read().await.get(session_id).map(|s| s.context.clone())
+        self.sessions
+            .read()
+            .await
+            .get(session_id)
+            .map(|s| s.context.clone())
     }
 
     /// 取消会话的当前请求
@@ -387,7 +446,7 @@ mod tests {
         manager.add_message(&session_id, msg2).await;
 
         assert_eq!(manager.active_count().await, 1);
-        
+
         manager.close().await;
 
         let manager2 = PersistentSessionManager::new(&db_path, 20, 3600)

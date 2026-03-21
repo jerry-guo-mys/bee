@@ -8,9 +8,13 @@ use std::path::Path;
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::process::Command;
+use tokio_util::sync::CancellationToken;
 
 use crate::config::PluginEntry;
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+    ToolUseCase,
+};
 
 /// 从配置项构建的插件工具
 pub struct PluginTool {
@@ -89,22 +93,55 @@ impl Tool for PluginTool {
         &self.description
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(
+            ToolScope::System,
+            vec![ToolIntent::RunCommand, ToolIntent::ExecuteSideEffect],
+        )
+        .with_risk(ToolRisk::High)
+        .with_output_shape(ToolOutputShape::PlainText)
+        .with_side_effects(true)
+        .with_disallowed_use_cases(vec![
+            ToolUseCase::DirectExplanation,
+            ToolUseCase::TimeSensitiveCurrent,
+            ToolUseCase::ExternalGitHubRepo,
+        ])
+        .with_requires_explicit_user_request(true)
+        .with_critic_mode(ToolCriticMode::Always)
+    }
+
+    fn timeout_secs(&self) -> Option<u64> {
+        Some(self.timeout_secs)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
+        self.execute_with_cancel(args, CancellationToken::new())
+            .await
+    }
+
+    async fn execute_with_cancel(
+        &self,
+        args: Value,
+        cancel_token: CancellationToken,
+    ) -> Result<String, String> {
         let args_vec = self.substitute(&args);
         let program = self.program.clone();
         tracing::info!(tool = %self.name, program = %program, "plugin tool invoke");
-        let child = Command::new(&program)
-            .args(&args_vec)
+        let mut cmd = Command::new(&program);
+        cmd.args(&args_vec)
             .current_dir(&self.working_dir)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("plugin spawn failed: {}", e))?;
+            .kill_on_drop(true);
         let timeout = std::time::Duration::from_secs(self.timeout_secs);
-        let output = tokio::time::timeout(timeout, child.wait_with_output())
-            .await
-            .map_err(|_| format!("plugin timeout after {}s", self.timeout_secs))?
-            .map_err(|e| format!("plugin wait failed: {}", e))?;
+        let output = tokio::select! {
+            _ = cancel_token.cancelled() => {
+                return Err("Cancelled by user".to_string());
+            }
+            result = tokio::time::timeout(timeout, cmd.output()) => result
+                .map_err(|_| format!("plugin timeout after {}s", self.timeout_secs))?
+                .map_err(|e| format!("plugin wait failed: {}", e))?,
+        };
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !output.status.success() {

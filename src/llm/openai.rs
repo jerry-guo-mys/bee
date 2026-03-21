@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use async_openai::config::OpenAIConfig;
 use async_openai::types::chat::{
-    ChatCompletionRequestMessage, ChatCompletionRequestAssistantMessageArgs,
+    ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
     ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
     CreateChatCompletionRequestArgs,
 };
@@ -37,8 +37,10 @@ impl TokenUsage {
 
     pub fn add(&self, prompt: u64, completion: u64) {
         self.prompt_tokens.fetch_add(prompt, Ordering::Relaxed);
-        self.completion_tokens.fetch_add(completion, Ordering::Relaxed);
-        self.total_tokens.fetch_add(prompt + completion, Ordering::Relaxed);
+        self.completion_tokens
+            .fetch_add(completion, Ordering::Relaxed);
+        self.total_tokens
+            .fetch_add(prompt + completion, Ordering::Relaxed);
     }
 
     pub fn get(&self) -> (u64, u64, u64) {
@@ -66,9 +68,7 @@ impl OpenAiClient {
             .unwrap_or_else(|| "sk-placeholder".to_string());
 
         let config = if let Some(url) = base_url {
-            OpenAIConfig::new()
-                .with_api_base(url)
-                .with_api_key(api_key)
+            OpenAIConfig::new().with_api_base(url).with_api_key(api_key)
         } else {
             OpenAIConfig::new().with_api_key(api_key)
         };
@@ -126,15 +126,23 @@ fn convert_openai_error(e: async_openai::error::OpenAIError) -> LlmError {
     if msg_lower.contains("unauthorized") || msg_lower.contains("invalid api key") {
         LlmError::AuthError(msg)
     } else if msg_lower.contains("rate limit") || msg_lower.contains("429") {
-        LlmError::RateLimited { retry_after_ms: 60000 }
+        LlmError::RateLimited {
+            retry_after_ms: 60000,
+        }
     } else if msg_lower.contains("context length") || msg_lower.contains("maximum context") {
-        LlmError::ContextLengthExceeded { tokens: 0, max_tokens: 0 }
+        LlmError::ContextLengthExceeded {
+            tokens: 0,
+            max_tokens: 0,
+        }
     } else if msg_lower.contains("model") && msg_lower.contains("not found") {
         LlmError::ModelNotFound { model: msg }
     } else if msg_lower.contains("timeout") {
         LlmError::Timeout { timeout_ms: 30000 }
     } else if msg_lower.contains("500") || msg_lower.contains("502") || msg_lower.contains("503") {
-        LlmError::ServerError { status: 500, message: msg }
+        LlmError::ServerError {
+            status: 500,
+            message: msg,
+        }
     } else {
         LlmError::ApiError(msg)
     }
@@ -149,7 +157,7 @@ impl LlmClient for OpenAiClient {
     async fn complete(&self, messages: &[Message]) -> Result<String, LlmError> {
         let start = Instant::now();
         let metrics = Metrics::global();
-        
+
         let request = CreateChatCompletionRequestArgs::default()
             .model(&self.model)
             .messages(self.to_openai_messages(messages))
@@ -165,10 +173,8 @@ impl LlmClient for OpenAiClient {
 
         // 提取 token 使用统计
         let (prompt_tokens, completion_tokens) = if let Some(usage) = &response.usage {
-            self.usage.add(
-                usage.prompt_tokens as u64,
-                usage.completion_tokens as u64,
-            );
+            self.usage
+                .add(usage.prompt_tokens as u64, usage.completion_tokens as u64);
             (usage.prompt_tokens as u64, usage.completion_tokens as u64)
         } else {
             (0, 0)
@@ -182,7 +188,9 @@ impl LlmClient for OpenAiClient {
 
         // 记录 metrics
         let latency = start.elapsed();
-        metrics.llm.record_call(true, latency, prompt_tokens, completion_tokens);
+        metrics
+            .llm
+            .record_call(true, latency, prompt_tokens, completion_tokens);
         tracing::debug!(
             target: "bee::metrics",
             latency_ms = latency.as_millis(),
@@ -201,7 +209,7 @@ impl LlmClient for OpenAiClient {
         let start = Instant::now();
         let metrics = Metrics::global();
         let usage = self.usage.clone();
-        
+
         let request = CreateChatCompletionRequestArgs::default()
             .model(&self.model)
             .messages(self.to_openai_messages(messages))
@@ -220,40 +228,38 @@ impl LlmClient for OpenAiClient {
             let start = start.clone();
             let metrics = metrics;
             let usage = usage.clone();
-            
-            result
-                .map_err(convert_openai_error)
-                .map(move |response| {
-                    // 累积 token 使用
-                    if let Some(usage_info) = &response.usage {
-                        usage.add(
-                            usage_info.prompt_tokens as u64,
-                            usage_info.completion_tokens as u64,
-                        );
-                    }
-                    
-                    let content = response
-                        .choices
-                        .first()
-                        .and_then(|c| c.delta.content.clone())
-                        .unwrap_or_default();
-                    
-                    // 在流结束时记录 metrics
-                    if response.choices.is_empty() || content.is_empty() {
-                        let latency = start.elapsed();
-                        let (prompt, completion, _total) = usage.get();
-                        metrics.llm.record_call(true, latency, prompt, completion);
-                        tracing::debug!(
-                            target: "bee::metrics",
-                            latency_ms = latency.as_millis(),
-                            prompt_tokens = prompt,
-                            completion_tokens = completion,
-                            "llm_call_stream_complete"
-                        );
-                    }
-                    
-                    content
-                })
+
+            result.map_err(convert_openai_error).map(move |response| {
+                // 累积 token 使用
+                if let Some(usage_info) = &response.usage {
+                    usage.add(
+                        usage_info.prompt_tokens as u64,
+                        usage_info.completion_tokens as u64,
+                    );
+                }
+
+                let content = response
+                    .choices
+                    .first()
+                    .and_then(|c| c.delta.content.clone())
+                    .unwrap_or_default();
+
+                // 在流结束时记录 metrics
+                if response.choices.is_empty() || content.is_empty() {
+                    let latency = start.elapsed();
+                    let (prompt, completion, _total) = usage.get();
+                    metrics.llm.record_call(true, latency, prompt, completion);
+                    tracing::debug!(
+                        target: "bee::metrics",
+                        latency_ms = latency.as_millis(),
+                        prompt_tokens = prompt,
+                        completion_tokens = completion,
+                        "llm_call_stream_complete"
+                    );
+                }
+
+                content
+            })
         });
 
         Ok(Box::pin(mapped_stream))

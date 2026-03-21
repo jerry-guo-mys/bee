@@ -3,7 +3,9 @@
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::tools::Tool;
+use crate::tools::{
+    Tool, ToolCriticMode, ToolIntent, ToolMetadata, ToolOutputShape, ToolRisk, ToolScope,
+};
 
 /// Echo 工具：回显文本
 pub struct EchoTool;
@@ -16,6 +18,13 @@ impl Tool for EchoTool {
 
     fn description(&self) -> &str {
         "Echo text (for testing)"
+    }
+
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::Internal, vec![ToolIntent::Other])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::PlainText)
+            .with_critic_mode(ToolCriticMode::Skip)
     }
 
     fn parameters_schema(&self) -> Value {

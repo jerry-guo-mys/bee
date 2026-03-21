@@ -9,7 +9,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
-        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Wrap,
     },
     Frame,
 };
@@ -101,10 +102,7 @@ pub fn draw(
     let input_height = 6u16;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(5),
-            Constraint::Length(input_height),
-        ])
+        .constraints([Constraint::Min(5), Constraint::Length(input_height)])
         .split(f.area());
 
     let conv_area = chunks[0];
@@ -146,7 +144,10 @@ pub fn draw(
         for (i, line) in wrapped.into_iter().enumerate() {
             let pref = if i == 0 { prefix } else { "    " };
             text_lines.push(Line::from(vec![
-                Span::styled(pref, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    pref,
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(line),
             ]));
         }
@@ -187,7 +188,10 @@ pub fn draw(
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border_color))
-        .title_bottom(Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray))));
+        .title_bottom(Line::from(Span::styled(
+            hint,
+            Style::default().fg(Color::DarkGray),
+        )));
 
     let inner = input_block.inner(input_area);
     let (text_area, toolbar_area) = {
@@ -222,12 +226,16 @@ pub fn draw(
     let model_str = models.get(model_idx).copied().unwrap_or("默认");
 
     let agent_style = if input_state.focus == InputFocus::Agent {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::White)
     };
     let model_style = if input_state.focus == InputFocus::Model {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::White)
     };
@@ -235,7 +243,9 @@ pub fn draw(
     let send_style = if send_disabled {
         Style::default().fg(Color::DarkGray)
     } else if input_state.focus == InputFocus::Send {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Green)
     };

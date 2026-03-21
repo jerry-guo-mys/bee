@@ -64,9 +64,10 @@ impl UserMemoryManager {
         }
 
         let memory: Arc<dyn LongTermMemory> = if self.config.vector_enabled {
-            let snapshot_path = self.config.snapshot_dir.as_ref().map(|dir| {
-                dir.join(format!("user_{}_vectors.json", sanitize_user_id(user_id)))
-            });
+            let snapshot_path =
+                self.config.snapshot_dir.as_ref().map(|dir| {
+                    dir.join(format!("user_{}_vectors.json", sanitize_user_id(user_id)))
+                });
             Arc::new(InMemoryVectorLongTerm::new_with_persistence(
                 Arc::clone(&self.embedder),
                 self.config.max_entries_per_user,
@@ -136,7 +137,7 @@ fn sanitize_user_id(user_id: &str) -> String {
 }
 
 /// 用户隔离的 LongTermMemory 包装器
-/// 
+///
 /// 可以替代全局 LongTermMemory，在内部按 user_id 路由
 pub struct UserScopedMemory {
     manager: Arc<UserMemoryManager>,

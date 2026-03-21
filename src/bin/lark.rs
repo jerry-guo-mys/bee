@@ -13,11 +13,11 @@
 #[cfg(feature = "lark")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    use std::collections::{HashMap, HashSet};
-    use std::sync::Arc;
     use bee::agent::create_agent_components;
     use bee::config::load_config;
     use bee::integrations::lark::{create_router, LarkState};
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
     use tokio::sync::RwLock;
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -28,8 +28,8 @@ async fn main() -> anyhow::Result<()> {
 
     let app_id = std::env::var("LARK_APP_ID").expect("LARK_APP_ID must be set");
     let app_secret = std::env::var("LARK_APP_SECRET").expect("LARK_APP_SECRET must be set");
-    let base_url = std::env::var("LARK_BASE_URL")
-        .unwrap_or_else(|_| "https://open.feishu.cn".to_string());
+    let base_url =
+        std::env::var("LARK_BASE_URL").unwrap_or_else(|_| "https://open.feishu.cn".to_string());
 
     let cfg = load_config(None).unwrap_or_default();
     let workspace = cfg

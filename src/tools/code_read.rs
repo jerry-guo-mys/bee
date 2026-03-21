@@ -7,12 +7,18 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::tools::Tool;
+use crate::tools::output;
+use crate::tools::{
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode, ToolIntent,
+    ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
+};
 
 /// 代码读取工具
 pub struct CodeReadTool {
     /// 允许的根目录（通常是项目根目录）
     allowed_root: PathBuf,
+    /// 回退根目录（通常是当前仓库根）
+    fallback_root: Option<PathBuf>,
     /// 最大读取行数
     max_lines: usize,
     /// 单行最大字符数
@@ -21,8 +27,16 @@ pub struct CodeReadTool {
 
 impl CodeReadTool {
     pub fn new(allowed_root: impl AsRef<Path>) -> Self {
+        let root = allowed_root.as_ref().to_path_buf();
+        let allowed_root = root.canonicalize().unwrap_or(root);
+        let fallback_root = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| cwd.canonicalize().ok().or(Some(cwd)))
+            .filter(|cwd| cwd != &allowed_root);
+
         Self {
-            allowed_root: allowed_root.as_ref().to_path_buf(),
+            allowed_root,
+            fallback_root,
             max_lines: 2000,
             max_line_length: 2000,
         }
@@ -35,40 +49,38 @@ impl CodeReadTool {
     }
 
     /// 验证路径是否在允许范围内
-    fn validate_path(&self, file_path: &str) -> Result<PathBuf, String> {
-        let path = Path::new(file_path);
-        
-        // 解析为绝对路径
-        let absolute_path = if path.is_absolute() {
-            path.to_path_buf()
+    fn validate_under_root(root: &Path, file_path: &str) -> Result<PathBuf, String> {
+        let trimmed = file_path.trim_start_matches("./");
+        let candidate = root.join(trimmed);
+        let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let canonical_path = candidate
+            .canonicalize()
+            .map_err(|_| format!("File not found: {}", candidate.display()))?;
+
+        if canonical_path.starts_with(&canonical_root) {
+            Ok(canonical_path)
         } else {
-            self.allowed_root.join(path)
-        };
-
-        // 规范化路径
-        let canonical_path = match absolute_path.canonicalize() {
-            Ok(p) => p,
-            Err(_) => {
-                // 文件可能不存在，使用绝对路径继续
-                absolute_path
-            }
-        };
-
-        // 安全检查：确保在允许目录内
-        let allowed_canonical = match self.allowed_root.canonicalize() {
-            Ok(p) => p,
-            Err(_) => self.allowed_root.clone(),
-        };
-
-        if !canonical_path.starts_with(&allowed_canonical) {
-            return Err(format!(
+            Err(format!(
                 "Access denied: path '{}' is outside allowed root '{}'",
                 file_path,
-                self.allowed_root.display()
-            ));
+                root.display()
+            ))
         }
+    }
 
-        Ok(canonical_path)
+    /// 验证路径是否在允许范围内，允许回退到当前仓库根
+    fn validate_path(&self, file_path: &str) -> Result<PathBuf, String> {
+        match Self::validate_under_root(&self.allowed_root, file_path) {
+            Ok(path) => Ok(path),
+            Err(err) if err.starts_with("File not found:") => {
+                if let Some(fallback_root) = &self.fallback_root {
+                    Self::validate_under_root(fallback_root, file_path)
+                } else {
+                    Err(err)
+                }
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// 读取文件内容（带行号）
@@ -93,7 +105,9 @@ impl CodeReadTool {
             ));
         }
 
-        let end = limit.map(|l| (offset + l).min(total_lines)).unwrap_or(total_lines);
+        let end = limit
+            .map(|l| (offset + l).min(total_lines))
+            .unwrap_or(total_lines);
         let slice = &lines[offset..end];
 
         let mut result = String::new();
@@ -139,6 +153,31 @@ impl Tool for CodeReadTool {
         "Read code file contents with line numbers"
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ReadCode])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::StructuredJson)
+            .with_preferred_use_cases(vec![ToolUseCase::LocalWorkspaceInspection])
+            .with_disallowed_use_cases(vec![
+                ToolUseCase::DirectExplanation,
+                ToolUseCase::TimeSensitiveCurrent,
+                ToolUseCase::ExternalGitHubRepo,
+            ])
+            .with_requires_explicit_user_request(true)
+            .with_capability(
+                ToolCapabilityGroup::LocalWorkspace,
+                ToolCapabilitySubgroup::CodeRead,
+            )
+            .with_costs(
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+            )
+            .with_preferred_rank(2)
+            .with_critic_mode(ToolCriticMode::Skip)
+    }
+
     fn parameters_schema(&self) -> Value {
         serde_json::json!({
             "type": "object",
@@ -182,7 +221,7 @@ impl Tool for CodeReadTool {
             .or(Some(200));
 
         let validated_path = self.validate_path(file_path)?;
-        
+
         if !validated_path.exists() {
             return Err(format!("File not found: {}", validated_path.display()));
         }
@@ -191,7 +230,16 @@ impl Tool for CodeReadTool {
             return Err(format!("Path is not a file: {}", validated_path.display()));
         }
 
-        self.read_file_with_lines(&validated_path, offset, limit)
+        let content = self.read_file_with_lines(&validated_path, offset, limit)?;
+        output::structured(
+            self.name(),
+            format!("Read code file {}", validated_path.display()),
+            true,
+            serde_json::json!({
+                "file_path": validated_path.display().to_string(),
+                "content": content,
+            }),
+        )
     }
 }
 
@@ -206,17 +254,17 @@ mod tests {
         std::fs::create_dir_all(test_dir.join("src")).unwrap();
         std::fs::write(test_dir.join("Cargo.toml"), "").unwrap();
         std::fs::write(test_dir.join("src/main.rs"), "fn main() {}").unwrap();
-        
+
         let tool = CodeReadTool::new(&test_dir);
-        
+
         // 正常路径
         assert!(tool.validate_path("src/main.rs").is_ok());
         assert!(tool.validate_path("Cargo.toml").is_ok());
-        
+
         // 路径穿越攻击应该被阻止
         assert!(tool.validate_path("../../../etc/passwd").is_err());
         assert!(tool.validate_path("src/../../../etc/passwd").is_err());
-        
+
         std::fs::remove_dir_all(&test_dir).ok();
     }
 
@@ -224,7 +272,7 @@ mod tests {
     fn test_read_nonexistent_file() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let tool = CodeReadTool::new(".");
-        
+
         rt.block_on(async {
             let args = serde_json::json!({
                 "file_path": "nonexistent_file_xyz.txt"

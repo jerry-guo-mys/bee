@@ -33,9 +33,9 @@ impl RecoveryEngine {
             AgentError::ToolExecutionFailed(msg) => {
                 RecoveryAction::AskUser(format!("工具执行失败: {msg}"))
             }
-            AgentError::NetworkTimeout => RecoveryAction::RetryWithPrompt(
-                "网络请求超时，请重试。".to_string(),
-            ),
+            AgentError::NetworkTimeout => {
+                RecoveryAction::RetryWithPrompt("网络请求超时，请重试。".to_string())
+            }
             AgentError::LlmError(_) => RecoveryAction::DowngradeModel,
             AgentError::Cancelled => RecoveryAction::Abort,
             _ => RecoveryAction::Abort,
@@ -93,7 +93,9 @@ mod tests {
     #[test]
     fn test_recovery_llm_error() {
         let engine = RecoveryEngine::new();
-        let err = AgentError::LlmError(LlmError::RateLimited { retry_after_ms: 1000 });
+        let err = AgentError::LlmError(LlmError::RateLimited {
+            retry_after_ms: 1000,
+        });
         let action = engine.handle(&err, &mut []);
         assert!(matches!(action, RecoveryAction::DowngradeModel));
     }

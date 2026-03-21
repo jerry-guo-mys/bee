@@ -8,6 +8,7 @@
 //! - **llm**: LLM 客户端抽象与实现（OpenAI 兼容 / DeepSeek / Mock）
 //! - **memory**: 短期 / 中期 / 长期记忆与持久化
 //! - **react**: Planner、Critic、ReAct 主循环
+//! - **saas**: 多租户主数据模型与仓储边界
 //! - **skills**: 技能系统（能力描述、模板、脚本）
 //! - **tools**: 工具箱（cat、ls、shell、search、echo）与执行器
 //! - **ui**: Ratatui TUI 界面
@@ -24,12 +25,16 @@ pub mod memory;
 pub mod observability;
 pub mod plugins;
 pub mod react;
+pub mod saas;
+pub mod service_contracts;
 pub mod skills;
+pub mod tool_policy;
+pub mod tool_router;
 pub mod tools;
-pub mod workflow;
 pub mod ui;
+pub mod workflow;
 
-pub use evolution::{EvolutionLoop, EvolutionConfig};
+pub use evolution::{EvolutionConfig, EvolutionLoop};
 
 #[cfg(test)]
 mod integration_tests {
@@ -78,20 +83,30 @@ mod integration_tests {
                 None,
                 None,
                 None,
-            ).await;
+            )
+            .await;
 
             assert!(result.is_ok(), "React loop should complete successfully");
             let react_result = result.unwrap();
 
             // 验证消息历史非空
-            assert!(!react_result.messages.is_empty(), "Should have at least one message");
+            assert!(
+                !react_result.messages.is_empty(),
+                "Should have at least one message"
+            );
 
             // 验证存在用户消息
-            let has_user_msg = react_result.messages.iter().any(|m| m.role == crate::memory::Role::User);
+            let has_user_msg = react_result
+                .messages
+                .iter()
+                .any(|m| m.role == crate::memory::Role::User);
             assert!(has_user_msg, "Should contain user message");
 
             // 验证存在助手回复
-            let has_assistant_msg = react_result.messages.iter().any(|m| m.role == crate::memory::Role::Assistant);
+            let has_assistant_msg = react_result
+                .messages
+                .iter()
+                .any(|m| m.role == crate::memory::Role::Assistant);
             assert!(has_assistant_msg, "Should contain assistant message");
         });
     }
@@ -139,7 +154,9 @@ mod integration_tests {
 
             let executor = ToolExecutor::new(registry, 30);
 
-            let result = executor.execute("echo", serde_json::json!({"text": "Hello"})).await;
+            let result = executor
+                .execute("echo", serde_json::json!({"text": "Hello"}))
+                .await;
             assert!(result.is_ok());
             assert_eq!(result.unwrap(), "Hello");
         });
@@ -197,7 +214,8 @@ mod integration_tests {
                 None,
                 None,
                 None,
-            ).await;
+            )
+            .await;
 
             // 应该返回取消错误
             assert!(result.is_err());

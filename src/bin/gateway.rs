@@ -23,8 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cfg = load_config(None).unwrap_or_default();
 
-    let bind_addr = std::env::var("GATEWAY_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:9000".to_string());
+    let bind_addr = std::env::var("GATEWAY_BIND").unwrap_or_else(|_| "127.0.0.1:9000".to_string());
 
     let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
@@ -34,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session_db_path = workspace.join("gateway_sessions.db");
     let task_db_path = workspace.join("gateway_tasks.db");
     let user_memory_dir = workspace.join("memory/users");
-    
+
     let hub_config = HubConfig {
         bind_addr: bind_addr.clone(),
         max_connections: 1000,

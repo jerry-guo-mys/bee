@@ -61,8 +61,8 @@ struct SerMessage {
     content: String,
 }
 
-use rusqlite::{params, Connection, Result as SqliteResult};
 use chrono::Utc;
+use rusqlite::{params, Connection, Result as SqliteResult};
 
 pub struct SqlitePersistence {
     conn: Connection,
@@ -86,7 +86,7 @@ impl SqlitePersistence {
             )",
             [],
         )?;
-        
+
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,7 +98,7 @@ impl SqlitePersistence {
             )",
             [],
         )?;
-        
+
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS checkpoints (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,12 +110,12 @@ impl SqlitePersistence {
             )",
             [],
         )?;
-        
+
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)",
             [],
         )?;
-        
+
         Ok(())
     }
 
@@ -136,36 +136,38 @@ impl SqlitePersistence {
             Role::Tool => "tool",
         };
         let now = Utc::now().to_rfc3339();
-        
+
         self.conn.execute(
             "INSERT INTO messages (session_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4)",
             params![session_id, role_str, message.content, now],
         )?;
-        
+
         self.conn.execute(
             "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
             params![now, session_id],
         )?;
-        
+
         Ok(())
     }
 
     pub fn load_messages(&self, session_id: &str) -> SqliteResult<Vec<Message>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT role, content FROM messages WHERE session_id = ?1 ORDER BY id ASC"
-        )?;
-        
-        let messages = stmt.query_map([session_id], |row| {
-            let role_str: String = row.get(0)?;
-            let content: String = row.get(1)?;
-            let role = match role_str.as_str() {
-                "user" => Role::User,
-                "assistant" => Role::Assistant,
-                _ => Role::System,
-            };
-            Ok(Message { role, content })
-        })?.collect::<SqliteResult<Vec<_>>>()?;
-        
+        let mut stmt = self
+            .conn
+            .prepare("SELECT role, content FROM messages WHERE session_id = ?1 ORDER BY id ASC")?;
+
+        let messages = stmt
+            .query_map([session_id], |row| {
+                let role_str: String = row.get(0)?;
+                let content: String = row.get(1)?;
+                let role = match role_str.as_str() {
+                    "user" => Role::User,
+                    "assistant" => Role::Assistant,
+                    _ => Role::System,
+                };
+                Ok(Message { role, content })
+            })?
+            .collect::<SqliteResult<Vec<_>>>()?;
+
         Ok(messages)
     }
 
@@ -180,15 +182,15 @@ impl SqlitePersistence {
 
     pub fn load_latest_checkpoint(&self, session_id: &str) -> SqliteResult<Option<(i32, String)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT step, state FROM checkpoints WHERE session_id = ?1 ORDER BY id DESC LIMIT 1"
+            "SELECT step, state FROM checkpoints WHERE session_id = ?1 ORDER BY id DESC LIMIT 1",
         )?;
-        
+
         let result = stmt.query_row([session_id], |row| {
             let step: i32 = row.get(0)?;
             let state: String = row.get(1)?;
             Ok((step, state))
         });
-        
+
         match result {
             Ok(checkpoint) => Ok(Some(checkpoint)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -198,24 +200,24 @@ impl SqlitePersistence {
 
     pub fn list_sessions(&self, limit: i32) -> SqliteResult<Vec<(String, String, Option<String>)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, updated_at, title FROM sessions ORDER BY updated_at DESC LIMIT ?1"
+            "SELECT id, updated_at, title FROM sessions ORDER BY updated_at DESC LIMIT ?1",
         )?;
-        
-        let sessions = stmt.query_map([limit], |row| {
-            let id: String = row.get(0)?;
-            let updated: String = row.get(1)?;
-            let title: Option<String> = row.get(2)?;
-            Ok((id, updated, title))
-        })?.collect::<SqliteResult<Vec<_>>>()?;
-        
+
+        let sessions = stmt
+            .query_map([limit], |row| {
+                let id: String = row.get(0)?;
+                let updated: String = row.get(1)?;
+                let title: Option<String> = row.get(2)?;
+                Ok((id, updated, title))
+            })?
+            .collect::<SqliteResult<Vec<_>>>()?;
+
         Ok(sessions)
     }
 
     pub fn delete_session(&self, session_id: &str) -> SqliteResult<()> {
-        self.conn.execute(
-            "DELETE FROM sessions WHERE id = ?1",
-            [session_id],
-        )?;
+        self.conn
+            .execute("DELETE FROM sessions WHERE id = ?1", [session_id])?;
         Ok(())
     }
 }
