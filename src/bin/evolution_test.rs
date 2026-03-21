@@ -3,16 +3,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-
 use bee::{
     config::load_config,
     core::orchestrator::create_llm_from_config,
+    evolution::{EvolutionConfig, EvolutionLoop},
     tools::{
-        ToolExecutor, ToolRegistry, CatTool, LsTool, EchoTool, ShellTool, SearchTool,
-        CodeReadTool, CodeGrepTool, CodeEditTool, CodeWriteTool,
-        TestRunTool, TestCheckTool, GitCommitTool,
+        CatTool, CodeEditTool, CodeGrepTool, CodeReadTool, CodeWriteTool, EchoTool, GitCommitTool,
+        LsTool, SearchTool, ShellTool, TestCheckTool, TestRunTool, ToolExecutor, ToolRegistry,
     },
-    evolution::{EvolutionLoop, EvolutionConfig},
 };
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -78,14 +76,25 @@ async fn main() -> anyhow::Result<()> {
 
     match evolution_loop.run().await {
         Ok(results) => {
-            println!("\n📈 Evolution completed with {} iterations:", results.len());
+            println!(
+                "\n📈 Evolution completed with {} iterations:",
+                results.len()
+            );
             for result in results {
                 println!(
                     "  Iteration {}: {} (score: {:.2}, tests: {})",
                     result.iteration,
-                    if result.success { "✓ SUCCESS" } else { "✗ FAILED" },
+                    if result.success {
+                        "✓ SUCCESS"
+                    } else {
+                        "✗ FAILED"
+                    },
                     result.quality_score,
-                    if result.tests_passed { "passed" } else { "failed" }
+                    if result.tests_passed {
+                        "passed"
+                    } else {
+                        "failed"
+                    }
                 );
                 if !result.changes_made.is_empty() {
                     println!("    Changes made:");

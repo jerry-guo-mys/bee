@@ -62,15 +62,10 @@ pub enum MessageType {
     },
 
     /// AI 响应（流式开始）
-    ResponseStart {
-        request_id: String,
-    },
+    ResponseStart { request_id: String },
 
     /// AI 响应（流式 chunk）
-    ResponseChunk {
-        request_id: String,
-        content: String,
-    },
+    ResponseChunk { request_id: String, content: String },
 
     /// AI 响应（流式结束）
     ResponseEnd {
@@ -94,10 +89,7 @@ pub enum MessageType {
     },
 
     /// 思考过程
-    Thinking {
-        request_id: String,
-        content: String,
-    },
+    Thinking { request_id: String, content: String },
 
     /// 错误
     Error {
@@ -113,14 +105,10 @@ pub enum MessageType {
     },
 
     /// 心跳 ping
-    Ping {
-        timestamp: u64,
-    },
+    Ping { timestamp: u64 },
 
     /// 心跳 pong
-    Pong {
-        timestamp: u64,
-    },
+    Pong { timestamp: u64 },
 
     /// 客户端认证
     Auth {
@@ -136,19 +124,13 @@ pub enum MessageType {
     },
 
     /// 取消当前请求
-    Cancel {
-        request_id: String,
-    },
+    Cancel { request_id: String },
 
     /// 请求会话历史
-    GetHistory {
-        limit: Option<usize>,
-    },
+    GetHistory { limit: Option<usize> },
 
     /// 会话历史响应
-    History {
-        messages: Vec<HistoryMessage>,
-    },
+    History { messages: Vec<HistoryMessage> },
 
     /// 后台任务完成通知
     TaskComplete {
@@ -166,14 +148,10 @@ pub enum MessageType {
     },
 
     /// 任务提交结果
-    TaskSubmitted {
-        task_id: String,
-    },
+    TaskSubmitted { task_id: String },
 
     /// 查询任务状态
-    GetTaskStatus {
-        task_id: String,
-    },
+    GetTaskStatus { task_id: String },
 
     /// 任务状态响应
     TaskStatus {

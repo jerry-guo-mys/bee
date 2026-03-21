@@ -21,15 +21,15 @@ mod sqlx_impl {
         /// 创建新的异步持久化实例
         pub async fn new(db_path: impl AsRef<Path>) -> Result<Self, sqlx::Error> {
             let db_url = format!("sqlite:{}?mode=rwc", db_path.as_ref().display());
-            
+
             let pool = SqlitePoolOptions::new()
                 .max_connections(5)
                 .connect(&db_url)
                 .await?;
-            
+
             let persistence = Self { pool };
             persistence.init_tables().await?;
-            
+
             Ok(persistence)
         }
 
@@ -46,7 +46,7 @@ mod sqlx_impl {
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     title TEXT
-                )"
+                )",
             )
             .execute(&self.pool)
             .await?;
@@ -59,7 +59,7 @@ mod sqlx_impl {
                     content TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-                )"
+                )",
             )
             .execute(&self.pool)
             .await?;
@@ -72,16 +72,14 @@ mod sqlx_impl {
                     state TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-                )"
+                )",
             )
             .execute(&self.pool)
             .await?;
 
-            sqlx::query(
-                "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)"
-            )
-            .execute(&self.pool)
-            .await?;
+            sqlx::query("CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)")
+                .execute(&self.pool)
+                .await?;
 
             Ok(())
         }
@@ -93,7 +91,7 @@ mod sqlx_impl {
             title: Option<&str>,
         ) -> Result<(), sqlx::Error> {
             let now = chrono::Utc::now().to_rfc3339();
-            
+
             sqlx::query(
                 "INSERT OR REPLACE INTO sessions (id, created_at, updated_at, title) VALUES (?, ?, ?, ?)"
             )
@@ -103,7 +101,7 @@ mod sqlx_impl {
             .bind(title)
             .execute(&self.pool)
             .await?;
-            
+
             Ok(())
         }
 
@@ -122,7 +120,7 @@ mod sqlx_impl {
             let now = chrono::Utc::now().to_rfc3339();
 
             sqlx::query(
-                "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)"
+                "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
             )
             .bind(session_id)
             .bind(role_str)
@@ -181,7 +179,7 @@ mod sqlx_impl {
         /// 加载消息
         pub async fn load_messages(&self, session_id: &str) -> Result<Vec<Message>, sqlx::Error> {
             let rows = sqlx::query(
-                "SELECT role, content FROM messages WHERE session_id = ? ORDER BY id ASC"
+                "SELECT role, content FROM messages WHERE session_id = ? ORDER BY id ASC",
             )
             .bind(session_id)
             .fetch_all(&self.pool)
@@ -213,9 +211,9 @@ mod sqlx_impl {
             state: &str,
         ) -> Result<(), sqlx::Error> {
             let now = chrono::Utc::now().to_rfc3339();
-            
+
             sqlx::query(
-                "INSERT INTO checkpoints (session_id, step, state, created_at) VALUES (?, ?, ?, ?)"
+                "INSERT INTO checkpoints (session_id, step, state, created_at) VALUES (?, ?, ?, ?)",
             )
             .bind(session_id)
             .bind(step)
@@ -223,7 +221,7 @@ mod sqlx_impl {
             .bind(&now)
             .execute(&self.pool)
             .await?;
-            
+
             Ok(())
         }
 
@@ -233,7 +231,7 @@ mod sqlx_impl {
             session_id: &str,
         ) -> Result<Option<(i32, String)>, sqlx::Error> {
             let result = sqlx::query(
-                "SELECT step, state FROM checkpoints WHERE session_id = ? ORDER BY id DESC LIMIT 1"
+                "SELECT step, state FROM checkpoints WHERE session_id = ? ORDER BY id DESC LIMIT 1",
             )
             .bind(session_id)
             .fetch_optional(&self.pool)
@@ -252,7 +250,7 @@ mod sqlx_impl {
             limit: i32,
         ) -> Result<Vec<(String, String, Option<String>)>, sqlx::Error> {
             let rows = sqlx::query(
-                "SELECT id, updated_at, title FROM sessions ORDER BY updated_at DESC LIMIT ?"
+                "SELECT id, updated_at, title FROM sessions ORDER BY updated_at DESC LIMIT ?",
             )
             .bind(limit)
             .fetch_all(&self.pool)
@@ -277,17 +275,17 @@ mod sqlx_impl {
                 .bind(session_id)
                 .execute(&self.pool)
                 .await?;
-            
+
             sqlx::query("DELETE FROM checkpoints WHERE session_id = ?")
                 .bind(session_id)
                 .execute(&self.pool)
                 .await?;
-            
+
             sqlx::query("DELETE FROM sessions WHERE id = ?")
                 .bind(session_id)
                 .execute(&self.pool)
                 .await?;
-            
+
             Ok(())
         }
 
@@ -300,14 +298,14 @@ mod sqlx_impl {
             let result = sqlx::query(
                 "DELETE FROM checkpoints WHERE session_id = ? AND id NOT IN (
                     SELECT id FROM checkpoints WHERE session_id = ? ORDER BY id DESC LIMIT ?
-                )"
+                )",
             )
             .bind(session_id)
             .bind(session_id)
             .bind(keep_count)
             .execute(&self.pool)
             .await?;
-            
+
             Ok(result.rows_affected())
         }
 
@@ -332,9 +330,20 @@ pub use sqlx_impl::AsyncSqlitePersistence;
 pub trait AsyncPersistence: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    async fn create_session(&self, session_id: &str, title: Option<&str>) -> Result<(), Self::Error>;
-    async fn save_message(&self, session_id: &str, message: &crate::memory::Message) -> Result<(), Self::Error>;
-    async fn load_messages(&self, session_id: &str) -> Result<Vec<crate::memory::Message>, Self::Error>;
+    async fn create_session(
+        &self,
+        session_id: &str,
+        title: Option<&str>,
+    ) -> Result<(), Self::Error>;
+    async fn save_message(
+        &self,
+        session_id: &str,
+        message: &crate::memory::Message,
+    ) -> Result<(), Self::Error>;
+    async fn load_messages(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::memory::Message>, Self::Error>;
     async fn delete_session(&self, session_id: &str) -> Result<(), Self::Error>;
 }
 
@@ -343,15 +352,26 @@ pub trait AsyncPersistence: Send + Sync {
 impl AsyncPersistence for AsyncSqlitePersistence {
     type Error = sqlx::Error;
 
-    async fn create_session(&self, session_id: &str, title: Option<&str>) -> Result<(), Self::Error> {
+    async fn create_session(
+        &self,
+        session_id: &str,
+        title: Option<&str>,
+    ) -> Result<(), Self::Error> {
         AsyncSqlitePersistence::create_session(self, session_id, title).await
     }
 
-    async fn save_message(&self, session_id: &str, message: &crate::memory::Message) -> Result<(), Self::Error> {
+    async fn save_message(
+        &self,
+        session_id: &str,
+        message: &crate::memory::Message,
+    ) -> Result<(), Self::Error> {
         AsyncSqlitePersistence::save_message(self, session_id, message).await
     }
 
-    async fn load_messages(&self, session_id: &str) -> Result<Vec<crate::memory::Message>, Self::Error> {
+    async fn load_messages(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::memory::Message>, Self::Error> {
         AsyncSqlitePersistence::load_messages(self, session_id).await
     }
 
@@ -370,16 +390,22 @@ mod tests {
     async fn test_async_persistence_basic() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("test.db");
-        
+
         let persistence = AsyncSqlitePersistence::new(&db_path).await.unwrap();
-        
+
         // 创建会话
-        persistence.create_session("test-session", Some("Test")).await.unwrap();
-        
+        persistence
+            .create_session("test-session", Some("Test"))
+            .await
+            .unwrap();
+
         // 保存消息
         let msg = Message::user("Hello");
-        persistence.save_message("test-session", &msg).await.unwrap();
-        
+        persistence
+            .save_message("test-session", &msg)
+            .await
+            .unwrap();
+
         // 加载消息
         let messages = persistence.load_messages("test-session").await.unwrap();
         assert_eq!(messages.len(), 1);
@@ -391,19 +417,25 @@ mod tests {
     async fn test_async_persistence_batch() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("test.db");
-        
+
         let persistence = AsyncSqlitePersistence::new(&db_path).await.unwrap();
-        persistence.create_session("batch-session", None).await.unwrap();
-        
+        persistence
+            .create_session("batch-session", None)
+            .await
+            .unwrap();
+
         let messages = vec![
             Message::user("Q1"),
             Message::assistant("A1"),
             Message::user("Q2"),
             Message::assistant("A2"),
         ];
-        
-        persistence.save_messages("batch-session", &messages).await.unwrap();
-        
+
+        persistence
+            .save_messages("batch-session", &messages)
+            .await
+            .unwrap();
+
         let loaded = persistence.load_messages("batch-session").await.unwrap();
         assert_eq!(loaded.len(), 4);
     }
@@ -412,16 +444,28 @@ mod tests {
     async fn test_async_persistence_checkpoints() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("test.db");
-        
+
         let persistence = AsyncSqlitePersistence::new(&db_path).await.unwrap();
-        persistence.create_session("checkpoint-session", None).await.unwrap();
-        
+        persistence
+            .create_session("checkpoint-session", None)
+            .await
+            .unwrap();
+
         // 保存检查点
-        persistence.save_checkpoint("checkpoint-session", 1, r#"{"step": 1}"#).await.unwrap();
-        persistence.save_checkpoint("checkpoint-session", 2, r#"{"step": 2}"#).await.unwrap();
-        
+        persistence
+            .save_checkpoint("checkpoint-session", 1, r#"{"step": 1}"#)
+            .await
+            .unwrap();
+        persistence
+            .save_checkpoint("checkpoint-session", 2, r#"{"step": 2}"#)
+            .await
+            .unwrap();
+
         // 加载最新检查点
-        let checkpoint = persistence.load_latest_checkpoint("checkpoint-session").await.unwrap();
+        let checkpoint = persistence
+            .load_latest_checkpoint("checkpoint-session")
+            .await
+            .unwrap();
         assert!(checkpoint.is_some());
         let (step, state) = checkpoint.unwrap();
         assert_eq!(step, 2);

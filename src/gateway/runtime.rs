@@ -8,12 +8,29 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use super::message::{GatewayMessage, MessageType, SessionStatus};
+use super::session::SessionScope;
 use super::session_store::SessionStore;
-use crate::agent::create_agent_components;
+use crate::agent::{create_agent_components, create_context_with_long_term_for_assistant};
 use crate::config::AppConfig;
 use crate::core::{AgentComponents, AgentError};
 use crate::react::{react_loop, ReactEvent};
+use crate::saas::{
+    default_low_risk_tools, resolve_effective_tool_allowlist, SaasSqliteStore, ToolPolicyScope,
+};
 use crate::skills::SkillSelector;
+use crate::tool_policy::refine_allowed_tools_for_input;
+use crate::tool_router::{deterministic_route, execute_direct_route};
+
+fn allowed_tools_hint(allowed_tools: &[String]) -> Option<String> {
+    if allowed_tools.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "For this conversation, you may use only these tools: {}. Do not call any other tool.",
+            allowed_tools.join(", ")
+        ))
+    }
+}
 
 /// Runtime 配置
 #[derive(Debug, Clone)]
@@ -89,7 +106,9 @@ impl AgentRuntime {
     ) -> Result<String, AgentError> {
         let request_id = uuid::Uuid::new_v4().to_string();
 
-        self.session_store.set_status(session_id, SessionStatus::Processing).await;
+        self.session_store
+            .set_status(session_id, SessionStatus::Processing)
+            .await;
 
         response_tx
             .send(GatewayMessage::new(
@@ -171,7 +190,9 @@ impl AgentRuntime {
             .run_react_loop(session_id, user_input, event_tx, assistant_id, model)
             .await;
 
-        self.session_store.set_status(session_id, SessionStatus::Idle).await;
+        self.session_store
+            .set_status(session_id, SessionStatus::Idle)
+            .await;
 
         match &result {
             Ok(response) => {
@@ -207,7 +228,7 @@ impl AgentRuntime {
         session_id: &str,
         user_input: &str,
         event_tx: mpsc::UnboundedSender<ReactEvent>,
-        _assistant_id: Option<&str>,
+        assistant_id: Option<&str>,
         _model: Option<&str>,
     ) -> Result<String, AgentError> {
         let cancel_token = self
@@ -215,12 +236,34 @@ impl AgentRuntime {
             .new_cancel_token(session_id)
             .await
             .unwrap_or_else(tokio_util::sync::CancellationToken::new);
+        let scope = self
+            .session_store
+            .get_scope(session_id)
+            .await
+            .unwrap_or_default();
+        let allowed_tools =
+            resolve_allowed_tools_for_scope(&self.components, &self.config.workspace, &scope);
+        let allowed_tool_metadata = self
+            .components
+            .executor
+            .tool_metadata_for_names(&allowed_tools);
+        let policy_decision = refine_allowed_tools_for_input(user_input, &allowed_tool_metadata);
+        let allowed_tools_hint = allowed_tools_hint(&policy_decision.allowed_tools);
 
         let mut context = self
             .session_store
             .get_context(session_id)
             .await
-            .unwrap_or_else(|| crate::react::ContextManager::new(20));
+            .unwrap_or_else(|| {
+                let scoped_workspace = scoped_runtime_workspace(&self.config.workspace, &scope);
+                create_context_with_long_term_for_assistant(
+                    &self.config.app_config,
+                    self.config.app_config.app.max_context_turns,
+                    Some(&scoped_workspace),
+                    None,
+                    assistant_id,
+                )
+            });
 
         let system_prompt = if self.config.enable_skills {
             let selector = SkillSelector::new(
@@ -232,11 +275,58 @@ impl AgentRuntime {
                 None
             } else {
                 let skills_prompt = SkillSelector::build_skills_prompt(&skills);
-                Some(format!("{}\n\n{}", self.config.system_prompt, skills_prompt))
+                Some(format!(
+                    "{}\n\n{}",
+                    self.config.system_prompt, skills_prompt
+                ))
             }
         } else {
             None
         };
+        let system_prompt = match (
+            system_prompt,
+            policy_decision.system_hint.as_deref(),
+            allowed_tools_hint.as_deref(),
+        ) {
+            (Some(base), Some(policy_hint), Some(allowed_hint)) => {
+                Some(format!("{base}\n\n{policy_hint}\n{allowed_hint}"))
+            }
+            (Some(base), Some(policy_hint), None) => Some(format!("{base}\n\n{policy_hint}")),
+            (Some(base), None, Some(allowed_hint)) => Some(format!("{base}\n\n{allowed_hint}")),
+            (Some(base), None, None) => Some(base),
+            (None, Some(policy_hint), Some(allowed_hint)) => {
+                Some(format!("{policy_hint}\n{allowed_hint}"))
+            }
+            (None, Some(policy_hint), None) => Some(policy_hint.to_string()),
+            (None, None, Some(allowed_hint)) => Some(allowed_hint.to_string()),
+            (None, None, None) => None,
+        };
+
+        if let Some(route) =
+            deterministic_route(user_input, Some(policy_decision.allowed_tools.as_slice()))
+        {
+            let result = execute_direct_route(
+                &self.components.executor,
+                &mut context,
+                user_input,
+                &route,
+                Some(&event_tx),
+                cancel_token,
+            )
+            .await;
+            self.session_store.set_context(session_id, context).await;
+            if let Ok(ref direct_result) = result {
+                crate::observability::Metrics::global()
+                    .tools
+                    .record_direct_route_hit();
+                for msg in &direct_result.messages {
+                    self.session_store
+                        .add_message(session_id, msg.clone())
+                        .await;
+                }
+            }
+            return result.map(|r| r.response);
+        }
 
         let result = react_loop(
             &self.components.planner,
@@ -250,7 +340,7 @@ impl AgentRuntime {
             self.components.critic.as_ref(),
             Some(&self.components.task_scheduler),
             system_prompt.as_deref(),
-            None,
+            Some(policy_decision.allowed_tools.as_slice()),
         )
         .await;
 
@@ -258,7 +348,9 @@ impl AgentRuntime {
 
         if let Ok(ref react_result) = result {
             for msg in &react_result.messages {
-                self.session_store.add_message(session_id, msg.clone()).await;
+                self.session_store
+                    .add_message(session_id, msg.clone())
+                    .await;
             }
         }
 
@@ -271,7 +363,91 @@ impl AgentRuntime {
     }
 
     /// 获取会话历史
-    pub async fn get_history(&self, session_id: &str, limit: Option<usize>) -> Vec<(String, String)> {
+    pub async fn get_history(
+        &self,
+        session_id: &str,
+        limit: Option<usize>,
+    ) -> Vec<(String, String)> {
         self.session_store.get_history(session_id, limit).await
     }
+}
+
+fn scoped_runtime_workspace(base_workspace: &std::path::Path, scope: &SessionScope) -> PathBuf {
+    let mut path = base_workspace.join(".bee").join("runtime_scopes");
+    path.push(sanitize_scope_segment(
+        scope.tenant_id.as_deref().unwrap_or("tenant-default"),
+    ));
+    path.push(sanitize_scope_segment(
+        scope.organization_id.as_deref().unwrap_or("org-default"),
+    ));
+    if let Some(team_id) = scope.team_id.as_deref() {
+        path.push("teams");
+        path.push(sanitize_scope_segment(team_id));
+    }
+    if let Some(user_id) = scope.user_id.as_deref() {
+        path.push("users");
+        path.push(sanitize_scope_segment(user_id));
+    }
+    if let Some(agent_instance_id) = scope.agent_instance_id.as_deref() {
+        path.push("agents");
+        path.push(sanitize_scope_segment(agent_instance_id));
+    }
+    let _ = std::fs::create_dir_all(&path);
+    path
+}
+
+fn sanitize_scope_segment(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "default".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn resolve_allowed_tools_for_scope(
+    components: &AgentComponents,
+    workspace: &std::path::Path,
+    scope: &SessionScope,
+) -> Vec<String> {
+    let tools = components.executor.tool_names();
+    let default_tools = if scope
+        .team_id
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        tools
+    } else {
+        default_low_risk_tools(&tools)
+    };
+    let db_path = workspace.join(".bee").join("saas.db");
+    if let Ok(store) = SaasSqliteStore::new(db_path) {
+        if let Ok(resolved) = resolve_effective_tool_allowlist(
+            &store,
+            &ToolPolicyScope {
+                tenant_id: scope
+                    .tenant_id
+                    .clone()
+                    .unwrap_or_else(|| "tenant-default".to_string()),
+                organization_id: scope
+                    .organization_id
+                    .clone()
+                    .or_else(|| Some("org-default".to_string())),
+                team_id: scope.team_id.clone(),
+            },
+            &default_tools,
+        ) {
+            return resolved;
+        }
+    }
+    default_tools
 }

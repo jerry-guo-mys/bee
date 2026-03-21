@@ -1,13 +1,13 @@
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::io::{self, Write};
 
 use tokio::time;
 
-use crate::tools::ToolExecutor;
-use crate::evolution::types::{ImprovementPlan, IterationResult};
 use crate::config::ApprovalMode;
 use crate::evolution::engine::EvolutionConfig;
+use crate::evolution::types::{ImprovementPlan, IterationResult};
+use crate::tools::ToolExecutor;
 
 pub struct ExecutionEngine {
     executor: Arc<ToolExecutor>,
@@ -38,10 +38,14 @@ impl ExecutionEngine {
 
         // 检查是否需要审批
         if !matches!(self.config.approval_mode, ApprovalMode::None) {
-            let needs_approval = self.config.require_approval_for.is_empty() ||
-                self.config.require_approval_for.iter().any(|t| plan.title.to_lowercase().contains(&t.to_lowercase()) ||
-                    format!("{:?}", plan.improvement_type).to_lowercase().contains(&t.to_lowercase()));
-            
+            let needs_approval = self.config.require_approval_for.is_empty()
+                || self.config.require_approval_for.iter().any(|t| {
+                    plan.title.to_lowercase().contains(&t.to_lowercase())
+                        || format!("{:?}", plan.improvement_type)
+                            .to_lowercase()
+                            .contains(&t.to_lowercase())
+                });
+
             if needs_approval {
                 match self.check_approval(plan).await {
                     Ok(true) => (),
@@ -118,7 +122,8 @@ impl ExecutionEngine {
             return self.execute_removal(step).await;
         } else if step.to_lowercase().contains("add") || step.to_lowercase().contains("create") {
             return self.execute_addition(step).await;
-        } else if step.to_lowercase().contains("replace") || step.to_lowercase().contains("change") {
+        } else if step.to_lowercase().contains("replace") || step.to_lowercase().contains("change")
+        {
             return self.execute_replacement(step).await;
         } else if step.to_lowercase().contains("rename") {
             return self.execute_rename(step).await;
@@ -135,7 +140,10 @@ impl ExecutionEngine {
                 "new_string": ""
             });
 
-            self.executor.execute("code_edit", args).await.map_err(|e| e.to_string())?;
+            self.executor
+                .execute("code_edit", args)
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(format!("Removed pattern from {}", file_path))
         } else {
             Err(format!("Could not parse removal step: {}", step))
@@ -154,9 +162,9 @@ impl ExecutionEngine {
         }
 
         if let Some((file_path, content)) = self.extract_file_and_content(step) {
-            let existing = std::fs::read_to_string(self.project_root.join(&file_path))
-                .unwrap_or_default();
-            
+            let existing =
+                std::fs::read_to_string(self.project_root.join(&file_path)).unwrap_or_default();
+
             if existing.is_empty() {
                 let args = serde_json::json!({
                     "file_path": file_path,
@@ -164,7 +172,10 @@ impl ExecutionEngine {
                     "overwrite": false
                 });
 
-                self.executor.execute("code_write", args).await.map_err(|e| e.to_string())?;
+                self.executor
+                    .execute("code_write", args)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 Ok(format!("Created new file: {}", file_path))
             } else {
                 let args = serde_json::json!({
@@ -173,7 +184,10 @@ impl ExecutionEngine {
                     "new_string": content
                 });
 
-            self.executor.execute("code_edit", args).await.map_err(|e| e.to_string())?;
+                self.executor
+                    .execute("code_edit", args)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 Ok(format!("Added content to {}", file_path))
             }
         } else {
@@ -189,7 +203,10 @@ impl ExecutionEngine {
                 "new_string": new_content
             });
 
-            self.executor.execute("code_edit", args).await.map_err(|e| e.to_string())?;
+            self.executor
+                .execute("code_edit", args)
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(format!("Replaced content in {}", file_path))
         } else {
             Err(format!("Could not parse replacement step: {}", step))
@@ -203,25 +220,26 @@ impl ExecutionEngine {
     async fn add_function(&self, step: &str) -> Result<String, String> {
         // Parse step like "Add function foo(bar: i32) -> bool to src/lib.rs"
         // or "Create function calculate_total in src/calculations.rs"
-        
+
         // First try to extract file path
-        let file_path = self.extract_file_path(step)
+        let file_path = self
+            .extract_file_path(step)
             .ok_or_else(|| format!("Could not find file path in step: {}", step))?;
-        
+
         // Validate path is allowed
         if !self.is_path_allowed(Path::new(&file_path)) {
             return Err(format!("File path '{}' is not allowed", file_path));
         }
-        
+
         // Try to extract function signature
-        let func_sig = self.extract_function_signature(step)
+        let func_sig = self
+            .extract_function_signature(step)
             .unwrap_or_else(|| "fn new_function() {\n    // TODO: Implement\n}".to_string());
-        
+
         // Read existing file to decide where to insert
         let full_path = self.project_root.join(&file_path);
-        let existing_content = std::fs::read_to_string(&full_path)
-            .unwrap_or_default();
-        
+        let existing_content = std::fs::read_to_string(&full_path).unwrap_or_default();
+
         let new_content = if existing_content.is_empty() {
             // New file
             format!("{}\n", func_sig)
@@ -229,7 +247,7 @@ impl ExecutionEngine {
             // Append to end of file (simplified)
             format!("{}\n\n{}", existing_content.trim_end(), func_sig)
         };
-        
+
         // Use code_write or code_edit tool
         let args = if existing_content.is_empty() {
             serde_json::json!({
@@ -244,23 +262,31 @@ impl ExecutionEngine {
                 "new_string": new_content
             })
         };
-        
-        let tool_name = if existing_content.is_empty() { "code_write" } else { "code_edit" };
-        self.executor.execute(tool_name, args).await.map_err(|e| e.to_string())?;
-        
+
+        let tool_name = if existing_content.is_empty() {
+            "code_write"
+        } else {
+            "code_edit"
+        };
+        self.executor
+            .execute(tool_name, args)
+            .await
+            .map_err(|e| e.to_string())?;
+
         Ok(format!("Added function to {}", file_path))
     }
 
     async fn add_type(&self, step: &str) -> Result<String, String> {
         // Parse step like "Add struct Item with fields: id, name, price to src/models.rs"
-        
-        let file_path = self.extract_file_path(step)
+
+        let file_path = self
+            .extract_file_path(step)
             .ok_or_else(|| format!("Could not find file path in step: {}", step))?;
-        
+
         if !self.is_path_allowed(Path::new(&file_path)) {
             return Err(format!("File path '{}' is not allowed", file_path));
         }
-        
+
         // Extract type definition (simplified)
         let type_def = if step.to_lowercase().contains("struct") {
             "struct NewType {\n    // TODO: Add fields\n}"
@@ -269,17 +295,16 @@ impl ExecutionEngine {
         } else {
             "struct NewType {\n    // TODO: Add fields\n}"
         };
-        
+
         let full_path = self.project_root.join(&file_path);
-        let existing_content = std::fs::read_to_string(&full_path)
-            .unwrap_or_default();
-        
+        let existing_content = std::fs::read_to_string(&full_path).unwrap_or_default();
+
         let new_content = if existing_content.is_empty() {
             format!("{}\n", type_def)
         } else {
             format!("{}\n\n{}", existing_content.trim_end(), type_def)
         };
-        
+
         let args = if existing_content.is_empty() {
             serde_json::json!({
                 "file_path": file_path,
@@ -293,23 +318,31 @@ impl ExecutionEngine {
                 "new_string": new_content
             })
         };
-        
-        let tool_name = if existing_content.is_empty() { "code_write" } else { "code_edit" };
-        self.executor.execute(tool_name, args).await.map_err(|e| e.to_string())?;
-        
+
+        let tool_name = if existing_content.is_empty() {
+            "code_write"
+        } else {
+            "code_edit"
+        };
+        self.executor
+            .execute(tool_name, args)
+            .await
+            .map_err(|e| e.to_string())?;
+
         Ok(format!("Added type to {}", file_path))
     }
 
     async fn add_test(&self, step: &str) -> Result<String, String> {
         // Parse step like "Add test for calculate_total function in src/lib.rs"
-        
-        let file_path = self.extract_file_path(step)
+
+        let file_path = self
+            .extract_file_path(step)
             .ok_or_else(|| format!("Could not find file path in step: {}", step))?;
-        
+
         if !self.is_path_allowed(Path::new(&file_path)) {
             return Err(format!("File path '{}' is not allowed", file_path));
         }
-        
+
         // Create a basic test
         let test_code = r#"#[cfg(test)]
 mod tests {
@@ -321,31 +354,37 @@ mod tests {
         assert_eq!(2 + 2, 4);
     }
 }"#;
-        
+
         let full_path = self.project_root.join(&file_path);
-        let existing_content = std::fs::read_to_string(&full_path)
-            .unwrap_or_default();
-        
+        let existing_content = std::fs::read_to_string(&full_path).unwrap_or_default();
+
         // Check if tests module already exists
         let new_content = if existing_content.contains("#[cfg(test)]") {
             // Append to existing tests module (simplified - just append at end)
-            format!("{}\n\n{}", existing_content.trim_end(), "    #[test]\n    fn test_new_function() {\n        assert_eq!(2 + 2, 4);\n    }")
+            format!(
+                "{}\n\n{}",
+                existing_content.trim_end(),
+                "    #[test]\n    fn test_new_function() {\n        assert_eq!(2 + 2, 4);\n    }"
+            )
         } else {
             // Add new tests module at end
             format!("{}\n\n{}", existing_content.trim_end(), test_code)
         };
-        
+
         let args = serde_json::json!({
             "file_path": file_path,
             "old_string": existing_content,
             "new_string": new_content
         });
-        
-        self.executor.execute("code_edit", args).await.map_err(|e| e.to_string())?;
-        
+
+        self.executor
+            .execute("code_edit", args)
+            .await
+            .map_err(|e| e.to_string())?;
+
         Ok(format!("Added test to {}", file_path))
     }
-    
+
     fn extract_file_path(&self, step: &str) -> Option<String> {
         // Look for file paths ending with .rs, .toml, .md
         let words: Vec<&str> = step.split_whitespace().collect();
@@ -356,11 +395,11 @@ mod tests {
         }
         None
     }
-    
+
     fn extract_function_signature(&self, step: &str) -> Option<String> {
         // Look for patterns like "fn function_name(" or "function foo("
         let lower_step = step.to_lowercase();
-        
+
         // Try to find "fn " pattern
         if let Some(idx) = lower_step.find("fn ") {
             let remaining = &step[idx..];
@@ -369,8 +408,8 @@ mod tests {
             let sig = &remaining[..end];
             return Some(sig.trim().to_string());
         }
-        
-        // Try to find "function " pattern  
+
+        // Try to find "function " pattern
         if let Some(idx) = lower_step.find("function ") {
             let remaining = &step[idx..];
             let end = remaining.find('.').unwrap_or(remaining.len());
@@ -382,7 +421,7 @@ mod tests {
             }
             return Some(format!("fn {}", sig));
         }
-        
+
         None
     }
 
@@ -471,7 +510,10 @@ mod tests {
             "files": ["."]
         });
 
-        self.executor.execute("git_commit", args).await.map_err(|e| e.to_string())?;
+        self.executor
+            .execute("git_commit", args)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -495,14 +537,19 @@ mod tests {
         io::stdout().flush().map_err(|e| e.to_string())?;
 
         let mut input = String::new();
-        io::stdin().read_line(&mut input).map_err(|e| e.to_string())?;
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| e.to_string())?;
 
         let input = input.trim().to_lowercase();
         Ok(input == "y" || input == "yes" || input == "是")
     }
 
     async fn check_approval_prompt(&self, plan: &ImprovementPlan) -> Result<bool, String> {
-        println!("\n📋 改进计划需要审批 ({}秒超时):", self.config.approval_timeout_seconds);
+        println!(
+            "\n📋 改进计划需要审批 ({}秒超时):",
+            self.config.approval_timeout_seconds
+        );
         println!("标题: {}", plan.title);
         println!("类型: {:?}", plan.improvement_type);
         println!("目标文件: {:?}", plan.target_files);
@@ -521,7 +568,8 @@ mod tests {
                     Err(_) => None,
                 }
             }),
-        ).await;
+        )
+        .await;
 
         match result {
             Ok(join_result) => match join_result {
@@ -567,18 +615,19 @@ mod tests {
 
         let result = time::timeout(
             time::Duration::from_secs(self.config.approval_timeout_seconds),
-            client.post(url)
-                .json(&payload)
-                .send(),
-        ).await;
+            client.post(url).json(&payload).send(),
+        )
+        .await;
 
         match result {
             Ok(Ok(response)) => {
                 if response.status().is_success() {
                     let body = response.text().await.map_err(|e| e.to_string())?;
                     // 简化：假设返回 JSON 包含 approved 字段
-                    let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
-                    let approved = json.get("approved")
+                    let json: serde_json::Value =
+                        serde_json::from_str(&body).map_err(|e| e.to_string())?;
+                    let approved = json
+                        .get("approved")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
                     Ok(approved)
@@ -600,23 +649,25 @@ mod tests {
 
     fn is_path_allowed(&self, path: &Path) -> bool {
         let path_str = path.to_string_lossy().to_string();
-        
+
         // 检查是否在允许的目录中
-        let allowed = self.config.allowed_directories.iter().any(|dir| {
-            path_str.starts_with(dir) || path_str.contains(dir)
-        });
-        
+        let allowed = self
+            .config
+            .allowed_directories
+            .iter()
+            .any(|dir| path_str.starts_with(dir) || path_str.contains(dir));
+
         if !allowed {
             return false;
         }
-        
+
         // 检查是否为受限文件
         for restricted in &self.config.restricted_files {
             if path_str.ends_with(restricted) || path_str.contains(restricted) {
                 return false;
             }
         }
-        
+
         // 检查文件大小（如果文件存在）
         if let Ok(metadata) = std::fs::metadata(path) {
             let size_kb = metadata.len() / 1024;
@@ -624,13 +675,15 @@ mod tests {
                 return false;
             }
         }
-        
+
         true
     }
 
     #[allow(dead_code)]
     fn is_operation_allowed(&self, operation_type: &str) -> bool {
-        self.config.allowed_operation_types.iter()
+        self.config
+            .allowed_operation_types
+            .iter()
             .any(|op| op == operation_type)
     }
 
@@ -638,10 +691,10 @@ mod tests {
     async fn validate_operation(&self, step: &str) -> Result<(), String> {
         // 解析步骤以提取文件路径和操作类型
         // 简化实现：检查基本安全性
-        
+
         let step_lower = step.to_lowercase();
         let mut operation_type = "";
-        
+
         if step_lower.contains("remove") || step_lower.contains("delete") {
             operation_type = "remove";
         } else if step_lower.contains("add") || step_lower.contains("create") {
@@ -651,11 +704,11 @@ mod tests {
         } else if step_lower.contains("rename") {
             operation_type = "rename";
         }
-        
+
         if !operation_type.is_empty() && !self.is_operation_allowed(operation_type) {
             return Err(format!("操作类型 '{}' 不被允许", operation_type));
         }
-        
+
         // 尝试提取文件路径（简化）
         let words: Vec<&str> = step.split_whitespace().collect();
         for word in words {
@@ -667,7 +720,7 @@ mod tests {
                 break;
             }
         }
-        
+
         Ok(())
     }
 }

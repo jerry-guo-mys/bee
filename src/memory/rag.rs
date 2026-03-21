@@ -25,7 +25,11 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(id: impl Into<String>, text: impl Into<String>, source_id: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        text: impl Into<String>,
+        source_id: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             text: text.into(),
@@ -92,7 +96,7 @@ impl Chunker {
         let mut chunks = Vec::new();
         let chars: Vec<char> = text.chars().collect();
         let total_chars = chars.len();
-        
+
         if total_chars == 0 {
             return chunks;
         }
@@ -110,7 +114,8 @@ impl Chunker {
                 let slice: String = chars[current_idx..target_end].iter().collect();
                 for sep in &self.config.separators {
                     if let Some(pos) = slice.rfind(sep) {
-                        let chars_to_sep: usize = slice[..pos].chars().count() + sep.chars().count();
+                        let chars_to_sep: usize =
+                            slice[..pos].chars().count() + sep.chars().count();
                         if chars_to_sep > 0 {
                             actual_end = current_idx + chars_to_sep;
                             break;
@@ -127,15 +132,11 @@ impl Chunker {
             // 提取块文本
             let chunk_text: String = chars[current_idx..actual_end].iter().collect();
             let trimmed = chunk_text.trim();
-            
+
             if !trimmed.is_empty() {
                 let byte_offset: usize = chars[..current_idx].iter().map(|c| c.len_utf8()).sum();
-                let chunk = Chunk::new(
-                    format!("{}_{}", doc_id, chunk_idx),
-                    trimmed,
-                    doc_id,
-                )
-                .with_offset(byte_offset);
+                let chunk = Chunk::new(format!("{}_{}", doc_id, chunk_idx), trimmed, doc_id)
+                    .with_offset(byte_offset);
                 chunks.push(chunk);
                 chunk_idx += 1;
             }
@@ -143,7 +144,7 @@ impl Chunker {
             // 计算下一个块的起始位置
             let overlap = self.config.chunk_overlap.min(actual_end - current_idx);
             let next_start = actual_end.saturating_sub(overlap);
-            
+
             // 确保前进
             current_idx = if next_start > current_idx {
                 next_start
@@ -196,7 +197,7 @@ impl VectorStore {
         if embedding.is_empty() {
             return Err("Empty embedding".to_string());
         }
-        
+
         let id = chunk.id.clone();
         self.entries.push((id, chunk, embedding));
 
@@ -249,7 +250,7 @@ impl VectorStore {
     pub fn hybrid_search(&self, query: &str, k: usize) -> Vec<RetrievalResult> {
         // 向量检索结果
         let vector_results = self.search(query, k * 2);
-        
+
         // 关键词检索
         let query_tokens = tokenizer::tokenize_to_set(query);
         let mut keyword_scored: Vec<(f32, &Chunk)> = self
@@ -262,23 +263,23 @@ impl VectorStore {
             })
             .filter(|(score, _)| *score > 0.0)
             .collect();
-        
+
         keyword_scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        
+
         // 合并结果（RRF - Reciprocal Rank Fusion）
         let mut scores: HashMap<String, f32> = HashMap::new();
         let rrf_k = 60.0; // RRF 常数
-        
+
         for (rank, result) in vector_results.iter().enumerate() {
             let rrf_score = 1.0 / (rrf_k + rank as f32);
             *scores.entry(result.chunk.id.clone()).or_insert(0.0) += rrf_score;
         }
-        
+
         for (rank, (_, chunk)) in keyword_scored.iter().take(k * 2).enumerate() {
             let rrf_score = 1.0 / (rrf_k + rank as f32);
             *scores.entry(chunk.id.clone()).or_insert(0.0) += rrf_score;
         }
-        
+
         // 按融合分数排序
         let mut final_results: Vec<RetrievalResult> = scores
             .into_iter()
@@ -292,16 +293,21 @@ impl VectorStore {
                     })
             })
             .collect();
-        
-        final_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+        final_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         final_results.truncate(k);
-        
+
         final_results
     }
 
     /// 删除指定来源的所有块
     pub fn remove_by_source(&mut self, source_id: &str) {
-        self.entries.retain(|(_, chunk, _)| chunk.source_id != source_id);
+        self.entries
+            .retain(|(_, chunk, _)| chunk.source_id != source_id);
     }
 
     /// 获取存储条目数
@@ -353,7 +359,7 @@ impl RagPipeline {
     pub fn index_document(&mut self, doc_id: &str, text: &str) -> Result<usize, String> {
         // 先删除旧版本
         self.vector_store.remove_by_source(doc_id);
-        
+
         // 分块并索引
         let chunks = self.chunker.chunk(doc_id, text);
         self.vector_store.add_chunks(chunks)
@@ -367,7 +373,7 @@ impl RagPipeline {
     /// 构建增强提示（将检索结果整合到提示中）
     pub fn build_augmented_prompt(&self, query: &str, k: usize) -> String {
         let results = self.retrieve(query, k);
-        
+
         if results.is_empty() {
             return query.to_string();
         }
@@ -382,7 +388,7 @@ impl RagPipeline {
             ));
         }
         context.push_str(&format!("问题: {}", query));
-        
+
         context
     }
 

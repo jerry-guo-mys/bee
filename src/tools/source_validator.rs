@@ -12,17 +12,39 @@ impl SourceValidatorTool {
         Self { trusted_domains }
     }
 
-    fn calculate_trust_score(&self, url: &str) -> f32 {
-        let domain = url
-            .strip_prefix("https://")
+    fn extract_domain(url: &str) -> String {
+        url.strip_prefix("https://")
             .or_else(|| url.strip_prefix("http://"))
             .unwrap_or(url)
             .split('/')
             .next()
             .unwrap_or("")
-            .to_lowercase();
+            .to_lowercase()
+    }
 
-        if self.trusted_domains.iter().any(|d| domain.contains(d)) {
+    fn domain_matches_pattern(domain: &str, pattern: &str) -> bool {
+        let domain = domain.to_lowercase();
+        let pattern = pattern.trim().to_lowercase();
+
+        if pattern.is_empty() {
+            return false;
+        }
+
+        if let Some(suffix) = pattern.strip_prefix("*.") {
+            return domain == suffix || domain.ends_with(&format!(".{suffix}"));
+        }
+
+        domain == pattern || domain.ends_with(&format!(".{pattern}"))
+    }
+
+    fn calculate_trust_score(&self, url: &str) -> f32 {
+        let domain = Self::extract_domain(url);
+
+        if self
+            .trusted_domains
+            .iter()
+            .any(|pattern| Self::domain_matches_pattern(&domain, pattern))
+        {
             return 0.9;
         }
 
@@ -64,7 +86,7 @@ impl Tool for SourceValidatorTool {
         }
 
         let trust_score = self.calculate_trust_score(url);
-        
+
         let credibility = if trust_score >= 0.8 {
             "high"
         } else if trust_score >= 0.6 {

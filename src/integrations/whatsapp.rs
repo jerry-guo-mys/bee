@@ -152,10 +152,14 @@ async fn webhook_receive(
     };
 
     for entry in entries {
-        let Some(changes) = entry.changes else { continue };
+        let Some(changes) = entry.changes else {
+            continue;
+        };
         for change in changes {
             let Some(value) = change.value else { continue };
-            let Some(messages) = value.messages else { continue };
+            let Some(messages) = value.messages else {
+                continue;
+            };
 
             for msg in messages {
                 if msg.msg_type.as_deref() != Some("text") {
@@ -170,7 +174,9 @@ async fn webhook_receive(
                     let mut sessions: tokio::sync::RwLockWriteGuard<
                         HashMap<String, ContextManager>,
                     > = state.sessions.write().await;
-                    sessions.remove(&user_id).unwrap_or_else(|| create_context_default(20, None, None))
+                    sessions
+                        .remove(&user_id)
+                        .unwrap_or_else(|| create_context_default(20, None, None))
                 };
 
                 // 处理消息

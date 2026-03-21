@@ -80,14 +80,27 @@ impl LlmError {
     /// 从字符串错误消息解析 LlmError（兼容旧代码）
     pub fn from_string(s: &str) -> Self {
         let s_lower = s.to_lowercase();
-        if s_lower.contains("unauthorized") || s_lower.contains("invalid api key") || s_lower.contains("authentication") {
+        if s_lower.contains("unauthorized")
+            || s_lower.contains("invalid api key")
+            || s_lower.contains("authentication")
+        {
             LlmError::AuthError(s.to_string())
         } else if s_lower.contains("rate limit") || s_lower.contains("too many requests") {
-            LlmError::RateLimited { retry_after_ms: 60000 }
-        } else if s_lower.contains("context length") || s_lower.contains("maximum context") || s_lower.contains("token limit") {
-            LlmError::ContextLengthExceeded { tokens: 0, max_tokens: 0 }
+            LlmError::RateLimited {
+                retry_after_ms: 60000,
+            }
+        } else if s_lower.contains("context length")
+            || s_lower.contains("maximum context")
+            || s_lower.contains("token limit")
+        {
+            LlmError::ContextLengthExceeded {
+                tokens: 0,
+                max_tokens: 0,
+            }
         } else if s_lower.contains("model") && s_lower.contains("not found") {
-            LlmError::ModelNotFound { model: s.to_string() }
+            LlmError::ModelNotFound {
+                model: s.to_string(),
+            }
         } else if s_lower.contains("timeout") {
             LlmError::Timeout { timeout_ms: 30000 }
         } else if s_lower.contains("network") || s_lower.contains("connection") {
@@ -161,7 +174,8 @@ impl RetryConfig {
         if let Some(suggested) = error.retry_delay_ms() {
             return suggested.min(self.max_delay_ms);
         }
-        let delay = (self.initial_delay_ms as f64 * self.backoff_multiplier.powi(retry_count as i32)) as u64;
+        let delay = (self.initial_delay_ms as f64
+            * self.backoff_multiplier.powi(retry_count as i32)) as u64;
         delay.min(self.max_delay_ms)
     }
 }

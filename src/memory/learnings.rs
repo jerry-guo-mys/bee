@@ -67,7 +67,10 @@ fn ensure_header(path: &Path, title: &str) -> std::io::Result<()> {
         return Ok(());
     }
     ensure_dir(path)?;
-    let header = format!("# {}\n\n*Self-improving agent: entries appended below.*\n\n---\n\n", title);
+    let header = format!(
+        "# {}\n\n*Self-improving agent: entries appended below.*\n\n---\n\n",
+        title
+    );
     std::fs::write(path, header)
 }
 
@@ -127,7 +130,11 @@ pub fn record_learning(workspace: &Path, category: &str, content: &str, see_also
 pub fn record_feature_request(workspace: &Path, description: &str) {
     let path = feature_requests_path(workspace);
     let _ = ensure_header(&path, "Feature Requests");
-    let block = format!("\n- **{}**: {}\n\n", timestamp(), description.trim().replace("\n", " "));
+    let block = format!(
+        "\n- **{}**: {}\n\n",
+        timestamp(),
+        description.trim().replace("\n", " ")
+    );
     let _ = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -140,11 +147,7 @@ pub fn record_feature_request(workspace: &Path, description: &str) {
 /// 当学习内容被证明广泛适用时，提升到 SOUL.md（行为模式：简洁明了，避免免责声明）
 pub fn promote_to_soul(workspace: &Path, content: &str) {
     let path = soul_path(workspace);
-    let _ = ensure_workspace_header(
-        &path,
-        "SOUL",
-        "行为模式：简洁明了，避免免责声明。",
-    );
+    let _ = ensure_workspace_header(&path, "SOUL", "行为模式：简洁明了，避免免责声明。");
     let line = format!("- {}\n", content.trim().replace("\n", " "));
     let _ = std::fs::OpenOptions::new()
         .create(true)
@@ -156,11 +159,7 @@ pub fn promote_to_soul(workspace: &Path, content: &str) {
 /// 当学习内容被证明广泛适用时，提升到 AGENTS.md（工作流改进：如长任务生成子代理）
 pub fn promote_to_agents(workspace: &Path, content: &str) {
     let path = agents_path(workspace);
-    let _ = ensure_workspace_header(
-        &path,
-        "AGENTS",
-        "工作流改进：长任务生成子代理等。",
-    );
+    let _ = ensure_workspace_header(&path, "AGENTS", "工作流改进：长任务生成子代理等。");
     let line = format!("- {}\n", content.trim().replace("\n", " "));
     let _ = std::fs::OpenOptions::new()
         .create(true)
@@ -172,11 +171,7 @@ pub fn promote_to_agents(workspace: &Path, content: &str) {
 /// 当学习内容被证明广泛适用时，提升到 TOOLS.md（工具技巧：如 Git push 需要先配置认证）
 pub fn promote_to_tools(workspace: &Path, content: &str) {
     let path = tools_guide_path(workspace);
-    let _ = ensure_workspace_header(
-        &path,
-        "TOOLS",
-        "工具技巧：如 Git push 需要先配置认证。",
-    );
+    let _ = ensure_workspace_header(&path, "TOOLS", "工具技巧：如 Git push 需要先配置认证。");
     let line = format!("- {}\n", content.trim().replace("\n", " "));
     let _ = std::fs::OpenOptions::new()
         .create(true)

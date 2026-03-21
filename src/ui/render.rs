@@ -1,4 +1,4 @@
-//! 生产级 TUI 渲染布局
+//! Production TUI layout rendering
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -68,7 +68,8 @@ pub fn draw(
         .style(theme::fill_style())
         .render(area, f.buffer_mut());
 
-    ctx.status_indicator.inline_message = state.active_tool.as_ref().map(|tool| format!("tool: {tool}"));
+    ctx.status_indicator.inline_message =
+        state.active_tool.as_ref().map(|tool| format!("tool: {tool}"));
     ctx.status_indicator.details = state
         .error_message
         .as_ref()
@@ -90,7 +91,12 @@ pub fn draw(
     let content_width = root[1].width.saturating_sub(2) as usize;
     let content_height = root[1].height.saturating_sub(1) as usize;
 
-    let conversation_area = Rect::new(root[1].x + 1, root[1].y, root[1].width.saturating_sub(2), root[1].height);
+    let conversation_area = Rect::new(
+        root[1].x + 1,
+        root[1].y,
+        root[1].width.saturating_sub(2),
+        root[1].height,
+    );
     let mut conv_view = ConversationView::new(
         state,
         conversation_scroll,

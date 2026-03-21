@@ -149,11 +149,12 @@
     .thinking-bar .duration { font-size: 0.75rem; color: #9ca3af; }
     .thinking-steps { transition: all 0.2s; }
     .thinking-steps.collapsed .steps-content { display: none; }
-    .step-item { font-size: 0.8rem; padding: 8px 12px; margin: 6px 0; background: rgba(0,0,0,0.03); border-radius: 8px; border-left: 3px solid #3b82f6; }
+    .steps-content { display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
+    .step-item { display: flex; align-items: baseline; gap: 8px; width: 100%; font-size: 0.75rem; padding: 4px 10px; margin: 0; background: rgba(0,0,0,0.03); border-radius: 8px; border-left: 3px solid #3b82f6; }
     .dark .step-item { background: rgba(255,255,255,0.05); }
-    .step-item .step-title { font-weight: 600; color: #374151; margin-bottom: 4px; }
+    .step-item .step-title { font-weight: 600; color: #374151; margin: 0; flex: 0 0 auto; min-width: 44px; }
     .dark .step-item .step-title { color: #e5e7eb; }
-    .step-item .step-detail { font-size: 0.75rem; opacity: 0.9; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+    .step-item .step-detail { font-size: 0.72rem; opacity: 0.85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
     .step-item.step-understand { border-color: #6366f1; }
     .step-item.step-decompose { border-color: #8b5cf6; }
     .step-item.step-tool { border-color: #f59e0b; }
@@ -569,6 +570,66 @@
               <select id="settings-view-default-model" class="settings-select">
                 <option value="default">默认</option>
               </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-view-section">
+          <h3 class="settings-view-title">当前组织上下文</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mb-3">当前会话列表、历史加载和消息发送会使用这组 scope。</p>
+          <div class="settings-view-card">
+            <div class="p-5 space-y-4">
+              <div id="settings-view-scope-summary" class="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"></div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label for="settings-view-tenant-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tenant ID</label>
+                  <input id="settings-view-tenant-id" type="text" placeholder="tenant-default" class="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+                </div>
+                <div>
+                  <label for="settings-view-organization-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Organization ID</label>
+                  <input id="settings-view-organization-id" type="text" placeholder="org-default" class="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+                </div>
+                <div>
+                  <label for="settings-view-team-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Team ID</label>
+                  <input id="settings-view-team-id" type="text" placeholder="可选" class="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+                </div>
+                <div>
+                  <label for="settings-view-user-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">User ID</label>
+                  <input id="settings-view-user-id" type="text" placeholder="可选，默认按 session_id" class="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button id="settings-view-scope-apply" class="px-4 py-2 text-sm bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors">应用上下文</button>
+                <button id="settings-view-scope-reset" class="px-4 py-2 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors">重置为默认</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-view-section">
+          <h3 class="settings-view-title">组织初始化</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mb-3">快速创建一个公司、默认团队和对应的 Agent 实例。</p>
+          <div class="settings-view-card">
+            <div class="p-5 space-y-4">
+              <div>
+                <label for="settings-view-org-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">公司名称</label>
+                <input id="settings-view-org-name" type="text" placeholder="例如：Acme Software" class="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+              </div>
+              <div>
+                <label for="settings-view-org-industry" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">行业模板</label>
+                <select id="settings-view-org-industry" class="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+                  <option value="general">通用公司</option>
+                  <option value="sales_service">销售与客服</option>
+                  <option value="marketing_studio">市场内容工作室</option>
+                  <option value="recruiting_agency">招聘服务团队</option>
+                  <option value="software_delivery">软件交付团队</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-3">
+                <button id="settings-view-org-bootstrap" class="px-4 py-2 text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors">初始化组织</button>
+                <span class="text-xs text-gray-400">会写入 `.bee/saas.db`</span>
+              </div>
+              <div id="settings-view-org-result" class="hidden rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"></div>
             </div>
           </div>
         </div>
@@ -1071,20 +1132,77 @@
 
     // Session management
     let currentSessionId = null;
+    let currentSessionCompositeId = null;
     let currentGroupId = null;  // 群聊模式下的 group_id
     let groups = [];
     let assistants = [];
     let models = [];
     let skills = [];
+    let sessionIndex = new Map();
     let selectedAssistant = localStorage.getItem('bee_assistant') || 'auto';
     let selectedModel = localStorage.getItem('bee_model') || 'default';
     let isGenerating = false;
+    let currentStreamController = null;
     let sessionTokensAccum = 0;
+    let currentScope = getStoredScope();
+
+    function getStoredScope() {
+      return {
+        tenant_id: localStorage.getItem('bee_tenant_id') || null,
+        organization_id: localStorage.getItem('bee_organization_id') || null,
+        team_id: localStorage.getItem('bee_team_id') || null,
+        agent_instance_id: localStorage.getItem('bee_agent_instance_id') || null,
+        user_id: localStorage.getItem('bee_user_id') || null,
+      };
+    }
+
+    function persistScope(scope) {
+      currentScope = {
+        tenant_id: scope?.tenant_id || null,
+        organization_id: scope?.organization_id || null,
+        team_id: scope?.team_id || null,
+        agent_instance_id: scope?.agent_instance_id || null,
+        user_id: scope?.user_id || null,
+      };
+      const mappings = [
+        ['bee_tenant_id', currentScope.tenant_id],
+        ['bee_organization_id', currentScope.organization_id],
+        ['bee_team_id', currentScope.team_id],
+        ['bee_agent_instance_id', currentScope.agent_instance_id],
+        ['bee_user_id', currentScope.user_id],
+      ];
+      mappings.forEach(([key, value]) => {
+        if (value) localStorage.setItem(key, value);
+        else localStorage.removeItem(key);
+      });
+      renderCurrentScopeSummary();
+    }
+
+    function renderCurrentScopeSummary() {
+      const summary = document.getElementById('settings-view-scope-summary');
+      if (!summary) return;
+      const tenant = currentScope.tenant_id || 'tenant-default';
+      const organization = currentScope.organization_id || 'org-default';
+      const team = currentScope.team_id || '未指定 team';
+      const user = currentScope.user_id || '按 session_id 动态派生';
+      summary.textContent = `tenant=${tenant} · org=${organization} · team=${team} · user=${user}`;
+    }
+
+    function buildScopePayload(overrides = {}) {
+      return {
+        tenant_id: overrides.tenant_id ?? currentScope.tenant_id ?? undefined,
+        organization_id: overrides.organization_id ?? currentScope.organization_id ?? undefined,
+        team_id: overrides.team_id ?? currentScope.team_id ?? undefined,
+        agent_instance_id: overrides.agent_instance_id ?? currentScope.agent_instance_id ?? undefined,
+        user_id: overrides.user_id ?? currentScope.user_id ?? undefined,
+      };
+    }
 
     async function loadSessions() {
       try {
         const response = await fetch('/api/sessions');
         const sessions = await response.json();
+        sessionIndex = new Map(sessions.map(session => [session.id, session]));
         renderSessions(sessions);
       } catch (e) {
         console.error('Failed to load sessions:', e);
@@ -1127,6 +1245,7 @@
     function loadGroup(groupId) {
       currentGroupId = groupId;
       currentSessionId = null;
+      currentSessionCompositeId = null;
       selectedAssistant = null;
       sessionTokensAccum = 0;
       updateTokenStats(0, 0);
@@ -1165,14 +1284,21 @@
     function renderSessions(sessions) {
       const list = document.getElementById('session-list');
       const empty = document.getElementById('empty-sessions');
+      const filteredSessions = sessions.filter(session => {
+        if (currentScope.tenant_id && session.tenant_id !== currentScope.tenant_id) return false;
+        if (currentScope.organization_id && session.organization_id !== currentScope.organization_id) return false;
+        if (currentScope.team_id && session.team_id !== currentScope.team_id) return false;
+        return true;
+      });
       
-      if (sessions.length === 0) {
+      if (filteredSessions.length === 0) {
+        list.innerHTML = '';
         empty.classList.remove('hidden');
         return;
       }
       empty.classList.add('hidden');
       
-      const groups = groupSessionsByDate(sessions);
+      const groups = groupSessionsByDate(filteredSessions);
       
       list.innerHTML = Object.entries(groups).map(([date, items]) => `
         <div>
@@ -1181,7 +1307,7 @@
             ${items.map(session => {
               const safeId = escapeHtml(session.id);
               const safeTitle = escapeHtml(session.title);
-              const isActive = currentSessionId && selectedAssistant && session.id === `${currentSessionId}::${selectedAssistant}`;
+              const isActive = currentSessionCompositeId && session.id === currentSessionCompositeId;
               return `
               <li class="session-item ${isActive ? 'active' : ''}" data-id="${safeId}">
                 <a href="#" class="flex items-start gap-3 px-4 py-3 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors group" onclick="loadSession('${safeId}'); return false;">
@@ -1193,7 +1319,7 @@
                       <span class="text-xs text-text-sub-light dark:text-text-sub-dark">${session.updated_at}</span>
                     </div>
                   </div>
-                  <button class="delete-session-btn opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded transition-all" onclick="event.stopPropagation(); deleteSession('${safeId}')">
+                  <button class="delete-session-btn opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded transition-all" onclick="event.preventDefault(); event.stopPropagation(); deleteSession('${safeId}')">
                     <span class="material-icons-outlined text-sm text-red-500">delete</span>
                   </button>
                 </a>
@@ -1227,13 +1353,32 @@
       currentGroupId = null;
       document.getElementById('assistant-selector').classList.remove('hidden');
       document.getElementById('inbox-process-btn')?.classList.add('hidden');
-      const [sid, aid] = sessionIdOrComposite.includes('::') ? sessionIdOrComposite.split('::') : [sessionIdOrComposite, 'default'];
+      currentSessionCompositeId = sessionIdOrComposite;
+      const sessionMeta = sessionIndex.get(sessionIdOrComposite);
+      const sid = sessionMeta?.session_id || (sessionIdOrComposite.includes('::') ? sessionIdOrComposite.split('::')[0] : sessionIdOrComposite);
+      const aid = sessionMeta?.assistant_id || (sessionIdOrComposite.includes('::') ? sessionIdOrComposite.split('::')[1] : 'default');
       currentSessionId = sid;
       selectedAssistant = aid || 'default';
+      if (sessionMeta) {
+        persistScope({
+          tenant_id: sessionMeta.tenant_id,
+          organization_id: sessionMeta.organization_id,
+          team_id: sessionMeta.team_id,
+          agent_instance_id: sessionMeta.agent_instance_id || aid || 'default',
+          user_id: sessionMeta.user_id,
+        });
+      }
       sessionTokensAccum = 0;
       updateTokenStats(0, 0);
       try {
-        const response = await fetch(`/api/history?session_id=${encodeURIComponent(sid)}&assistant_id=${encodeURIComponent(selectedAssistant)}`);
+        const params = new URLSearchParams({
+          session_id: sid,
+          assistant_id: selectedAssistant,
+        });
+        Object.entries(buildScopePayload()).forEach(([key, value]) => {
+          if (value) params.set(key, value);
+        });
+        const response = await fetch(`/api/history?${params.toString()}`);
         const data = await response.json();
         showChatInterface();
         renderMessages(data.messages);
@@ -1296,16 +1441,46 @@
     }
 
     function highlightCurrentSession() {
-      const activeId = currentSessionId && selectedAssistant ? `${currentSessionId}::${selectedAssistant}` : null;
       document.querySelectorAll('.session-item').forEach(item => {
-        item.classList.toggle('active', item.dataset.id === activeId);
+        item.classList.toggle('active', item.dataset.id === currentSessionCompositeId);
       });
+    }
+
+    async function cancelCurrentGeneration() {
+      if (!isGenerating) return;
+
+      try {
+        const body = currentGroupId
+          ? { session_id: currentGroupId, assistant_id: selectedAssistant || 'default', ...buildScopePayload() }
+          : {
+              session_id: currentSessionId,
+              assistant_id: selectedAssistant || 'default',
+              ...buildScopePayload({ agent_instance_id: selectedAssistant || 'default' }),
+            };
+
+        if (body.session_id) {
+          await fetch('/api/session/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+        }
+      } catch (e) {
+        console.error('Failed to cancel session:', e);
+      }
+
+      currentStreamController?.abort();
+      typewriterControls?.hide();
     }
 
     async function sendMessage() {
       const textarea = document.getElementById('message-input');
       const message = textarea.value.trim();
-      if (!message || isGenerating) return;
+      if (isGenerating) {
+        await cancelCurrentGeneration();
+        return;
+      }
+      if (!message) return;
       
       showChatInterface();
       
@@ -1336,20 +1511,24 @@
       isGenerating = true;
       updateSendButtonState();
       typewriterControls?.show();
+      const streamController = new AbortController();
+      currentStreamController = streamController;
       
       try {
-        const body = { message, model_id: selectedModel };
+        const body = { message, model_id: selectedModel, ...buildScopePayload() };
         if (currentGroupId) {
           body.group_id = currentGroupId;
           body.session_id = currentGroupId;
         } else {
           body.session_id = currentSessionId;
           body.assistant_id = selectedAssistant;
+          body.agent_instance_id = selectedAssistant;
         }
         const response = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
+          body: JSON.stringify(body),
+          signal: streamController.signal
         });
         
         const reader = response.body.getReader();
@@ -1377,10 +1556,13 @@
                       <span class="label"><span class="material-icons-outlined text-sm">psychology</span><span class="thinking-label">展示步骤</span></span>
                       <span class="arrow">›</span>
                     </div>
+                    <button type="button" class="thinking-copy-btn p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors" title="复制全部步骤">
+                      <span class="material-icons-outlined text-sm">content_copy</span>
+                    </button>
                     <span class="duration text-xs text-text-sub-light dark:text-text-sub-dark">0s</span>
                   </div>
                 </div>
-                <div class="steps-content mb-3"></div>
+                <div class="steps-content mb-3 hidden"></div>
                 <div class="message-content typewriter-active"></div>
                 <div class="flex gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button type="button" onclick="copyMessage(this)" class="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors" title="复制">
@@ -1397,6 +1579,7 @@
         const thinkingSteps = msgEl?.querySelector('.thinking-steps');
         let stepsContent = msgEl?.querySelector('.steps-content');
         const thinkingBar = msgEl?.querySelector('.thinking-bar');
+        const thinkingCopyBtn = msgEl?.querySelector('.thinking-copy-btn');
         const durationEl = msgEl?.querySelector('.duration');
         let responseStarted = false;
         let typewriter = null;
@@ -1436,12 +1619,63 @@
           stepsContent?.classList?.toggle('hidden');
           updateThinkingLabel();
         });
-        const addStep = (type, title, detail) => {
+        const buildStepsText = () => {
+          if (!stepsContent) return '';
+          return Array.from(stepsContent.querySelectorAll('.step-item'))
+            .map((step, index) => {
+              const title = step.dataset.title || `步骤 ${index + 1}`;
+              const detail = step.dataset.detail || '';
+              return detail ? `${title}\n${detail}` : title;
+            })
+            .join('\n\n');
+        };
+        thinkingCopyBtn?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const fullText = buildStepsText();
+          if (!fullText) {
+            showToast('暂无可复制的步骤', 'error');
+            return;
+          }
+          try {
+            await navigator.clipboard.writeText(fullText);
+            showToast('已复制全部步骤', 'success');
+          } catch (_) {
+            showToast('复制失败', 'error');
+          }
+        });
+        const findExistingStep = (stepKey) => {
+          if (!stepsContent || !stepKey) return null;
+          return stepsContent.querySelector(`.step-item[data-step-key="${stepKey}"]`);
+        };
+        const trimStepCount = (maxSteps = 6) => {
           if (!stepsContent) return;
-          const step = document.createElement('div');
-          step.className = `step-item ${type}`;
-          step.innerHTML = detail ? `<div class="step-title">${escapeHtml(title)}</div><div class="step-detail">${escapeHtml(detail)}</div>` : `<div class="step-title">${escapeHtml(title)}</div>`;
-          stepsContent.appendChild(step);
+          while (stepsContent.children.length > maxSteps) {
+            stepsContent.removeChild(stepsContent.firstChild);
+          }
+        };
+        const removeStep = (stepKey) => {
+          const step = findExistingStep(stepKey);
+          if (step?.parentNode) step.parentNode.removeChild(step);
+        };
+        const upsertStep = (stepKey, type, title, detail) => {
+          if (!stepsContent) return;
+          let step = findExistingStep(stepKey);
+          if (!step) {
+            step = document.createElement('div');
+            step.className = `step-item ${type}`;
+            step.dataset.stepKey = stepKey || '';
+            stepsContent.appendChild(step);
+          } else {
+            step.className = `step-item ${type}`;
+          }
+          step.dataset.title = title || '';
+          step.dataset.detail = detail || '';
+          step.innerHTML = detail ? `<span class="step-title">${escapeHtml(title)}</span><span class="step-detail">${escapeHtml(detail)}</span>` : `<span class="step-title">${escapeHtml(title)}</span>`;
+          if (step !== stepsContent.lastElementChild) {
+            stepsContent.appendChild(step);
+          }
+          stepsContent.classList.remove('hidden');
+          trimStepCount();
           updateDuration();
           scrollToBottom();
         };
@@ -1451,6 +1685,11 @@
             stepsContent.classList.add('hidden');
             updateThinkingLabel();
           }
+        };
+        const shorten = (text, limit = 120) => {
+          const normalized = (text || '').trim().replace(/\s+/g, ' ');
+          if (!normalized) return '';
+          return normalized.length > limit ? normalized.substring(0, limit) + '…' : normalized;
         };
         
         while (true) {
@@ -1467,6 +1706,7 @@
               const event = JSON.parse(line);
               if (event.type === 'session_id') {
                 currentSessionId = event.session_id;
+                currentSessionCompositeId = null;
                 if (currentGroupId) loadGroups(); else loadSessions();
               } else if (event.type === 'group_assistant_start') {
                 const asstName = assistants.find(a => a.id === event.assistant_id)?.name || event.assistant_id || 'Assistant';
@@ -1504,32 +1744,34 @@
                 typewriter?.appendText(event.content || '');
               } else if (event.type === 'thinking' && !isGroupMode) {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
-                addStep('step-understand', '1. 理解问题', '正在分析用户问题…');
+                if (!findExistingStep('plan')) {
+                  upsertStep('understand', 'step-understand', '分析中', '正在理解问题');
+                }
               } else if (event.type === 'thinking_content') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
                 const text = (event.text || '').trim();
-                addStep('step-decompose', '2. 拆解与规划', text ? text.substring(0, 300) + (text.length > 300 ? '…' : '') : '规划中…');
+                removeStep('understand');
+                upsertStep('plan', 'step-decompose', '规划', shorten(text || '规划中…', 140) || '规划中…');
               } else if (event.type === 'memory_recovery') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
                 const preview = (event.preview || '').trim();
-                addStep('step-memory', '4. 组织上下文 · 使用长期记忆', preview ? preview.substring(0, 200) + (preview.length > 200 ? '…' : '') : '检索相关记忆');
+                upsertStep('memory-recovery', 'step-memory', '上下文', shorten(preview || '检索相关记忆', 100) || '检索相关记忆');
               } else if (event.type === 'tool_call') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
-                addStep('step-tool tool-call', '3. 选择并调用工具', event.tool || '');
+                upsertStep(`tool-${event.tool || 'unknown'}`, 'step-tool tool-call', '工具', event.tool || '执行中');
               } else if (event.type === 'observation') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
-                const prev = (event.preview || '').substring(0, 150);
-                addStep('observation', '观察工具返回', event.tool ? `${event.tool}: ${prev}${(event.preview || '').length > 150 ? '…' : ''}` : prev || '');
+                const prev = shorten(event.preview || '', 120);
+                upsertStep(`tool-${event.tool || 'unknown'}`, 'observation', '工具', event.tool ? `${event.tool}: ${prev}` : prev || '');
               } else if (event.type === 'tool_failure') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
-                addStep('recovery', '工具失败', `${event.tool || ''}: ${event.reason || ''}`);
+                upsertStep('recovery', 'recovery', '纠偏', shorten(`${event.tool || ''}: ${event.reason || ''}`, 120));
               } else if (event.type === 'recovery') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
-                addStep('recovery', '错误恢复', event.detail || event.action || '');
+                upsertStep('recovery', 'recovery', '纠偏', shorten(event.detail || event.action || '', 120));
               } else if (event.type === 'memory_consolidation') {
                 if (thinkingStartTime == null) thinkingStartTime = Date.now();
-                const prev = (event.preview || '').trim().substring(0, 150);
-                addStep('step-consolidate', '5. 整理到长期记忆', prev ? prev + ((event.preview || '').length > 150 ? '…' : '') : '写入长期记忆');
+                upsertStep('memory-consolidation', 'step-consolidate', '记忆', shorten((event.preview || '').trim() || '写入长期记忆', 100) || '写入长期记忆');
               } else if (event.type === 'token_usage') {
                 const delta = event.total_tokens || 0;
                 sessionTokensAccum += delta;
@@ -1552,11 +1794,16 @@
         }
         
       } catch (e) {
-        showToast('Failed to send message', 'error');
+        if (e.name !== 'AbortError') {
+          showToast('Failed to send message', 'error');
+        }
         document.getElementById(loadingId)?.remove();
         typewriterControls?.hide();
       } finally {
         isGenerating = false;
+        if (currentStreamController === streamController) {
+          currentStreamController = null;
+        }
         updateSendButtonState();
       }
     }
@@ -1766,6 +2013,7 @@
       newChatBtns.forEach(btn => {
         btn.addEventListener('click', () => {
           currentSessionId = null;
+          currentSessionCompositeId = null;
           currentGroupId = null;
           document.getElementById('assistant-selector').classList.remove('hidden');
           document.getElementById('inbox-process-btn')?.classList.add('hidden');
@@ -1784,23 +2032,34 @@
 
     async function deleteSession(sessionIdOrComposite) {
       if (!confirm('Delete this conversation?')) return;
-      const [sid, aid] = sessionIdOrComposite.includes('::') ? sessionIdOrComposite.split('::') : [sessionIdOrComposite, 'default'];
+      const sessionMeta = sessionIndex.get(sessionIdOrComposite);
+      const sid = sessionMeta?.session_id || (sessionIdOrComposite.includes('::') ? sessionIdOrComposite.split('::')[0] : sessionIdOrComposite);
+      const aid = sessionMeta?.assistant_id || (sessionIdOrComposite.includes('::') ? sessionIdOrComposite.split('::')[1] : 'default');
       try {
         await fetch('/api/session/clear', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: sid, assistant_id: aid || 'default' })
+          body: JSON.stringify({
+            session_id: sid,
+            assistant_id: aid || 'default',
+            ...buildScopePayload(sessionMeta || {}),
+          })
         });
         
         if (currentSessionId === sid && selectedAssistant === (aid || 'default')) {
           currentSessionId = null;
+          currentSessionCompositeId = null;
           document.getElementById('messages').innerHTML = '';
           document.getElementById('messages').classList.add('hidden');
           document.getElementById('welcome-screen').classList.remove('hidden');
           document.getElementById('current-session-title').textContent = 'New Chat';
         }
-        
-        loadSessions();
+
+        sessionIndex.delete(sessionIdOrComposite);
+        const sessionItem = document.querySelector(`.session-item[data-id="${CSS.escape(sessionIdOrComposite)}"]`);
+        sessionItem?.remove();
+        highlightCurrentSession();
+        await loadSessions();
         showToast('Conversation deleted', 'success');
       } catch (e) {
         showToast('Failed to delete conversation', 'error');
@@ -1976,6 +2235,30 @@
           modelSelect.appendChild(opt);
         });
       }
+
+      const tenantInput = document.getElementById('settings-view-tenant-id');
+      const organizationInput = document.getElementById('settings-view-organization-id');
+      const teamInput = document.getElementById('settings-view-team-id');
+      const userInput = document.getElementById('settings-view-user-id');
+      if (tenantInput) tenantInput.value = currentScope.tenant_id || '';
+      if (organizationInput) organizationInput.value = currentScope.organization_id || '';
+      if (teamInput) teamInput.value = currentScope.team_id || '';
+      if (userInput) userInput.value = currentScope.user_id || '';
+      renderCurrentScopeSummary();
+
+      const organizationNameInput = document.getElementById('settings-view-org-name');
+      if (organizationNameInput) {
+        organizationNameInput.value = localStorage.getItem('bee_org_name') || '';
+      }
+      const organizationIndustrySelect = document.getElementById('settings-view-org-industry');
+      if (organizationIndustrySelect) {
+        organizationIndustrySelect.value = localStorage.getItem('bee_org_industry') || 'general';
+      }
+      const organizationResult = document.getElementById('settings-view-org-result');
+      if (organizationResult) {
+        organizationResult.classList.add('hidden');
+        organizationResult.textContent = '';
+      }
       
       // Load skills
       renderSettingsViewSkills();
@@ -2100,6 +2383,39 @@
       const opt = e.target.options[e.target.selectedIndex];
       document.getElementById('selected-model').textContent = opt.textContent;
     });
+
+    document.getElementById('settings-view-org-name')?.addEventListener('input', (e) => {
+      localStorage.setItem('bee_org_name', e.target.value);
+    });
+
+    document.getElementById('settings-view-org-industry')?.addEventListener('change', (e) => {
+      localStorage.setItem('bee_org_industry', e.target.value);
+    });
+
+    document.getElementById('settings-view-scope-apply')?.addEventListener('click', () => {
+      persistScope({
+        tenant_id: document.getElementById('settings-view-tenant-id')?.value.trim() || null,
+        organization_id: document.getElementById('settings-view-organization-id')?.value.trim() || null,
+        team_id: document.getElementById('settings-view-team-id')?.value.trim() || null,
+        user_id: document.getElementById('settings-view-user-id')?.value.trim() || null,
+        agent_instance_id: currentScope.agent_instance_id,
+      });
+      loadSessions();
+      showToast('组织上下文已更新', 'success');
+    });
+
+    document.getElementById('settings-view-scope-reset')?.addEventListener('click', () => {
+      persistScope({
+        tenant_id: 'tenant-default',
+        organization_id: 'org-default',
+        team_id: null,
+        user_id: null,
+        agent_instance_id: currentScope.agent_instance_id,
+      });
+      loadSettingsViewValues();
+      loadSessions();
+      showToast('已切回默认上下文', 'success');
+    });
     
     document.getElementById('settings-view-models-all')?.addEventListener('click', () => {
       document.querySelectorAll('#settings-view-models-list .settings-model-checkbox').forEach(cb => {
@@ -2123,6 +2439,61 @@
       showToast('技能已刷新', 'success');
     });
 
+    document.getElementById('settings-view-org-bootstrap')?.addEventListener('click', async () => {
+      const nameInput = document.getElementById('settings-view-org-name');
+      const industrySelect = document.getElementById('settings-view-org-industry');
+      const resultBox = document.getElementById('settings-view-org-result');
+      const button = document.getElementById('settings-view-org-bootstrap');
+      const organizationName = (nameInput?.value || '').trim();
+      const industry = industrySelect?.value || 'general';
+
+      if (!organizationName) {
+        showToast('请输入公司名称', 'error');
+        nameInput?.focus();
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = '初始化中...';
+      if (resultBox) {
+        resultBox.classList.add('hidden');
+        resultBox.textContent = '';
+      }
+
+      try {
+        const response = await fetch('/api/organizations/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            organization_name: organizationName,
+            industry,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.message || data?.error || '初始化失败');
+        }
+        persistScope({
+          tenant_id: data.tenant_id,
+          organization_id: data.organization_id,
+          user_id: null,
+          team_id: null,
+          agent_instance_id: null,
+        });
+
+        if (resultBox) {
+          resultBox.textContent = `已创建 ${organizationName}，生成 ${data.team_count} 个团队、${data.agent_instance_count} 个 Agent，workspace=${data.workspace_id}。团队：${(data.team_names || []).join('、')}`;
+          resultBox.classList.remove('hidden');
+        }
+        showToast('组织初始化完成', 'success');
+      } catch (e) {
+        showToast('初始化失败: ' + (e.message || 'unknown'), 'error');
+      } finally {
+        button.disabled = false;
+        button.textContent = '初始化组织';
+      }
+    });
+
     document.getElementById('settings-view-skills-import-openclaw')?.addEventListener('click', openOpenClawImport);
     
     document.getElementById('settings-view-clear-current')?.addEventListener('click', async () => {
@@ -2135,10 +2506,15 @@
         await fetch('/api/session/clear', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: currentSessionId, assistant_id: selectedAssistant || 'default' })
+          body: JSON.stringify({
+            session_id: currentSessionId,
+            assistant_id: selectedAssistant || 'default',
+            ...buildScopePayload({ agent_instance_id: selectedAssistant || 'default' }),
+          })
         });
         document.getElementById('messages').innerHTML = '';
         currentSessionId = null;
+        currentSessionCompositeId = null;
         loadSessions();
         closeSettings();
         showToast('当前对话已清除', 'success');
@@ -2155,11 +2531,16 @@
           await fetch('/api/session/clear', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session_id: s.session_id || s.id.split('::')[0], assistant_id: s.assistant_id || 'default' })
+            body: JSON.stringify({
+              session_id: s.session_id || s.id.split('::')[0],
+              assistant_id: s.assistant_id || 'default',
+              ...buildScopePayload(s),
+            })
           });
         }
         document.getElementById('messages').innerHTML = '';
         currentSessionId = null;
+        currentSessionCompositeId = null;
         loadSessions();
         closeSettings();
         showToast('所有对话已清除', 'success');

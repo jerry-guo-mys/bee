@@ -94,12 +94,15 @@ impl Tool for CreateGroupTool {
 
         let dedup: Vec<String> = member_ids
             .into_iter()
-            .fold((std::collections::HashSet::new(), Vec::new()), |(mut set, mut vec), id| {
-                if set.insert(id.clone()) {
-                    vec.push(id);
-                }
-                (set, vec)
-            })
+            .fold(
+                (std::collections::HashSet::new(), Vec::new()),
+                |(mut set, mut vec), id| {
+                    if set.insert(id.clone()) {
+                        vec.push(id);
+                    }
+                    (set, vec)
+                },
+            )
             .1;
 
         if dedup.len() < 2 {

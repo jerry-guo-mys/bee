@@ -5,7 +5,9 @@
 //! - 工具执行时间
 //! - 请求完整生命周期追踪
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -78,6 +80,16 @@ impl Metrics {
                 "total_executions": self.tools.total_executions.load(Ordering::Relaxed),
                 "successful_executions": self.tools.successful_executions.load(Ordering::Relaxed),
                 "failed_executions": self.tools.failed_executions.load(Ordering::Relaxed),
+                "policy_rewrites": self.tools.policy_rewrites.load(Ordering::Relaxed),
+                "policy_blocks": self.tools.policy_blocks.load(Ordering::Relaxed),
+                "direct_route_hits": self.tools.direct_route_hits.load(Ordering::Relaxed),
+                "route_drift_count": self.tools.route_drift_count.load(Ordering::Relaxed),
+                "critic_score_count": self.tools.critic_score_count.load(Ordering::Relaxed),
+                "critic_score_avg": self.tools.average_critic_score(),
+                "critic_low_score_count": self.tools.critic_low_score_count.load(Ordering::Relaxed),
+                "critic_score_buckets": self.tools.critic_score_buckets_snapshot(),
+                "critic_low_score_query_kind": self.tools.critic_low_score_query_kind_snapshot(),
+                "critic_low_score_tool_pairs": self.tools.critic_low_score_tool_pairs_snapshot(),
                 "total_execution_time_ms": self.tools.total_execution_time_ms.load(Ordering::Relaxed),
                 "average_execution_time_ms": self.tools.average_execution_time_ms(),
             },
@@ -103,7 +115,7 @@ impl Metrics {
     /// 导出为 Prometheus 格式
     pub fn to_prometheus(&self) -> String {
         let mut output = String::new();
-        
+
         // LLM metrics
         output.push_str(&format!(
             "# TYPE bee_llm_calls_total counter\nbee_llm_calls_total {}\n",
@@ -129,7 +141,7 @@ impl Metrics {
             "# TYPE bee_llm_latency_ms_total counter\nbee_llm_latency_ms_total {}\n",
             self.llm.total_latency_ms.load(Ordering::Relaxed)
         ));
-        
+
         // Tool metrics
         output.push_str(&format!(
             "# TYPE bee_tool_executions_total counter\nbee_tool_executions_total {}\n",
@@ -144,10 +156,38 @@ impl Metrics {
             self.tools.failed_executions.load(Ordering::Relaxed)
         ));
         output.push_str(&format!(
+            "# TYPE bee_tool_policy_rewrites counter\nbee_tool_policy_rewrites {}\n",
+            self.tools.policy_rewrites.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "# TYPE bee_tool_policy_blocks counter\nbee_tool_policy_blocks {}\n",
+            self.tools.policy_blocks.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "# TYPE bee_tool_direct_route_hits counter\nbee_tool_direct_route_hits {}\n",
+            self.tools.direct_route_hits.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "# TYPE bee_tool_route_drift_count counter\nbee_tool_route_drift_count {}\n",
+            self.tools.route_drift_count.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "# TYPE bee_tool_critic_score_count counter\nbee_tool_critic_score_count {}\n",
+            self.tools.critic_score_count.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "# TYPE bee_tool_critic_low_score_count counter\nbee_tool_critic_low_score_count {}\n",
+            self.tools.critic_low_score_count.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "# TYPE bee_tool_critic_score_avg gauge\nbee_tool_critic_score_avg {}\n",
+            self.tools.average_critic_score()
+        ));
+        output.push_str(&format!(
             "# TYPE bee_tool_execution_time_ms_total counter\nbee_tool_execution_time_ms_total {}\n",
             self.tools.total_execution_time_ms.load(Ordering::Relaxed)
         ));
-        
+
         // Session metrics
         output.push_str(&format!(
             "# TYPE bee_session_requests_total counter\nbee_session_requests_total {}\n",
@@ -195,7 +235,7 @@ impl Metrics {
             "# TYPE bee_behavior_error_rate gauge\nbee_behavior_error_rate {}\n",
             self.behavior.error_rate()
         ));
-        
+
         output
     }
 }
@@ -212,16 +252,25 @@ pub struct LlmMetrics {
 }
 
 impl LlmMetrics {
-    pub fn record_call(&self, success: bool, latency: Duration, prompt_tokens: u64, completion_tokens: u64) {
+    pub fn record_call(
+        &self,
+        success: bool,
+        latency: Duration,
+        prompt_tokens: u64,
+        completion_tokens: u64,
+    ) {
         self.total_calls.fetch_add(1, Ordering::Relaxed);
         if success {
             self.successful_calls.fetch_add(1, Ordering::Relaxed);
         } else {
             self.failed_calls.fetch_add(1, Ordering::Relaxed);
         }
-        self.total_latency_ms.fetch_add(latency.as_millis() as u64, Ordering::Relaxed);
-        self.total_prompt_tokens.fetch_add(prompt_tokens, Ordering::Relaxed);
-        self.total_completion_tokens.fetch_add(completion_tokens, Ordering::Relaxed);
+        self.total_latency_ms
+            .fetch_add(latency.as_millis() as u64, Ordering::Relaxed);
+        self.total_prompt_tokens
+            .fetch_add(prompt_tokens, Ordering::Relaxed);
+        self.total_completion_tokens
+            .fetch_add(completion_tokens, Ordering::Relaxed);
     }
 
     pub fn average_latency_ms(&self) -> f64 {
@@ -251,6 +300,16 @@ pub struct ToolMetrics {
     pub total_executions: AtomicU64,
     pub successful_executions: AtomicU64,
     pub failed_executions: AtomicU64,
+    pub policy_rewrites: AtomicU64,
+    pub policy_blocks: AtomicU64,
+    pub direct_route_hits: AtomicU64,
+    pub route_drift_count: AtomicU64,
+    pub critic_score_count: AtomicU64,
+    pub critic_score_sum_milli: AtomicU64,
+    pub critic_low_score_count: AtomicU64,
+    pub critic_score_buckets: Mutex<HashMap<String, u64>>,
+    pub critic_low_score_query_kind: Mutex<HashMap<String, u64>>,
+    pub critic_low_score_tool_pairs: Mutex<HashMap<String, u64>>,
     pub total_execution_time_ms: AtomicU64,
 }
 
@@ -262,7 +321,8 @@ impl ToolMetrics {
         } else {
             self.failed_executions.fetch_add(1, Ordering::Relaxed);
         }
-        self.total_execution_time_ms.fetch_add(duration.as_millis() as u64, Ordering::Relaxed);
+        self.total_execution_time_ms
+            .fetch_add(duration.as_millis() as u64, Ordering::Relaxed);
     }
 
     pub fn average_execution_time_ms(&self) -> f64 {
@@ -273,6 +333,92 @@ impl ToolMetrics {
         } else {
             total as f64 / count as f64
         }
+    }
+
+    pub fn record_policy_rewrite(&self) {
+        self.policy_rewrites.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_policy_block(&self) {
+        self.policy_blocks.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_direct_route_hit(&self) {
+        self.direct_route_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_route_drift(&self) {
+        self.route_drift_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_critic_score(
+        &self,
+        score: f32,
+        query_kind: &str,
+        tool_name: &str,
+        threshold: f32,
+    ) {
+        let clamped = score.clamp(0.0, 1.0);
+        self.critic_score_count.fetch_add(1, Ordering::Relaxed);
+        self.critic_score_sum_milli
+            .fetch_add((clamped * 1000.0) as u64, Ordering::Relaxed);
+
+        let bucket = if clamped < 0.2 {
+            "lt_0_2"
+        } else if clamped < 0.4 {
+            "lt_0_4"
+        } else if clamped < 0.6 {
+            "lt_0_6"
+        } else if clamped < 0.8 {
+            "lt_0_8"
+        } else {
+            "gte_0_8"
+        };
+        if let Ok(mut buckets) = self.critic_score_buckets.lock() {
+            *buckets.entry(bucket.to_string()).or_insert(0) += 1;
+        }
+
+        if clamped < threshold {
+            self.critic_low_score_count.fetch_add(1, Ordering::Relaxed);
+            if let Ok(mut kinds) = self.critic_low_score_query_kind.lock() {
+                *kinds.entry(query_kind.to_string()).or_insert(0) += 1;
+            }
+            if let Ok(mut pairs) = self.critic_low_score_tool_pairs.lock() {
+                let key = format!("{query_kind}::{tool_name}");
+                *pairs.entry(key).or_insert(0) += 1;
+            }
+        }
+    }
+
+    pub fn average_critic_score(&self) -> f64 {
+        let total = self.critic_score_sum_milli.load(Ordering::Relaxed);
+        let count = self.critic_score_count.load(Ordering::Relaxed);
+        if count == 0 {
+            0.0
+        } else {
+            total as f64 / count as f64 / 1000.0
+        }
+    }
+
+    pub fn critic_score_buckets_snapshot(&self) -> HashMap<String, u64> {
+        self.critic_score_buckets
+            .lock()
+            .map(|map| map.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn critic_low_score_query_kind_snapshot(&self) -> HashMap<String, u64> {
+        self.critic_low_score_query_kind
+            .lock()
+            .map(|map| map.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn critic_low_score_tool_pairs_snapshot(&self) -> HashMap<String, u64> {
+        self.critic_low_score_tool_pairs
+            .lock()
+            .map(|map| map.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -319,7 +465,8 @@ pub struct BehaviorMetrics {
 impl BehaviorMetrics {
     /// 记录意图误解
     pub fn record_intent_misunderstanding(&self) {
-        self.intent_misunderstandings.fetch_add(1, Ordering::Relaxed);
+        self.intent_misunderstandings
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// 记录工具误用
@@ -346,7 +493,8 @@ impl BehaviorMetrics {
     pub fn record_task(&self, completed_first_try: bool) {
         self.tasks_total.fetch_add(1, Ordering::Relaxed);
         if completed_first_try {
-            self.tasks_completed_first_try.fetch_add(1, Ordering::Relaxed);
+            self.tasks_completed_first_try
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -424,7 +572,9 @@ impl Drop for SpanTimer {
 #[macro_export]
 macro_rules! record_llm_call {
     ($metrics:expr, $success:expr, $latency:expr, $prompt:expr, $completion:expr) => {
-        $metrics.llm.record_call($success, $latency, $prompt, $completion);
+        $metrics
+            .llm
+            .record_call($success, $latency, $prompt, $completion);
     };
 }
 
@@ -457,9 +607,20 @@ mod tests {
         let metrics = ToolMetrics::default();
         metrics.record_execution(true, Duration::from_millis(50));
         metrics.record_execution(true, Duration::from_millis(100));
+        metrics.record_policy_rewrite();
+        metrics.record_policy_block();
+        metrics.record_direct_route_hit();
+        metrics.record_route_drift();
+        metrics.record_critic_score(0.3, "News", "search", 0.45);
 
         assert_eq!(metrics.total_executions.load(Ordering::Relaxed), 2);
         assert_eq!(metrics.average_execution_time_ms(), 75.0);
+        assert_eq!(metrics.policy_rewrites.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.policy_blocks.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.direct_route_hits.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.route_drift_count.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.critic_score_count.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.critic_low_score_count.load(Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -478,8 +639,10 @@ mod tests {
     #[test]
     fn test_metrics_to_json() {
         let metrics = Metrics::new();
-        metrics.llm.record_call(true, Duration::from_millis(100), 50, 25);
-        
+        metrics
+            .llm
+            .record_call(true, Duration::from_millis(100), 50, 25);
+
         let json = metrics.to_json();
         assert!(json["llm"]["total_calls"].as_u64().unwrap() == 1);
     }
@@ -494,7 +657,7 @@ mod tests {
     #[test]
     fn test_behavior_metrics() {
         let metrics = BehaviorMetrics::default();
-        
+
         metrics.record_intent_misunderstanding();
         metrics.record_tool_misuse();
         metrics.record_path_error();
@@ -512,7 +675,7 @@ mod tests {
     #[test]
     fn test_behavior_metrics_completion_rate() {
         let metrics = BehaviorMetrics::default();
-        
+
         metrics.record_task(true);
         metrics.record_task(true);
         metrics.record_task(false);

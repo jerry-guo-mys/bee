@@ -18,10 +18,7 @@ pub enum ReactEvent {
         args: serde_json::Value,
     },
     /// 工具返回（预览，避免过长）
-    Observation {
-        tool: String,
-        preview: String,
-    },
+    Observation { tool: String, preview: String },
     /// 工具执行失败（记录到 Working Memory）
     ToolFailure { tool: String, reason: String },
     /// 错误恢复动作（RetryWithPrompt / AskUser / Abort 等）

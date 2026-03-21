@@ -65,8 +65,7 @@ fn default_max_context_turns() -> usize {
 }
 
 /// 进化调度类型
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub enum ScheduleType {
     #[serde(rename = "manual")]
     #[default]
@@ -80,8 +79,7 @@ pub enum ScheduleType {
 }
 
 /// 审批模式
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub enum ApprovalMode {
     #[serde(rename = "none")]
     #[default]
@@ -95,8 +93,7 @@ pub enum ApprovalMode {
 }
 
 /// 安全级别
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub enum SafeMode {
     #[serde(rename = "strict")]
     #[default]
@@ -128,6 +125,12 @@ pub struct CriticSection {
     /// 仅评估的工具列表（为空时评估所有，evaluate_all_tools=false 时生效）
     #[serde(default)]
     pub evaluate_tools: Vec<String>,
+    /// 低于该分数时才触发自我纠偏
+    #[serde(default = "default_critic_score_threshold")]
+    pub score_threshold: f32,
+    /// 单次 ReAct 最多允许 Critic 触发多少次纠偏
+    #[serde(default = "default_critic_max_self_corrections")]
+    pub max_self_corrections: usize,
 }
 
 fn default_critic_enabled() -> bool {
@@ -141,10 +144,24 @@ Goal: {goal}
 Tool used: {tool}
 Observation: {observation}
 
-If the result looks correct and helpful for achieving the goal, respond with "OK".
-If there's an issue or better approach, briefly explain the problem.
+Respond with JSON only:
+{"score": 0.0, "reason": "", "retry_recommended": false, "blocking_risk": false}
 
-Response:"#.to_string()
+Rules:
+- score must be between 0.0 and 1.0
+- use higher scores when the result is already sufficient for answering the user
+- set retry_recommended=true only when another step is genuinely needed
+- set blocking_risk=true only for serious mismatch, unsafe action, or clearly stale/irrelevant evidence
+- keep reason brief"#
+        .to_string()
+}
+
+fn default_critic_score_threshold() -> f32 {
+    0.45
+}
+
+fn default_critic_max_self_corrections() -> usize {
+    2
 }
 
 impl Default for CriticSection {
@@ -156,6 +173,8 @@ impl Default for CriticSection {
             prompt_template: default_critic_prompt(),
             evaluate_all_tools: false,
             evaluate_tools: vec![],
+            score_threshold: default_critic_score_threshold(),
+            max_self_corrections: default_critic_max_self_corrections(),
         }
     }
 }
@@ -427,6 +446,8 @@ pub struct ToolsSection {
     pub shell: ShellSection,
     #[serde(default)]
     pub search: SearchSection,
+    #[serde(default)]
+    pub deep_research: DeepResearchSection,
     /// 技能插件：从配置注册，每项对应一个「程序 + 参数模板」工具（白皮书：Agent 动态注册新工具）
     #[serde(default)]
     pub plugins: Vec<PluginEntry>,
@@ -452,6 +473,61 @@ pub struct PluginEntry {
 
 fn default_tool_timeout_secs() -> u64 {
     30
+}
+
+/// [tools.deep_research] 段：深度研究工具的专属配置
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeepResearchSection {
+    #[serde(default = "default_deep_research_timeout_secs")]
+    pub timeout_secs: u64,
+    #[serde(default = "default_deep_research_max_rounds")]
+    pub max_rounds: usize,
+    #[serde(default = "default_deep_research_max_results_per_round")]
+    pub max_results_per_round: usize,
+    #[serde(default = "default_deep_research_trusted_domains")]
+    pub trusted_domains: Vec<String>,
+}
+
+impl Default for DeepResearchSection {
+    fn default() -> Self {
+        Self {
+            timeout_secs: default_deep_research_timeout_secs(),
+            max_rounds: default_deep_research_max_rounds(),
+            max_results_per_round: default_deep_research_max_results_per_round(),
+            trusted_domains: default_deep_research_trusted_domains(),
+        }
+    }
+}
+
+fn default_deep_research_timeout_secs() -> u64 {
+    180
+}
+
+fn default_deep_research_max_rounds() -> usize {
+    5
+}
+
+fn default_deep_research_max_results_per_round() -> usize {
+    3
+}
+
+fn default_deep_research_trusted_domains() -> Vec<String> {
+    vec![
+        "wikipedia.org".into(),
+        "arxiv.org".into(),
+        "pubmed.gov".into(),
+        "scholar.google.com".into(),
+        "github.com".into(),
+        "stackoverflow.com".into(),
+        "docs.rs".into(),
+        "developer.mozilla.org".into(),
+        "x.com".into(),
+        "twitter.com".into(),
+        "fixupx.com".into(),
+        "fxtwitter.com".into(),
+        "vxtwitter.com".into(),
+        "nitter.net".into(),
+    ]
 }
 
 /// [tools.shell] 段：允许执行的命令名（仅首词，如 ls、grep、cargo）
@@ -495,52 +571,8 @@ fn default_max_result_chars() -> usize {
 }
 
 fn default_allowed_domains() -> Vec<String> {
-    vec![
-        // 维基百科
-        "en.wikipedia.org".into(),
-        "zh.wikipedia.org".into(),
-        "ja.wikipedia.org".into(),
-        // 中文常用
-        "www.baidu.com".into(),
-        "baike.baidu.com".into(),      // 百度百科
-        "www.jd.com".into(),
-        "item.jd.com".into(),          // 京东商品页
-        "www.taobao.com".into(),
-        "www.zhihu.com".into(),
-        "zhuanlan.zhihu.com".into(),   // 知乎专栏
-        "www.bilibili.com".into(),
-        "www.douban.com".into(),
-        "movie.douban.com".into(),
-        "book.douban.com".into(),
-        // 开发者资源
-        "github.com".into(),
-        "raw.githubusercontent.com".into(),
-        "gist.github.com".into(),
-        "stackoverflow.com".into(),
-        "docs.rs".into(),
-        "crates.io".into(),
-        "doc.rust-lang.org".into(),
-        "www.rust-lang.org".into(),
-        "docs.python.org".into(),
-        "pypi.org".into(),
-        "www.npmjs.com".into(),
-        "nodejs.org".into(),
-        "developer.mozilla.org".into(), // MDN
-        "devdocs.io".into(),
-        "dev.to".into(),
-        "medium.com".into(),
-        // 学术 / 新闻
-        "arxiv.org".into(),
-        "news.google.com".into(),      // Google 新闻
-        "news.ycombinator.com".into(), // Hacker News
-        "www.reddit.com".into(),
-        // 工具类
-        "www.wolframalpha.com".into(),
-        "www.weather.com".into(),
-        "openweathermap.org".into(),
-    ]
+    vec!["*".into()]
 }
-
 
 /// 从 config 目录加载配置，环境变量 BEE__* 可覆盖
 ///
@@ -554,9 +586,7 @@ pub fn load_config(config_path: Option<PathBuf>) -> Result<AppConfig, config::Co
     for name in default_names {
         let path = format!("{}.toml", name);
         if std::path::Path::new(&path).exists() {
-            builder = builder.add_source(
-                config::File::with_name(name).required(false),
-            );
+            builder = builder.add_source(config::File::with_name(name).required(false));
             break;
         }
     }

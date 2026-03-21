@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
@@ -14,6 +15,42 @@ use crate::react::ContextManager;
 
 /// 会话 ID（用户维度，跨平台共享）
 pub type SessionId = String;
+
+/// 会话租户范围
+#[derive(Debug, Clone, Default)]
+pub struct SessionScope {
+    pub tenant_id: Option<String>,
+    pub organization_id: Option<String>,
+    pub team_id: Option<String>,
+    pub agent_instance_id: Option<String>,
+    pub user_id: Option<String>,
+}
+
+impl SessionScope {
+    pub fn from_client_metadata(user_id: &str, metadata: Option<&Value>) -> Self {
+        let mut scope = Self {
+            user_id: Some(user_id.to_string()),
+            ..Self::default()
+        };
+        let Some(Value::Object(map)) = metadata else {
+            return scope;
+        };
+        scope.tenant_id = scope_value(map.get("tenant_id"));
+        scope.organization_id = scope_value(map.get("organization_id"));
+        scope.team_id = scope_value(map.get("team_id"));
+        scope.agent_instance_id = scope_value(map.get("agent_instance_id"));
+        scope.user_id = scope_value(map.get("user_id")).or(scope.user_id);
+        scope
+    }
+}
+
+fn scope_value(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
 
 /// 单个会话
 pub struct Session {
@@ -37,11 +74,14 @@ pub struct Session {
     pub assistant_id: Option<String>,
     /// 模型 ID（可选）
     pub model_id: Option<String>,
+    /// 多租户上下文范围
+    pub scope: SessionScope,
 }
 
 impl Session {
     pub fn new(user_id: String, max_context_turns: usize) -> Self {
         let id = format!("session_{}", uuid::Uuid::new_v4());
+        let scope_user_id = user_id.clone();
         Self {
             id,
             user_id,
@@ -53,7 +93,16 @@ impl Session {
             created_at: Instant::now(),
             assistant_id: None,
             model_id: None,
+            scope: SessionScope {
+                user_id: Some(scope_user_id),
+                ..SessionScope::default()
+            },
         }
+    }
+
+    pub fn apply_client_scope(&mut self, client: &ClientInfo) {
+        let scope = SessionScope::from_client_metadata(&self.user_id, client.metadata.as_ref());
+        self.scope = scope;
     }
 
     /// 添加客户端连接
@@ -125,7 +174,7 @@ impl SessionManager {
     /// 获取或创建用户的会话
     pub async fn get_or_create(&self, user_id: &str, client: ClientInfo) -> SessionId {
         let user_sessions = self.user_sessions.read().await;
-        
+
         if let Some(session_id) = user_sessions.get(user_id) {
             let mut sessions = self.sessions.write().await;
             if let Some(session) = sessions.get_mut(session_id) {
@@ -136,11 +185,18 @@ impl SessionManager {
         drop(user_sessions);
 
         let mut session = Session::new(user_id.to_string(), self.max_context_turns);
+        session.apply_client_scope(&client);
         session.add_client(client);
         let session_id = session.id.clone();
 
-        self.sessions.write().await.insert(session_id.clone(), session);
-        self.user_sessions.write().await.insert(user_id.to_string(), session_id.clone());
+        self.sessions
+            .write()
+            .await
+            .insert(session_id.clone(), session);
+        self.user_sessions
+            .write()
+            .await
+            .insert(user_id.to_string(), session_id.clone());
 
         session_id
     }
@@ -151,7 +207,7 @@ impl SessionManager {
         if sessions.contains_key(session_id) {
             drop(sessions);
             Some(Arc::new(RwLock::new(
-                self.sessions.write().await.remove(session_id).unwrap()
+                self.sessions.write().await.remove(session_id).unwrap(),
             )))
         } else {
             None
@@ -179,7 +235,7 @@ impl SessionManager {
     pub async fn cleanup_expired(&self) -> usize {
         let mut sessions = self.sessions.write().await;
         let mut user_sessions = self.user_sessions.write().await;
-        
+
         let expired: Vec<_> = sessions
             .iter()
             .filter(|(_, s)| s.is_expired(self.session_timeout))

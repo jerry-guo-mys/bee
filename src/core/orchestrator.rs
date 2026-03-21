@@ -99,9 +99,7 @@ pub async fn create_agent(
     if let Some(parent) = sqlite_db_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    let sqlite_persistence = Arc::new(Mutex::new(
-        SqlitePersistence::new(&sqlite_db_path).ok()
-    ));
+    let sqlite_persistence = Arc::new(Mutex::new(SqlitePersistence::new(&sqlite_db_path).ok()));
 
     // 生成 session_id（解决问题 2.1：使用 tokio::sync::Mutex 避免阻塞）
     let session_id = uuid::Uuid::new_v4().to_string();

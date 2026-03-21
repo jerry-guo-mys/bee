@@ -2,10 +2,10 @@
 //!
 //! 提供流畅的API来构建工作流
 
-use std::collections::HashMap;
 #[cfg(feature = "gateway")]
 use crate::gateway::BackgroundTask;
 use crate::workflow::types::*;
+use std::collections::HashMap;
 
 /// 工作流构建器
 pub struct WorkflowBuilder {
@@ -52,13 +52,16 @@ impl WorkflowBuilder {
     #[cfg(feature = "gateway")]
     pub fn task(mut self, id: impl Into<TaskId>, task: BackgroundTask) -> Self {
         let id = id.into();
-        self.tasks.insert(id.clone(), WorkflowTask {
-            id,
-            definition: TaskDefinition::Simple(Box::new(task)),
-            dependencies: TaskDependencies::None,
-            fallback: None,
-            state: TaskState::Waiting,
-        });
+        self.tasks.insert(
+            id.clone(),
+            WorkflowTask {
+                id,
+                definition: TaskDefinition::Simple(Box::new(task)),
+                dependencies: TaskDependencies::None,
+                fallback: None,
+                state: TaskState::Waiting,
+            },
+        );
         self
     }
 
@@ -101,7 +104,9 @@ impl WorkflowBuilder {
     /// 构建工作流
     pub fn build(self) -> Result<Workflow, WorkflowError> {
         if self.user_id.is_empty() {
-            return Err(WorkflowError::InvalidConfiguration("user_id is required".to_string()));
+            return Err(WorkflowError::InvalidConfiguration(
+                "user_id is required".to_string(),
+            ));
         }
 
         Ok(Workflow {
@@ -131,22 +136,30 @@ mod tests {
         let workflow = WorkflowBuilder::new("Test Workflow")
             .description("A test workflow")
             .user_id("user1".to_string())
-            .task("task1", BackgroundTask::new("user1".to_string(), "Do something".to_string()))
-            .task("task2", BackgroundTask::new("user1".to_string(), "Do next".to_string()))
+            .task(
+                "task1",
+                BackgroundTask::new("user1".to_string(), "Do something".to_string()),
+            )
+            .task(
+                "task2",
+                BackgroundTask::new("user1".to_string(), "Do next".to_string()),
+            )
             .sequential("task1", "task2")
             .build()
             .expect("Failed to build workflow");
 
         assert_eq!(workflow.name, "Test Workflow");
         assert_eq!(workflow.tasks.len(), 2);
-        assert!(matches!(workflow.tasks.get("task2").unwrap().dependencies, TaskDependencies::Sequential(_)));
+        assert!(matches!(
+            workflow.tasks.get("task2").unwrap().dependencies,
+            TaskDependencies::Sequential(_)
+        ));
     }
 
     #[test]
     fn test_build_without_user_id_fails() {
-        let result = WorkflowBuilder::new("Test")
-            .build();
-        
+        let result = WorkflowBuilder::new("Test").build();
+
         assert!(result.is_err());
     }
 }

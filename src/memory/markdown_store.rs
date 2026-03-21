@@ -19,9 +19,19 @@ pub fn memory_root(workspace: &Path) -> PathBuf {
 pub fn assistant_memory_root(workspace: &Path, assistant_id: &str) -> PathBuf {
     let safe_id: String = assistant_id
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
-    let dir = if safe_id.is_empty() { "default" } else { safe_id.as_str() };
+    let dir = if safe_id.is_empty() {
+        "default"
+    } else {
+        safe_id.as_str()
+    };
     memory_root(workspace).join(dir)
 }
 
@@ -135,7 +145,12 @@ pub fn append_lesson(path: &Path, line: &str) -> std::io::Result<()> {
 }
 
 /// 追加一条程序记忆（工具名、成功/失败、简要原因），用于自我进化
-pub fn append_procedural(path: &Path, tool: &str, success: bool, detail: &str) -> std::io::Result<()> {
+pub fn append_procedural(
+    path: &Path,
+    tool: &str,
+    success: bool,
+    detail: &str,
+) -> std::io::Result<()> {
     if let Some(p) = path.parent() {
         std::fs::create_dir_all(p)?;
     }
@@ -161,7 +176,10 @@ const CONSOLIDATE_MAX_CHARS_PER_DAY: usize = 6000;
 /// 定期整理记忆：将近期短期日志（memory/logs/YYYY-MM-DD.md）归纳后写入长期记忆（long-term.md）
 /// - since_days：整理最近几天（含今天）；例如 7 表示最近 7 天
 /// - 每个日期对应一个块，标题为「整理 YYYY-MM-DD」，内容为当日日志摘要（截断以避免过长）
-pub fn consolidate_memory(memory_root: &Path, since_days: u32) -> std::io::Result<ConsolidateResult> {
+pub fn consolidate_memory(
+    memory_root: &Path,
+    since_days: u32,
+) -> std::io::Result<ConsolidateResult> {
     let logs_dir = memory_root.join("logs");
     if !logs_dir.exists() {
         return Ok(ConsolidateResult::default());
@@ -210,7 +228,10 @@ pub fn consolidate_memory(memory_root: &Path, since_days: u32) -> std::io::Resul
 }
 
 /// 列出需整理的每日日志（since_days 内），返回 (日期, 预处理后的内容) 供 LLM 摘要
-pub fn list_daily_logs_for_llm(memory_root: &Path, since_days: u32) -> std::io::Result<Vec<(String, String)>> {
+pub fn list_daily_logs_for_llm(
+    memory_root: &Path,
+    since_days: u32,
+) -> std::io::Result<Vec<(String, String)>> {
     let logs_dir = memory_root.join("logs");
     if !logs_dir.exists() {
         return Ok(Vec::new());
@@ -265,7 +286,12 @@ fn summarize_log_content(content: &str) -> String {
     }
     let s = out.join("\n");
     if s.len() > CONSOLIDATE_MAX_CHARS_PER_DAY {
-        format!("{}...", s.chars().take(CONSOLIDATE_MAX_CHARS_PER_DAY).collect::<String>())
+        format!(
+            "{}...",
+            s.chars()
+                .take(CONSOLIDATE_MAX_CHARS_PER_DAY)
+                .collect::<String>()
+        )
     } else {
         s
     }

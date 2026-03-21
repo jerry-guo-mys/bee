@@ -141,27 +141,68 @@ impl TaskClassifier {
 
     fn contains_code_keywords(content: &str) -> bool {
         let keywords = [
-            "代码", "编程", "函数", "代码", "bug", "error", "compile",
-            "rust", "python", "javascript", "typescript", "java", "go",
-            "implement", "fix", "refactor", "debug", "写个", "写一个",
-            "function", "class", "struct", "enum", "trait", "impl",
+            "代码",
+            "编程",
+            "函数",
+            "代码",
+            "bug",
+            "error",
+            "compile",
+            "rust",
+            "python",
+            "javascript",
+            "typescript",
+            "java",
+            "go",
+            "implement",
+            "fix",
+            "refactor",
+            "debug",
+            "写个",
+            "写一个",
+            "function",
+            "class",
+            "struct",
+            "enum",
+            "trait",
+            "impl",
         ];
         keywords.iter().any(|k| content.contains(k))
     }
 
     fn contains_reasoning_keywords(content: &str) -> bool {
         let keywords = [
-            "分析", "解释", "为什么", "怎么", "如何", "推理",
-            "analyze", "explain", "why", "how", "reason", "think",
-            "compare", "evaluate", "assess", "比较", "评估",
+            "分析",
+            "解释",
+            "为什么",
+            "怎么",
+            "如何",
+            "推理",
+            "analyze",
+            "explain",
+            "why",
+            "how",
+            "reason",
+            "think",
+            "compare",
+            "evaluate",
+            "assess",
+            "比较",
+            "评估",
         ];
         keywords.iter().any(|k| content.contains(k))
     }
 
     fn contains_summary_keywords(content: &str) -> bool {
         let keywords = [
-            "总结", "摘要", "概括", "简述",
-            "summarize", "summary", "tldr", "brief",
+            "总结",
+            "摘要",
+            "概括",
+            "简述",
+            "summarize",
+            "summary",
+            "tldr",
+            "brief",
         ];
         keywords.iter().any(|k| content.contains(k))
     }
@@ -227,12 +268,10 @@ impl ModelRouter {
         self.models
             .iter()
             .enumerate()
-            .max_by_key(|(_, (cap, _))| {
-                match task_type {
-                    TaskType::CodeGeneration => cap.code_score,
-                    TaskType::ComplexReasoning => cap.reasoning_score,
-                    _ => (cap.code_score + cap.reasoning_score) / 2,
-                }
+            .max_by_key(|(_, (cap, _))| match task_type {
+                TaskType::CodeGeneration => cap.code_score,
+                TaskType::ComplexReasoning => cap.reasoning_score,
+                _ => (cap.code_score + cap.reasoning_score) / 2,
             })
             .map(|(i, _)| i)
     }
@@ -305,16 +344,16 @@ impl RoutingLlmClient {
 impl LlmClient for RoutingLlmClient {
     async fn complete(&self, messages: &[Message]) -> Result<String, LlmError> {
         let task_type = TaskClassifier::classify(messages);
-        
+
         let client = self
             .router
             .select_model(task_type)
             .ok_or_else(|| LlmError::ApiError("No model available".to_string()))?;
-        
+
         self.router
             .call_counts
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        
+
         client.complete(messages).await
     }
 
@@ -326,16 +365,16 @@ impl LlmClient for RoutingLlmClient {
         LlmError,
     > {
         let task_type = TaskClassifier::classify(messages);
-        
+
         let client = self
             .router
             .select_model(task_type)
             .ok_or_else(|| LlmError::ApiError("No model available".to_string()))?;
-        
+
         self.router
             .call_counts
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        
+
         client.complete_stream(messages).await
     }
 
@@ -345,7 +384,9 @@ impl LlmClient for RoutingLlmClient {
             .models
             .iter()
             .map(|(_, client)| client.token_usage())
-            .fold((0, 0, 0), |acc, (a, b, c)| (acc.0 + a, acc.1 + b, acc.2 + c))
+            .fold((0, 0, 0), |acc, (a, b, c)| {
+                (acc.0 + a, acc.1 + b, acc.2 + c)
+            })
     }
 }
 
@@ -386,10 +427,10 @@ mod tests {
     #[test]
     fn test_model_router_selection() {
         let mut router = ModelRouter::new();
-        
+
         let fast_model: Arc<dyn LlmClient> = Arc::new(MockLlmClient);
         let smart_model: Arc<dyn LlmClient> = Arc::new(MockLlmClient);
-        
+
         router.add_model(
             ModelCapabilities::new("fast")
                 .with_speed(90)
@@ -398,7 +439,7 @@ mod tests {
                 .with_reasoning(50),
             fast_model,
         );
-        
+
         router.add_model(
             ModelCapabilities::new("smart")
                 .with_speed(40)
@@ -407,11 +448,11 @@ mod tests {
                 .with_reasoning(95),
             smart_model,
         );
-        
+
         // 测试不同策略
         router.set_default_strategy(RoutingStrategy::Fastest);
         assert!(router.select_model(TaskType::Default).is_some());
-        
+
         router.set_default_strategy(RoutingStrategy::BestQuality);
         assert!(router.select_model(TaskType::CodeGeneration).is_some());
     }
@@ -423,7 +464,7 @@ mod tests {
             .with_reasoning(90)
             .with_speed(70)
             .with_cost(60);
-        
+
         assert_eq!(cap.name, "test");
         assert_eq!(cap.code_score, 80);
         assert_eq!(cap.reasoning_score, 90);

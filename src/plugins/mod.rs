@@ -1,7 +1,7 @@
 //! Plugin 系统（Phase 4 长期演进）
 //!
 //! 提供标准化的插件接口，支持动态加载和扩展工具能力。
-//! 
+//!
 //! 插件类型：
 //! - 工具插件：扩展可用工具
 //! - 提供者插件：扩展 LLM/嵌入提供者
@@ -115,7 +115,9 @@ impl PluginContext {
     }
 
     pub fn get_config<T: serde::de::DeserializeOwned>(&self, key: &str) -> Option<T> {
-        self.config.get(key).and_then(|v| serde_json::from_value(v.clone()).ok())
+        self.config
+            .get(key)
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 }
 
@@ -148,7 +150,7 @@ pub trait Plugin: Send + Sync {
 
     /// 转换为 Any（用于向下转型）
     fn as_any(&self) -> &dyn Any;
-    
+
     /// 转换为可变 Any
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
@@ -233,7 +235,8 @@ impl PluginRegistry {
         if self.plugins.contains_key(&id) {
             return Err(PluginError::AlreadyRegistered(id));
         }
-        self.plugins.insert(id, Arc::new(tokio::sync::RwLock::new(plugin)));
+        self.plugins
+            .insert(id, Arc::new(tokio::sync::RwLock::new(plugin)));
         Ok(())
     }
 
@@ -241,13 +244,14 @@ impl PluginRegistry {
     pub fn register_tool(&mut self, plugin: Box<dyn ToolPlugin>) -> Result<(), PluginError> {
         let id = plugin.metadata().id.clone();
         let tool_name = plugin.tool_name().to_string();
-        
+
         if self.tool_plugins.contains_key(&tool_name) {
             return Err(PluginError::AlreadyRegistered(tool_name));
         }
-        
-        self.tool_plugins.insert(tool_name, Arc::new(tokio::sync::RwLock::new(plugin)));
-        
+
+        self.tool_plugins
+            .insert(tool_name, Arc::new(tokio::sync::RwLock::new(plugin)));
+
         // 同时注册到通用插件表
         // 由于所有权问题，这里需要重新创建
         tracing::debug!("Registered tool plugin: {}", id);
@@ -256,7 +260,8 @@ impl PluginRegistry {
 
     /// 注册消息处理器插件
     pub fn register_processor(&mut self, plugin: Box<dyn MessageProcessorPlugin>) {
-        self.processor_plugins.push(Arc::new(tokio::sync::RwLock::new(plugin)));
+        self.processor_plugins
+            .push(Arc::new(tokio::sync::RwLock::new(plugin)));
     }
 
     /// 初始化所有插件
@@ -268,7 +273,7 @@ impl PluginRegistry {
                 e
             })?;
         }
-        
+
         for (name, plugin) in &self.tool_plugins {
             let mut plugin = plugin.write().await;
             plugin.initialize(ctx).await.map_err(|e| {
@@ -276,12 +281,12 @@ impl PluginRegistry {
                 e
             })?;
         }
-        
+
         for plugin in &self.processor_plugins {
             let mut plugin = plugin.write().await;
             plugin.initialize(ctx).await?;
         }
-        
+
         Ok(())
     }
 
@@ -301,7 +306,7 @@ impl PluginRegistry {
             .tool_plugins
             .get(name)
             .ok_or_else(|| PluginError::NotFound(name.to_string()))?;
-        
+
         let plugin = plugin.read().await;
         plugin.execute(args).await
     }
@@ -332,17 +337,17 @@ impl PluginRegistry {
             let mut plugin = plugin.write().await;
             plugin.shutdown().await?;
         }
-        
+
         for (_, plugin) in &self.tool_plugins {
             let mut plugin = plugin.write().await;
             plugin.shutdown().await?;
         }
-        
+
         for plugin in &self.processor_plugins {
             let mut plugin = plugin.write().await;
             plugin.shutdown().await?;
         }
-        
+
         Ok(())
     }
 
@@ -455,12 +460,12 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let mut registry = PluginRegistry::new();
-            
+
             let plugin = Box::new(TestPlugin::new("test1"));
             registry.register(plugin).unwrap();
-            
+
             assert_eq!(registry.len(), 1);
-            
+
             // 重复注册应失败
             let plugin2 = Box::new(TestPlugin::new("test1"));
             assert!(registry.register(plugin2).is_err());

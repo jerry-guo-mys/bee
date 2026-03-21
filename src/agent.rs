@@ -12,16 +12,29 @@ use crate::config::AppConfig;
 use crate::core::{AgentBuilder, AgentComponents, AgentError};
 use crate::llm::create_embedder_from_config;
 use crate::memory::{
-    assistant_memory_root, ConsolidateResult, FileLongTerm, InMemoryLongTerm, InMemoryVectorLongTerm,
-    list_daily_logs_for_llm, lessons_path, long_term_path, memory_root, preferences_path,
-    procedural_path, vector_snapshot_path, LongTermMemory, Message,
+    assistant_memory_root, lessons_path, list_daily_logs_for_llm, long_term_path, memory_root,
+    preferences_path, procedural_path, vector_snapshot_path, ConsolidateResult, FileLongTerm,
+    InMemoryLongTerm, InMemoryVectorLongTerm, LongTermMemory, Message,
 };
 use crate::react::{react_loop, ContextManager, Planner, ReactEvent};
 use crate::skills::SkillSelector;
+use crate::tool_policy::refine_allowed_tools_for_input;
+use crate::tool_router::{deterministic_route, execute_direct_route};
 use tokio::sync::mpsc;
 
+fn allowed_tools_hint(allowed_tools: &[String]) -> Option<String> {
+    if allowed_tools.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "For this conversation, you may use only these tools: {}. Do not call any other tool.",
+            allowed_tools.join(", ")
+        ))
+    }
+}
+
 /// 创建 Agent 组件：使用统一的 AgentBuilder（解决问题 1.1）
-/// 
+///
 /// 现在接受配置参数而非内部加载（解决问题 1.2）
 pub fn create_agent_components(cfg: &AppConfig, workspace: &Path) -> AgentComponents {
     AgentBuilder::new(cfg.clone(), workspace.to_path_buf())
@@ -63,7 +76,10 @@ pub fn create_vector_long_term_for_assistant(
         .clone()
         .or_else(|| std::env::var("OPENAI_API_KEY").ok());
     let embedder = create_embedder_from_config(
-        cfg.memory.embedding_base_url.as_deref().or(cfg.llm.base_url.as_deref()),
+        cfg.memory
+            .embedding_base_url
+            .as_deref()
+            .or(cfg.llm.base_url.as_deref()),
         &cfg.memory.embedding_model,
         api_key.as_deref(),
     )?;
@@ -138,7 +154,10 @@ pub fn create_context_with_long_term_for_assistant(
                         .clone()
                         .or_else(|| std::env::var("OPENAI_API_KEY").ok());
                     if let Some(embedder) = create_embedder_from_config(
-                        cfg.memory.embedding_base_url.as_deref().or(cfg.llm.base_url.as_deref()),
+                        cfg.memory
+                            .embedding_base_url
+                            .as_deref()
+                            .or(cfg.llm.base_url.as_deref()),
                         &cfg.memory.embedding_model,
                         api_key.as_deref(),
                     ) {
@@ -238,6 +257,29 @@ pub async fn process_message(
     allowed_tools: Option<&[String]>,
 ) -> Result<String, AgentError> {
     let cancel_token = tokio_util::sync::CancellationToken::new();
+    let direct_route = deterministic_route(user_input, allowed_tools);
+    if let Some(route) = direct_route.as_ref() {
+        let result = execute_direct_route(
+            &components.executor,
+            context,
+            user_input,
+            route,
+            None,
+            cancel_token.clone(),
+        )
+        .await?;
+        crate::observability::Metrics::global()
+            .tools
+            .record_direct_route_hit();
+        return Ok(result.response);
+    }
+    let policy_decision = allowed_tools.map(|tools| {
+        let metadata = components.executor.tool_metadata_for_names(tools);
+        refine_allowed_tools_for_input(user_input, &metadata)
+    });
+    let allowed_tools_hint = policy_decision
+        .as_ref()
+        .and_then(|decision| allowed_tools_hint(&decision.allowed_tools));
     let result = react_loop(
         &components.planner,
         &components.executor,
@@ -249,8 +291,23 @@ pub async fn process_message(
         cancel_token,
         components.critic.as_ref(),
         Some(&components.task_scheduler),
-        None,
-        allowed_tools,
+        match (
+            policy_decision
+                .as_ref()
+                .and_then(|decision| decision.system_hint.as_deref()),
+            allowed_tools_hint.as_deref(),
+        ) {
+            (Some(policy_hint), Some(allowed_hint)) => {
+                Some(format!("{policy_hint}\n{allowed_hint}"))
+            }
+            (Some(policy_hint), None) => Some(policy_hint.to_string()),
+            (None, Some(allowed_hint)) => Some(allowed_hint.to_string()),
+            (None, None) => None,
+        }
+        .as_deref(),
+        policy_decision
+            .as_ref()
+            .map(|decision| decision.allowed_tools.as_slice()),
     )
     .await?;
     Ok(result.response)
@@ -272,8 +329,77 @@ pub async fn process_message_stream(
     allowed_tools: Option<&[String]>,
     assistant_id: Option<&str>,
 ) -> Result<String, AgentError> {
-    let cancel_token = tokio_util::sync::CancellationToken::new();
+    process_message_stream_with_cancel(
+        components,
+        context,
+        user_input,
+        event_tx,
+        system_prompt_override,
+        planner_override,
+        allowed_tools,
+        assistant_id,
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+}
+
+/// 流式处理单条用户消息（支持外部取消 token）
+#[allow(unused_variables)]
+pub async fn process_message_stream_with_cancel(
+    components: &AgentComponents,
+    context: &mut ContextManager,
+    user_input: &str,
+    event_tx: mpsc::UnboundedSender<ReactEvent>,
+    system_prompt_override: Option<&str>,
+    planner_override: Option<&Planner>,
+    allowed_tools: Option<&[String]>,
+    assistant_id: Option<&str>,
+    cancel_token: tokio_util::sync::CancellationToken,
+) -> Result<String, AgentError> {
     let planner = planner_override.unwrap_or(&components.planner);
+    let direct_route = deterministic_route(user_input, allowed_tools);
+    if let Some(route) = direct_route.as_ref() {
+        let result = execute_direct_route(
+            &components.executor,
+            context,
+            user_input,
+            route,
+            Some(&event_tx),
+            cancel_token,
+        )
+        .await?;
+        crate::observability::Metrics::global()
+            .tools
+            .record_direct_route_hit();
+        return Ok(result.response);
+    }
+    let policy_decision = allowed_tools.map(|tools| {
+        let metadata = components.executor.tool_metadata_for_names(tools);
+        refine_allowed_tools_for_input(user_input, &metadata)
+    });
+    let allowed_tools_hint = policy_decision
+        .as_ref()
+        .and_then(|decision| allowed_tools_hint(&decision.allowed_tools));
+    let combined_system_prompt = match (
+        system_prompt_override,
+        policy_decision
+            .as_ref()
+            .and_then(|decision| decision.system_hint.as_deref()),
+        allowed_tools_hint.as_deref(),
+    ) {
+        (Some(base), Some(policy_hint), Some(allowed_hint)) => {
+            Some(format!("{base}\n\n{policy_hint}\n{allowed_hint}"))
+        }
+        (Some(base), Some(policy_hint), None) => Some(format!("{base}\n\n{policy_hint}")),
+        (Some(base), None, Some(allowed_hint)) => Some(format!("{base}\n\n{allowed_hint}")),
+        (Some(base), None, None) => Some(base.to_string()),
+        (None, Some(policy_hint), Some(allowed_hint)) => {
+            Some(format!("{policy_hint}\n{allowed_hint}"))
+        }
+        (None, Some(policy_hint), None) => Some(policy_hint.to_string()),
+        (None, None, Some(allowed_hint)) => Some(allowed_hint.to_string()),
+        (None, None, None) => None,
+    };
 
     let result = {
         #[cfg(feature = "web")]
@@ -292,8 +418,10 @@ pub async fn process_message_stream(
                             cancel_token,
                             components.critic.as_ref(),
                             Some(&components.task_scheduler),
-                            system_prompt_override,
-                            allowed_tools,
+                            combined_system_prompt.as_deref(),
+                            policy_decision
+                                .as_ref()
+                                .map(|decision| decision.allowed_tools.as_slice()),
                         )
                         .await
                     })
@@ -310,8 +438,10 @@ pub async fn process_message_stream(
                     cancel_token,
                     components.critic.as_ref(),
                     Some(&components.task_scheduler),
-                    system_prompt_override,
-                    allowed_tools,
+                    combined_system_prompt.as_deref(),
+                    policy_decision
+                        .as_ref()
+                        .map(|decision| decision.allowed_tools.as_slice()),
                 )
                 .await
             }
@@ -329,8 +459,10 @@ pub async fn process_message_stream(
                 cancel_token,
                 components.critic.as_ref(),
                 Some(&components.task_scheduler),
-                system_prompt_override,
-                allowed_tools,
+                combined_system_prompt.as_deref(),
+                policy_decision
+                    .as_ref()
+                    .map(|decision| decision.allowed_tools.as_slice()),
             )
             .await
         }
@@ -353,10 +485,7 @@ pub async fn process_message_with_skills(
     planner_override: Option<&Planner>,
     allowed_tools: Option<&[String]>,
 ) -> Result<String, AgentError> {
-    let selector = SkillSelector::new(
-        components.skill_cache(),
-        Arc::clone(&components.llm),
-    );
+    let selector = SkillSelector::new(components.skill_cache(), Arc::clone(&components.llm));
 
     let skills = selector.select(user_input).await;
 

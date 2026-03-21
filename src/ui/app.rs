@@ -1,18 +1,18 @@
-//! 简化 TUI 主循环
+//! Simplified TUI main loop
 
 use std::io::{self, Stdout};
+
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
+    event::{DisableMouseCapture, EnableMouseCapture, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::sync::watch;
 
 use crate::core::UiState;
 use crate::ui::render::{draw, RenderContext};
-use crate::ui::widgets::{InputFocus, InputState, InputHistory, CommandPopup};
+use crate::ui::widgets::{CommandPopup, InputFocus, InputHistory, InputState};
 
 const DEFAULT_AGENTS: &[&str] = &["默认", "自动分派"];
 const DEFAULT_MODELS: &[&str] = &["默认", "DeepSeek", "GPT-4o", "Claude"];
@@ -55,7 +55,9 @@ pub async fn run_app(
         if let Ok(Some(ev)) = event_handler.poll() {
             match ev {
                 super::event::AppEvent::Command(cmd) => {
-                    if matches!(cmd, crate::core::Command::Quit) { break; }
+                    if matches!(cmd, crate::core::Command::Quit) {
+                        break;
+                    }
                 }
                 super::event::AppEvent::Key(key) if !state.input_locked => {
                     if command_popup.is_visible() {
@@ -73,30 +75,47 @@ pub async fn run_app(
                                 input_buffer.push(c);
                                 if input_buffer.starts_with('/') {
                                     command_popup.filter(&input_buffer[1..]);
-                                } else { command_popup.hide(); }
+                                } else {
+                                    command_popup.hide();
+                                }
                             }
                             KeyCode::Backspace => {
                                 input_buffer.pop();
                                 if input_buffer.starts_with('/') {
                                     command_popup.filter(&input_buffer[1..]);
-                                } else { command_popup.hide(); }
+                                } else {
+                                    command_popup.hide();
+                                }
                             }
                             _ => {}
                         }
                         terminal.draw(|f| {
-                            draw(f, &state, &input_buffer, conversation_scroll,
-                                &mut (0, 0), &input_state, &agents, &models,
-                                &mut render_ctx, &mut command_popup);
+                            draw(
+                                f,
+                                &state,
+                                &input_buffer,
+                                conversation_scroll,
+                                &mut (0, 0),
+                                &input_state,
+                                &agents,
+                                &models,
+                                &mut render_ctx,
+                                &mut command_popup,
+                            );
                         })?;
                         continue;
                     }
 
                     match key.code {
                         KeyCode::Enter => {
-                            if input_state.focus == InputFocus::Input || input_state.focus == InputFocus::Send {
+                            if input_state.focus == InputFocus::Input
+                                || input_state.focus == InputFocus::Send
+                            {
                                 let input = input_buffer.trim().to_string();
                                 if !input.is_empty() {
-                                    if matches!(input.to_lowercase().as_str(), "/exit" | "quit") { break; }
+                                    if matches!(input.to_lowercase().as_str(), "/exit" | "quit") {
+                                        break;
+                                    }
                                     input_history.push(input.clone());
                                     event_handler.send_submit(input);
                                     input_buffer.clear();
@@ -124,9 +143,11 @@ pub async fn run_app(
                                     input_buffer = cached;
                                 }
                             } else if input_state.focus == InputFocus::Agent {
-                                input_state.agent_index = (input_state.agent_index + 1).min(agents.len().saturating_sub(1));
+                                input_state.agent_index =
+                                    (input_state.agent_index + 1).min(agents.len().saturating_sub(1));
                             } else if input_state.focus == InputFocus::Model {
-                                input_state.model_index = (input_state.model_index + 1).min(models.len().saturating_sub(1));
+                                input_state.model_index =
+                                    (input_state.model_index + 1).min(models.len().saturating_sub(1));
                             } else {
                                 conversation_scroll = conversation_scroll.saturating_add(1);
                             }
@@ -147,14 +168,23 @@ pub async fn run_app(
                                 InputFocus::Send => InputFocus::Model,
                             };
                         }
-                        KeyCode::Backspace if input_state.focus == InputFocus::Input => { input_buffer.pop(); }
+                        KeyCode::Backspace if input_state.focus == InputFocus::Input => {
+                            input_buffer.pop();
+                        }
                         KeyCode::Char(c) if input_state.focus == InputFocus::Input => {
                             input_buffer.push(c);
-                            if input_buffer == "/" { command_popup.filter(""); }
-                            else if input_buffer.starts_with('/') { command_popup.filter(&input_buffer[1..]); }
+                            if input_buffer == "/" {
+                                command_popup.filter("");
+                            } else if input_buffer.starts_with('/') {
+                                command_popup.filter(&input_buffer[1..]);
+                            }
                         }
-                        KeyCode::PageUp => conversation_scroll = conversation_scroll.saturating_sub(10),
-                        KeyCode::PageDown => conversation_scroll = conversation_scroll.saturating_add(10),
+                        KeyCode::PageUp => {
+                            conversation_scroll = conversation_scroll.saturating_sub(10);
+                        }
+                        KeyCode::PageDown => {
+                            conversation_scroll = conversation_scroll.saturating_add(10);
+                        }
                         KeyCode::Home => conversation_scroll = 0,
                         KeyCode::End => conversation_scroll = usize::MAX,
                         KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -172,9 +202,18 @@ pub async fn run_app(
 
         let mut scroll_info = (0usize, 0usize);
         terminal.draw(|f| {
-            draw(f, &state, &input_buffer, conversation_scroll,
-                &mut scroll_info, &input_state, &agents, &models,
-                &mut render_ctx, &mut command_popup);
+            draw(
+                f,
+                &state,
+                &input_buffer,
+                conversation_scroll,
+                &mut scroll_info,
+                &input_state,
+                &agents,
+                &models,
+                &mut render_ctx,
+                &mut command_popup,
+            );
         })?;
         let (total_lines, viewport_height) = scroll_info;
         conversation_scroll = conversation_scroll.min(total_lines.saturating_sub(viewport_height));

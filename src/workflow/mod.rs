@@ -1,9 +1,11 @@
-pub mod types;
-pub mod graph;
 pub mod builder;
 pub mod engine;
+pub mod graph;
+pub mod types;
 
-pub use types::*;
-pub use graph::WorkflowGraph;
 pub use builder::WorkflowBuilder;
-pub use engine::{WorkflowEngine, WorkflowTaskExecutor};
+pub use engine::WorkflowEngine;
+#[cfg(feature = "gateway")]
+pub use engine::WorkflowTaskExecutor;
+pub use graph::WorkflowGraph;
+pub use types::*;

@@ -9,44 +9,69 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::core::AgentError;
-use crate::tools::Tool;
+use crate::tools::output;
+use crate::tools::{
+    Tool, ToolCapabilityGroup, ToolCapabilitySubgroup, ToolCostClass, ToolCriticMode, ToolIntent,
+    ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
+};
 
 /// 沙箱文件系统：绑定根目录，resolve 校验路径在根下，防止路径逃逸
 #[derive(Debug, Clone)]
 pub struct SafeFs {
     root_dir: PathBuf,
+    fallback_root: Option<PathBuf>,
 }
 
 impl SafeFs {
     pub fn new(root_dir: impl AsRef<Path>) -> Self {
         let root = root_dir.as_ref().to_path_buf();
         let root_dir = root.canonicalize().unwrap_or(root);
-        Self { root_dir }
+        let fallback_root = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| cwd.canonicalize().ok().or(Some(cwd)))
+            .filter(|cwd| cwd != &root_dir);
+        Self {
+            root_dir,
+            fallback_root,
+        }
+    }
+
+    fn resolve_under_root(root: &Path, path: &str) -> Result<PathBuf, AgentError> {
+        let full = root.join(path);
+        let canonical = full
+            .canonicalize()
+            .map_err(|_| AgentError::ToolExecutionFailed(format!("Path not found: {}", path)))?;
+        let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        if canonical.starts_with(root_canon) {
+            Ok(canonical)
+        } else {
+            Err(AgentError::PathEscape(path.to_string()))
+        }
     }
 
     /// 检查路径是否在沙箱内
     pub fn resolve(&self, path: &str) -> Result<PathBuf, AgentError> {
         let path = path.trim_start_matches("./");
-        let full = self.root_dir.join(path);
-        let canonical = full
-            .canonicalize()
-            .map_err(|_| AgentError::ToolExecutionFailed(format!("Path not found: {}", path)))?;
-        let root_canon = self
-            .root_dir
-            .canonicalize()
-            .unwrap_or_else(|_| self.root_dir.clone());
-        if canonical.starts_with(root_canon) {
-            Ok(canonical)
-        } else {
-            Err(AgentError::PathEscape(path.to_string())) // 如 ../../etc/passwd
+        match Self::resolve_under_root(&self.root_dir, path) {
+            Ok(resolved) => Ok(resolved),
+            Err(AgentError::ToolExecutionFailed(_)) => {
+                if let Some(fallback_root) = &self.fallback_root {
+                    Self::resolve_under_root(fallback_root, path)
+                } else {
+                    Err(AgentError::ToolExecutionFailed(format!(
+                        "Path not found: {}",
+                        path
+                    )))
+                }
+            }
+            Err(err) => Err(err),
         }
     }
 
     pub fn read_file(&self, path: &str) -> Result<String, AgentError> {
         let resolved = self.resolve(path)?;
-        std::fs::read_to_string(&resolved).map_err(|e| {
-            AgentError::ToolExecutionFailed(format!("Read failed: {}", e))
-        })
+        std::fs::read_to_string(&resolved)
+            .map_err(|e| AgentError::ToolExecutionFailed(format!("Read failed: {}", e)))
     }
 
     pub fn list_dir(&self, path: &str) -> Result<Vec<String>, AgentError> {
@@ -56,9 +81,9 @@ impl SafeFs {
             self.resolve(path)?
         };
         let mut entries = Vec::new();
-        for e in std::fs::read_dir(&base).map_err(|e| {
-            AgentError::ToolExecutionFailed(format!("List failed: {}", e))
-        })? {
+        for e in std::fs::read_dir(&base)
+            .map_err(|e| AgentError::ToolExecutionFailed(format!("List failed: {}", e)))?
+        {
             let e = e.map_err(|e| AgentError::ToolExecutionFailed(e.to_string()))?;
             let name = e.file_name().to_string_lossy().to_string();
             if !name.starts_with('.') {
@@ -98,13 +123,44 @@ impl Tool for CatTool {
         "Read file contents. Args: {\"path\": \"file path relative to workspace\"}"
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ReadFile])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::StructuredJson)
+            .with_preferred_use_cases(vec![ToolUseCase::LocalWorkspaceInspection])
+            .with_disallowed_use_cases(vec![
+                ToolUseCase::DirectExplanation,
+                ToolUseCase::TimeSensitiveCurrent,
+                ToolUseCase::ExternalGitHubRepo,
+            ])
+            .with_requires_explicit_user_request(true)
+            .with_capability(
+                ToolCapabilityGroup::LocalWorkspace,
+                ToolCapabilitySubgroup::FileRead,
+            )
+            .with_costs(
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+            )
+            .with_preferred_rank(2)
+            .with_critic_mode(ToolCriticMode::Skip)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
         tracing::info!(path = %path, "cat tool execute");
-        self.fs.read_file(path).map_err(|e| e.to_string())
+        let content = self.fs.read_file(path).map_err(|e| e.to_string())?;
+        output::structured(
+            self.name(),
+            format!("Read local file {}", path),
+            true,
+            serde_json::json!({
+                "path": path,
+                "content": content,
+            }),
+        )
     }
 }
 
@@ -131,13 +187,43 @@ impl Tool for LsTool {
         "List directory. Args: {\"path\": \"directory path, default '.'\"}"
     }
 
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::new(ToolScope::LocalWorkspace, vec![ToolIntent::ListDirectory])
+            .with_risk(ToolRisk::Low)
+            .with_output_shape(ToolOutputShape::StructuredJson)
+            .with_preferred_use_cases(vec![ToolUseCase::LocalWorkspaceInspection])
+            .with_disallowed_use_cases(vec![
+                ToolUseCase::DirectExplanation,
+                ToolUseCase::TimeSensitiveCurrent,
+                ToolUseCase::ExternalGitHubRepo,
+            ])
+            .with_requires_explicit_user_request(true)
+            .with_capability(
+                ToolCapabilityGroup::LocalWorkspace,
+                ToolCapabilitySubgroup::DirectoryListing,
+            )
+            .with_costs(
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+                ToolCostClass::Low,
+            )
+            .with_preferred_rank(3)
+            .with_critic_mode(ToolCriticMode::Skip)
+    }
+
     async fn execute(&self, args: Value) -> Result<String, String> {
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
         tracing::info!(path = %path, "ls tool execute");
         let entries = self.fs.list_dir(path).map_err(|e| e.to_string())?;
-        Ok(entries.join("\n"))
+        output::structured(
+            self.name(),
+            format!("Listed local directory {}", path),
+            false,
+            serde_json::json!({
+                "path": path,
+                "entries": entries,
+            }),
+        )
     }
 }

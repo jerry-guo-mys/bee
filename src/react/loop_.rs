@@ -8,6 +8,9 @@ use tokio::sync::broadcast;
 use crate::core::{AgentError, RecoveryAction, RecoveryEngine, TaskScheduler};
 use crate::memory::Message;
 use crate::react::{parse_llm_output, ContextManager, Critic, CriticResult, Planner, ReactEvent};
+use crate::tool_policy::{
+    classify_query, guard_tool_call, rewrite_tool_call, should_use_long_term_memory,
+};
 use crate::tools::ToolExecutor;
 
 /// 单次对话内最大 ReAct 步数，防止死循环
@@ -177,10 +180,20 @@ pub async fn react_loop_v2(
     let allowed_tools = session.allowed_tools;
 
     react_loop_impl(
-        planner, executor, recovery, context, user_input,
-        stream_tx, event_tx, cancel_token, critic, task_scheduler,
-        system_prompt_override, allowed_tools,
-    ).await
+        planner,
+        executor,
+        recovery,
+        context,
+        user_input,
+        stream_tx,
+        event_tx,
+        cancel_token,
+        critic,
+        task_scheduler,
+        system_prompt_override,
+        allowed_tools,
+    )
+    .await
 }
 
 /// 执行 ReAct 循环（兼容版本，保留原有 12 参数签名）
@@ -203,10 +216,20 @@ pub async fn react_loop(
     allowed_tools: Option<&[String]>,
 ) -> Result<ReactResult, AgentError> {
     react_loop_impl(
-        planner, executor, recovery, context, user_input,
-        stream_tx, event_tx, cancel_token, critic, task_scheduler,
-        system_prompt_override, allowed_tools,
-    ).await
+        planner,
+        executor,
+        recovery,
+        context,
+        user_input,
+        stream_tx,
+        event_tx,
+        cancel_token,
+        critic,
+        task_scheduler,
+        system_prompt_override,
+        allowed_tools,
+    )
+    .await
 }
 
 /// ReAct 循环内部实现
@@ -238,13 +261,26 @@ async fn react_loop_impl(
     let (init_prompt, init_completion, _) = planner.token_usage();
 
     let mut step = 0;
+    let mut critic_retry_budget = critic.map(|c| c.max_self_corrections()).unwrap_or(0);
     let mut last_llm_output = String::new();
+    let query_kind_label = format!("{:?}", classify_query(user_input));
 
     loop {
-        send_event(&event_tx, ReactEvent::StepUpdate { step, max_steps: MAX_REACT_STEPS });
+        send_event(
+            &event_tx,
+            ReactEvent::StepUpdate {
+                step,
+                max_steps: MAX_REACT_STEPS,
+            },
+        );
 
         if cancel_token.is_cancelled() {
-            send_event(&event_tx, ReactEvent::Error { text: "Cancelled by user".to_string() });
+            send_event(
+                &event_tx,
+                ReactEvent::Error {
+                    text: "Cancelled by user".to_string(),
+                },
+            );
             return Err(AgentError::Cancelled);
         }
 
@@ -261,16 +297,23 @@ async fn react_loop_impl(
         // 若当前对话条数过多，先压缩：摘要写入长期记忆并替换为一条摘要消息
         if context.messages().len() > COMPACT_THRESHOLD {
             if let Err(e) = compact_context(planner, context).await {
-                send_event(&event_tx, ReactEvent::Error {
-                    text: format!("Compaction failed: {}", e),
-                });
+                send_event(
+                    &event_tx,
+                    ReactEvent::Error {
+                        text: format!("Compaction failed: {}", e),
+                    },
+                );
                 // 不中止，继续用当前消息规划
             }
         }
 
         let messages = context.to_llm_messages();
         let working_section = context.working_memory_section();
-        let long_term_block = context.long_term_section(user_input);
+        let long_term_block = if should_use_long_term_memory(user_input) {
+            context.long_term_section(user_input)
+        } else {
+            String::new()
+        };
         if !long_term_block.is_empty() {
             let preview: String = long_term_block.chars().take(MEMORY_PREVIEW_CHARS).collect();
             let preview = if long_term_block.len() > MEMORY_PREVIEW_CHARS {
@@ -295,58 +338,89 @@ async fn react_loop_impl(
             preferences_block
         );
         send_event(&event_tx, ReactEvent::Thinking);
-        let output = match planner.plan_with_system(&messages, &system).await {
+        let output = match tokio::select! {
+            _ = cancel_token.cancelled() => Err(AgentError::Cancelled),
+            result = planner.plan_with_system(&messages, &system) => result,
+        } {
             Ok(o) => o,
             Err(e) => {
                 let mut hist = context.conversation.messages().to_vec();
                 let action = recovery.handle(&e, &mut hist);
                 match action {
                     RecoveryAction::RetryWithPrompt(prompt) => {
-                        send_event(&event_tx, ReactEvent::Recovery {
-                            action: "RetryWithPrompt".to_string(),
-                            detail: prompt.clone(),
-                        });
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Recovery {
+                                action: "RetryWithPrompt".to_string(),
+                                detail: prompt.clone(),
+                            },
+                        );
                         context.push_message(Message::user(prompt));
                         step += 1;
                         continue;
                     }
                     RecoveryAction::AskUser(msg) => {
-                        send_event(&event_tx, ReactEvent::Recovery {
-                            action: "AskUser".to_string(),
-                            detail: msg.clone(),
-                        });
-                        send_event(&event_tx, ReactEvent::Error { text: e.to_string() });
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Recovery {
+                                action: "AskUser".to_string(),
+                                detail: msg.clone(),
+                            },
+                        );
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Error {
+                                text: e.to_string(),
+                            },
+                        );
                         return Err(e);
                     }
                     RecoveryAction::SummarizeAndPrune => {
-                        send_event(&event_tx, ReactEvent::Recovery {
-                            action: "SummarizeAndPrune".to_string(),
-                            detail: "Compacting context and retrying".to_string(),
-                        });
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Recovery {
+                                action: "SummarizeAndPrune".to_string(),
+                                detail: "Compacting context and retrying".to_string(),
+                            },
+                        );
                         if let Err(compact_err) = compact_context(planner, context).await {
-                            send_event(&event_tx, ReactEvent::Error {
-                                text: format!("Compaction failed: {}", compact_err),
-                            });
+                            send_event(
+                                &event_tx,
+                                ReactEvent::Error {
+                                    text: format!("Compaction failed: {}", compact_err),
+                                },
+                            );
                             return Err(compact_err);
                         }
                         step += 1;
                         continue;
                     }
                     RecoveryAction::DowngradeModel => {
-                        send_event(&event_tx, ReactEvent::Recovery {
-                            action: "DowngradeModel".to_string(),
-                            detail: "建议切换至轻量模型".to_string(),
-                        });
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Recovery {
+                                action: "DowngradeModel".to_string(),
+                                detail: "建议切换至轻量模型".to_string(),
+                            },
+                        );
                         return Err(AgentError::SuggestDowngradeModel(
                             "LLM 调用失败，建议切换至轻量模型或检查网络与 API Key。".to_string(),
                         ));
                     }
                     _ => {
-                        send_event(&event_tx, ReactEvent::Recovery {
-                            action: "Abort".to_string(),
-                            detail: e.to_string(),
-                        });
-                        send_event(&event_tx, ReactEvent::Error { text: e.to_string() });
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Recovery {
+                                action: "Abort".to_string(),
+                                detail: e.to_string(),
+                            },
+                        );
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Error {
+                                text: e.to_string(),
+                            },
+                        );
                         return Err(e);
                     }
                 }
@@ -361,7 +435,12 @@ async fn react_loop_impl(
         } else {
             thinking_preview
         };
-        send_event(&event_tx, ReactEvent::ThinkingContent { text: thinking_preview });
+        send_event(
+            &event_tx,
+            ReactEvent::ThinkingContent {
+                text: thinking_preview,
+            },
+        );
 
         if let Some(tx) = stream_tx {
             let _ = tx.send(output.clone());
@@ -371,9 +450,12 @@ async fn react_loop_impl(
             Ok(crate::react::planner::PlannerOutput::Response(resp)) => {
                 let chars: Vec<char> = resp.chars().collect();
                 for chunk in chars.chunks(CHUNK_CHARS) {
-                    send_event(&event_tx, ReactEvent::MessageChunk {
-                        text: chunk.iter().collect(),
-                    });
+                    send_event(
+                        &event_tx,
+                        ReactEvent::MessageChunk {
+                            text: chunk.iter().collect(),
+                        },
+                    );
                 }
                 send_event(&event_tx, ReactEvent::MessageDone);
                 context.push_message(Message::assistant(resp.clone()));
@@ -383,19 +465,28 @@ async fn react_loop_impl(
                 } else {
                     cons_preview
                 };
-                send_event(&event_tx, ReactEvent::MemoryConsolidation { preview: cons_preview });
+                send_event(
+                    &event_tx,
+                    ReactEvent::MemoryConsolidation {
+                        preview: cons_preview,
+                    },
+                );
                 context.push_to_long_term(&resp); // 最终回复写入长期记忆
 
                 // 发送 token 统计
                 let (cur_prompt, cur_completion, cur_total) = planner.token_usage();
-                send_event(&event_tx, ReactEvent::TokenUsage {
-                    prompt_tokens: cur_prompt.saturating_sub(init_prompt),
-                    completion_tokens: cur_completion.saturating_sub(init_completion),
-                    total_tokens: cur_prompt.saturating_sub(init_prompt) + cur_completion.saturating_sub(init_completion),
-                    cumulative_prompt: cur_prompt,
-                    cumulative_completion: cur_completion,
-                    cumulative_total: cur_total,
-                });
+                send_event(
+                    &event_tx,
+                    ReactEvent::TokenUsage {
+                        prompt_tokens: cur_prompt.saturating_sub(init_prompt),
+                        completion_tokens: cur_completion.saturating_sub(init_completion),
+                        total_tokens: cur_prompt.saturating_sub(init_prompt)
+                            + cur_completion.saturating_sub(init_completion),
+                        cumulative_prompt: cur_prompt,
+                        cumulative_completion: cur_completion,
+                        cumulative_total: cur_total,
+                    },
+                );
 
                 // 策略沉淀：将本轮目标与使用的工具写入长期记忆，供后续检索（EVOLUTION §3.5）
                 let tools_used = context.working.tool_names_used();
@@ -407,28 +498,105 @@ async fn react_loop_impl(
                 });
             }
             Ok(crate::react::planner::PlannerOutput::ToolCall(tc)) => {
-                send_event(&event_tx, ReactEvent::ToolCall {
-                    tool: tc.tool.clone(),
-                    args: tc.args.clone(),
-                });
+                let rewritten = rewrite_tool_call(user_input, &tc.tool, &tc.args);
+                let mut tool_name = rewritten.tool_name.clone();
+                let mut tool_args = rewritten.args.clone();
+                let browser_available = executor.tool_names().iter().any(|n| n == "browser");
+                let search_available = executor.tool_names().iter().any(|n| n == "search");
+                if tool_name == "browser" && !browser_available && search_available {
+                    if let Some(url) = tool_args.get("url").and_then(|v| v.as_str()) {
+                        tracing::info!(
+                            requested_tool = %tc.tool,
+                            fallback_tool = "search",
+                            url = %url,
+                            "browser unavailable; falling back to search"
+                        );
+                        tool_name = "search".to_string();
+                        tool_args = serde_json::json!({ "url": url });
+                    }
+                }
+                send_event(
+                    &event_tx,
+                    ReactEvent::ToolCall {
+                        tool: tool_name.clone(),
+                        args: tool_args.clone(),
+                    },
+                );
                 let valid_names: &[String] = match allowed_tools {
                     Some(a) if !a.is_empty() => a,
                     _ => &[], // 空 slice 表示用 executor 全部工具
                 };
+                let executor_names = executor.tool_names();
+                let exists_in_executor = executor_names.iter().any(|n| n == &tool_name);
                 let is_allowed = if valid_names.is_empty() {
-                    executor.tool_names().iter().any(|n| n == &tc.tool)
+                    exists_in_executor
                 } else {
-                    valid_names.iter().any(|n| n == &tc.tool)
+                    valid_names.iter().any(|n| n == &tool_name)
                 };
                 if !is_allowed {
                     let ref_names: Vec<String> = if valid_names.is_empty() {
-                        executor.tool_names()
+                        executor_names.clone()
                     } else {
                         valid_names.to_vec()
                     };
-                    send_event(&event_tx, ReactEvent::Error { text: format!("工具 {} 不在该智能体技能范围内", tc.tool) });
-                    context.append_hallucination_lesson(&tc.tool, &ref_names);
-                    return Err(AgentError::HallucinatedTool(tc.tool.clone()));
+                    if exists_in_executor && !valid_names.is_empty() {
+                        let detail = format!(
+                            "Tool {} is not allowed in this conversation. Allowed tools: {}.",
+                            tool_name,
+                            ref_names.join(", ")
+                        );
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Recovery {
+                                action: "AllowedTools".to_string(),
+                                detail: detail.clone(),
+                            },
+                        );
+                        context.push_message(Message::user(detail));
+                        step += 1;
+                        continue;
+                    }
+                    send_event(
+                        &event_tx,
+                        ReactEvent::Error {
+                            text: format!("工具 {} 不在该智能体技能范围内", tool_name),
+                        },
+                    );
+                    context.append_hallucination_lesson(&tool_name, &ref_names);
+                    return Err(AgentError::HallucinatedTool(tool_name));
+                }
+                let tool_metadata = executor.tool_metadata(&tool_name);
+                if let Err(policy_error) =
+                    guard_tool_call(user_input, &tool_name, tool_metadata.as_ref(), &tool_args)
+                {
+                    let metrics = crate::observability::Metrics::global();
+                    metrics.tools.record_policy_block();
+                    metrics.behavior.record_tool_misuse();
+                    tracing::warn!(
+                        requested_tool = %tc.tool,
+                        effective_tool = %tool_name,
+                        detail = %policy_error,
+                        "tool policy blocked tool call"
+                    );
+                    send_event(
+                        &event_tx,
+                        ReactEvent::Recovery {
+                            action: "ToolPolicy".to_string(),
+                            detail: policy_error.clone(),
+                        },
+                    );
+                    context.push_message(Message::user(format!("Tool policy: {}", policy_error)));
+                    step += 1;
+                    continue;
+                }
+                if let Some(original_tool) = rewritten.rewritten_from.as_deref() {
+                    let metrics = crate::observability::Metrics::global();
+                    metrics.tools.record_policy_rewrite();
+                    tracing::info!(
+                        requested_tool = %original_tool,
+                        rewritten_tool = %tool_name,
+                        "tool policy rewrote tool call"
+                    );
                 }
                 // 工具并发限制：从 TaskScheduler 获取许可后再执行
                 let _permit = if let Some(sched) = task_scheduler {
@@ -436,38 +604,54 @@ async fn react_loop_impl(
                 } else {
                     None
                 };
-                let result = executor.execute(&tc.tool, tc.args).await;
+                let result = executor
+                    .execute_cancellable(&tool_name, tool_args, cancel_token.child_token())
+                    .await;
                 let observation = match result {
                     Ok(r) => {
                         if context.record_tool_success {
-                            context.append_procedural_record(&tc.tool, true, "ok");
+                            context.append_procedural_record(&tool_name, true, "ok");
                         }
                         r
                     }
                     Err(e) => {
-                        let failure_msg = format!("{}: {}", tc.tool, e);
+                        let failure_msg = format!("{}: {}", tool_name, e);
                         context.working.add_failure(failure_msg.clone());
-                        context.append_procedural_record(&tc.tool, false, &e.to_string());
-                        send_event(&event_tx, ReactEvent::ToolFailure {
-                            tool: tc.tool.clone(),
-                            reason: e.to_string(),
-                        });
+                        context.append_procedural_record(&tool_name, false, &e.to_string());
+                        send_event(
+                            &event_tx,
+                            ReactEvent::ToolFailure {
+                                tool: tool_name.clone(),
+                                reason: e.to_string(),
+                            },
+                        );
                         format!("Error: {}", e)
                     }
                 };
-                let preview: String = observation.chars().take(OBSERVATION_PREVIEW_CHARS).collect();
+                let preview: String = observation
+                    .chars()
+                    .take(OBSERVATION_PREVIEW_CHARS)
+                    .collect();
                 if observation.len() > OBSERVATION_PREVIEW_CHARS {
-                    send_event(&event_tx, ReactEvent::Observation {
-                        tool: tc.tool.clone(),
-                        preview: preview + "...",
-                    });
+                    send_event(
+                        &event_tx,
+                        ReactEvent::Observation {
+                            tool: tool_name.clone(),
+                            preview: preview + "...",
+                        },
+                    );
                 } else {
-                    send_event(&event_tx, ReactEvent::Observation {
-                        tool: tc.tool.clone(),
-                        preview,
-                    });
+                    send_event(
+                        &event_tx,
+                        ReactEvent::Observation {
+                            tool: tool_name.clone(),
+                            preview,
+                        },
+                    );
                 }
-                context.working.add_attempt(format!("{} -> {}", tc.tool, observation));
+                context
+                    .working
+                    .add_attempt(format!("{} -> {}", tool_name, observation));
                 // 可选 Critic：校验工具结果是否符合目标；若 observation 已明确表示工具失败，则跳过 Critic，避免重复的“修正建议”
                 let obs_upper = observation.to_uppercase();
                 let is_tool_failure = obs_upper.contains("FAILED")
@@ -476,30 +660,78 @@ async fn react_loop_impl(
                     || obs_upper.contains("TIMEOUT");
                 if !is_tool_failure {
                     if let Some(c) = critic {
-                        if let Ok(CriticResult::Correction(suggestion)) =
-                            c.evaluate(user_input, &tc.tool, &observation).await
-                        {
-                            send_event(&event_tx, ReactEvent::Recovery {
-                                action: "Critic".to_string(),
-                                detail: suggestion.clone(),
-                            });
-                            context.append_critic_lesson(&suggestion);
-                            context.push_message(Message::user(format!(
-                                "Critic 建议：{}",
-                                suggestion
-                            )));
+                        if c.should_evaluate_with_metadata(
+                            &tool_name,
+                            tool_metadata.as_ref(),
+                            &observation,
+                        ) {
+                            match c.evaluate(user_input, &tool_name, &observation).await {
+                                Ok(CriticResult::Approved { score }) => {
+                                    crate::observability::Metrics::global()
+                                        .tools
+                                        .record_critic_score(
+                                            score,
+                                            &query_kind_label,
+                                            &tool_name,
+                                            c.score_threshold(),
+                                        );
+                                    tracing::debug!(tool = %tool_name, critic_score = score, "critic approved observation");
+                                }
+                                Ok(CriticResult::Review(review)) => {
+                                    let metrics = crate::observability::Metrics::global();
+                                    metrics.tools.record_critic_score(
+                                        review.score,
+                                        &query_kind_label,
+                                        &tool_name,
+                                        c.score_threshold(),
+                                    );
+                                    metrics.tools.record_route_drift();
+                                    if review.score < c.score_threshold()
+                                        && review.retry_recommended
+                                        && critic_retry_budget > 0
+                                    {
+                                        critic_retry_budget -= 1;
+                                        let suggestion = if review.reason.trim().is_empty() {
+                                            "Critic requested a more aligned next step".to_string()
+                                        } else {
+                                            review.reason.clone()
+                                        };
+                                        send_event(
+                                            &event_tx,
+                                            ReactEvent::Recovery {
+                                                action: "Critic".to_string(),
+                                                detail: suggestion.clone(),
+                                            },
+                                        );
+                                        context.append_critic_lesson(&suggestion);
+                                        context.push_message(Message::user(format!(
+                                            "Critic 建议：{}",
+                                            suggestion
+                                        )));
+                                    }
+                                }
+                                Ok(CriticResult::Skipped) => {}
+                                Err(err) => {
+                                    tracing::warn!(tool = %tool_name, error = %err, "critic evaluation failed");
+                                }
+                            }
                         }
                     }
                 }
                 // 将工具调用与结果写回对话，供下一轮 Plan 使用
                 context.push_message(Message::assistant(format!(
                     "Tool call: {} | Result: {}",
-                    tc.tool, observation
+                    tool_name, observation
                 )));
                 context.push_message(Message::user(format!(
                     "Observation from {}: {}",
-                    tc.tool, observation
+                    tool_name, observation
                 )));
+                if tool_name == "github_repo_inspect" {
+                    context.push_message(Message::user(
+                        "If the github_repo_inspect result includes fields such as repo_summary, detected_stack, top_level_directories, key_files_found, or file_snippets, use that information to answer the user directly. Do not inspect the local workspace with ls/cat/code_read unless the user explicitly asks about local files or the GitHub result is clearly missing a specific required file.".to_string(),
+                    ));
+                }
             }
             Err(e) => {
                 // 解析失败（如 JSON 错误），交给 Recovery 决定是否 RetryWithPrompt
@@ -507,18 +739,29 @@ async fn react_loop_impl(
                 let action = recovery.handle(&e, &mut hist);
                 match action {
                     RecoveryAction::RetryWithPrompt(prompt) => {
-                        send_event(&event_tx, ReactEvent::Recovery {
-                            action: "RetryWithPrompt".to_string(),
-                            detail: prompt.clone(),
-                        });
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Recovery {
+                                action: "RetryWithPrompt".to_string(),
+                                detail: prompt.clone(),
+                            },
+                        );
                         context.push_message(Message::user(prompt));
                     }
                     _ => {
-                        send_event(&event_tx, ReactEvent::Recovery {
-                            action: "Abort".to_string(),
-                            detail: e.to_string(),
-                        });
-                        send_event(&event_tx, ReactEvent::Error { text: e.to_string() });
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Recovery {
+                                action: "Abort".to_string(),
+                                detail: e.to_string(),
+                            },
+                        );
+                        send_event(
+                            &event_tx,
+                            ReactEvent::Error {
+                                text: e.to_string(),
+                            },
+                        );
                         return Err(e);
                     }
                 }

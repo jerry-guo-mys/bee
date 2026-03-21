@@ -3,9 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::tools::Tool;
 use crate::llm::LlmClient;
 use crate::memory::Message;
+use crate::tools::Tool;
 
 pub struct ReportGeneratorTool {
     llm: Arc<dyn LlmClient>,
@@ -108,7 +108,10 @@ Report:"#,
         };
 
         let messages = vec![Message::user(&prompt)];
-        let response = self.llm.complete(&messages).await
+        let response = self
+            .llm
+            .complete(&messages)
+            .await
             .map_err(|e| format!("LLM error: {}", e))?;
 
         Ok(response)
