@@ -136,9 +136,7 @@ fn source_kind_label(kind: SourceKind) -> &'static str {
 }
 
 fn is_recoverable_fetch_error(error: &str) -> bool {
-    error.starts_with("HTTP 404")
-        || error.starts_with("HTTP 410")
-        || error.starts_with("HTTP 451")
+    error.starts_with("HTTP 404") || error.starts_with("HTTP 410") || error.starts_with("HTTP 451")
 }
 
 fn suggested_next_steps(kind: SourceKind, url: &str) -> Vec<String> {
@@ -146,7 +144,10 @@ fn suggested_next_steps(kind: SourceKind, url: &str) -> Vec<String> {
         SourceKind::ArticlePage | SourceKind::DynamicWebPage => vec![
             "Try the site homepage or category page instead of the dead deep link.".to_string(),
             "Search by article title, topic, or site name to find the updated page.".to_string(),
-            format!("Verify whether the article at {} has moved or been removed.", url),
+            format!(
+                "Verify whether the article at {} has moved or been removed.",
+                url
+            ),
         ],
         SourceKind::SocialContent => vec![
             "Try a readable mirror or another source that quotes the same post.".to_string(),

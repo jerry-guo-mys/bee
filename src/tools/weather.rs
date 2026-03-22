@@ -68,8 +68,7 @@ impl WeatherTool {
                 c.is_whitespace()
                     || matches!(
                         c,
-                        '？'
-                            | '?'
+                        '？' | '?'
                             | '。'
                             | '.'
                             | '！'
@@ -209,7 +208,10 @@ mod tests {
     #[test]
     fn test_sanitize_location_trims_punctuation() {
         assert_eq!(WeatherTool::sanitize_location("吉隆坡？"), "吉隆坡");
-        assert_eq!(WeatherTool::sanitize_location("  Kuala Lumpur?! "), "Kuala Lumpur");
+        assert_eq!(
+            WeatherTool::sanitize_location("  Kuala Lumpur?! "),
+            "Kuala Lumpur"
+        );
     }
 
     #[test]
