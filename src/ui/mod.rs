@@ -16,4 +16,4 @@ pub mod widgets;
 pub use app::run_app;
 pub use event::EventHandler;
 pub use render::draw;
-pub use widgets::{Renderable, ConversationView, InputArea, InputState, StatusIndicator};
+pub use widgets::{ConversationView, InputArea, InputState, Renderable, StatusIndicator};

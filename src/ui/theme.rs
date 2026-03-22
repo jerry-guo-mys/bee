@@ -39,70 +39,23 @@ pub fn muted_line(width: u16) -> String {
 
 pub fn phase_badge(phase: &AgentPhase) -> (&'static str, Style) {
     match phase {
-        AgentPhase::Idle => (
-            "idle",
-            Style::default()
-                .fg(UI_TEXT)
-                .bg(PANEL_BG_SOFT),
-        ),
-        AgentPhase::Thinking => (
-            "think",
-            Style::default()
-                .fg(UI_TEXT)
-                .bg(PANEL_BG_SOFT),
-        ),
-        AgentPhase::Streaming => (
-            "stream",
-            Style::default()
-                .fg(UI_TEXT)
-                .bg(PANEL_BG_SOFT),
-        ),
-        AgentPhase::ToolExecuting => (
-            "tool",
-            Style::default()
-                .fg(UI_TEXT)
-                .bg(PANEL_BG_SOFT),
-        ),
-        AgentPhase::Responding => (
-            "finalize",
-            Style::default()
-                .fg(UI_TEXT)
-                .bg(PANEL_BG_SOFT),
-        ),
-        AgentPhase::Error => (
-            "error",
-            Style::default()
-                .fg(UI_TEXT)
-                .bg(PANEL_BG_SOFT),
-        ),
+        AgentPhase::Idle => ("idle", Style::default().fg(UI_TEXT).bg(PANEL_BG_SOFT)),
+        AgentPhase::Thinking => ("think", Style::default().fg(UI_TEXT).bg(PANEL_BG_SOFT)),
+        AgentPhase::Streaming => ("stream", Style::default().fg(UI_TEXT).bg(PANEL_BG_SOFT)),
+        AgentPhase::ToolExecuting => ("tool", Style::default().fg(UI_TEXT).bg(PANEL_BG_SOFT)),
+        AgentPhase::Responding => ("finalize", Style::default().fg(UI_TEXT).bg(PANEL_BG_SOFT)),
+        AgentPhase::Error => ("error", Style::default().fg(UI_TEXT).bg(PANEL_BG_SOFT)),
     }
 }
 
 pub fn role_badge(role: &Role) -> (&'static str, Style) {
     match role {
-        Role::User => (
-            " user ",
-            Style::default()
-                .fg(UI_TEXT)
-                .bg(PANEL_BG_SOFT),
-        ),
+        Role::User => (" user ", Style::default().fg(UI_TEXT).bg(PANEL_BG_SOFT)),
         Role::Assistant => (
             " assistant ",
-            Style::default()
-                .fg(UI_TEXT)
-                .bg(PANEL_BG_SOFT),
+            Style::default().fg(UI_TEXT).bg(PANEL_BG_SOFT),
         ),
-        Role::System => (
-            " system ",
-            Style::default()
-                .fg(UI_TEXT)
-                .bg(PANEL_BG_SOFT),
-        ),
-        Role::Tool => (
-            " tool ",
-            Style::default()
-                .fg(UI_TEXT)
-                .bg(PANEL_BG_SOFT),
-        ),
+        Role::System => (" system ", Style::default().fg(UI_TEXT).bg(PANEL_BG_SOFT)),
+        Role::Tool => (" tool ", Style::default().fg(UI_TEXT).bg(PANEL_BG_SOFT)),
     }
 }

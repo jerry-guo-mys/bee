@@ -1,6 +1,8 @@
 //! 事件处理
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use std::thread;
+
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, MouseEvent};
 use tokio::sync::mpsc;
 
 use crate::core::Command;
@@ -10,28 +12,44 @@ use crate::core::Command;
 pub enum AppEvent {
     Command(Command),
     Key(KeyEvent),
-    Tick,
+    Mouse(MouseEvent),
 }
 
 /// 事件处理器
 pub struct EventHandler {
     cmd_tx: mpsc::UnboundedSender<Command>,
+    event_rx: mpsc::UnboundedReceiver<AppEvent>,
 }
 
 impl EventHandler {
     pub fn new(cmd_tx: mpsc::UnboundedSender<Command>) -> Self {
-        Self { cmd_tx }
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        thread::spawn(move || loop {
+            match event::read() {
+                Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
+                    if event_tx.send(AppEvent::Key(key)).is_err() {
+                        break;
+                    }
+                }
+                Ok(Event::Mouse(mouse)) => {
+                    if event_tx.send(AppEvent::Mouse(mouse)).is_err() {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        });
+
+        Self { cmd_tx, event_rx }
     }
 
-    pub fn poll(&self) -> anyhow::Result<Option<AppEvent>> {
-        if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    return Ok(Some(self.handle_key(key)));
-                }
-            }
-        }
-        Ok(None)
+    pub async fn next_event(&mut self) -> Option<AppEvent> {
+        let event = self.event_rx.recv().await?;
+        Some(match event {
+            AppEvent::Key(key) => self.handle_key(key),
+            other => other,
+        })
     }
 
     fn handle_key(&self, key: KeyEvent) -> AppEvent {

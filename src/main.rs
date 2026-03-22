@@ -12,11 +12,7 @@ fn init_logging() -> WorkerGuard {
 
     tracing_subscriber::registry()
         .with(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
-        .with(
-            fmt::layer()
-                .with_ansi(false)
-                .with_writer(non_blocking),
-        )
+        .with(fmt::layer().with_ansi(false).with_writer(non_blocking))
         .init();
 
     guard
@@ -29,10 +25,10 @@ async fn main() -> anyhow::Result<()> {
     let _ = std::fs::create_dir_all("workspace");
     let _ = std::fs::create_dir_all("config/prompts");
 
-    let (cmd_tx, state_rx, stream_rx) =
+    let (cmd_tx, state_rx, stream_rx, event_rx) =
         create_agent(None).await.context("Failed to create agent")?;
 
-    run_app(state_rx, stream_rx, cmd_tx)
+    run_app(state_rx, stream_rx, event_rx, cmd_tx)
         .await
         .context("App run failed")?;
 

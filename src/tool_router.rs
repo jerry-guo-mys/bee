@@ -54,7 +54,9 @@ fn clean_location_text(text: &str) -> String {
         .replace("推荐", "")
         .to_string();
 
-    for marker in ["？", "?", "，", ",", "。", ".", "；", ";", "\n", "给出", "请", "并且", "并", "顺便"] {
+    for marker in [
+        "？", "?", "，", ",", "。", ".", "；", ";", "\n", "给出", "请", "并且", "并", "顺便",
+    ] {
         if let Some(idx) = cleaned.find(marker) {
             cleaned.truncate(idx);
             break;
@@ -67,8 +69,7 @@ fn clean_location_text(text: &str) -> String {
             c.is_whitespace()
                 || matches!(
                     c,
-                    '？'
-                        | '?'
+                    '？' | '?'
                         | '。'
                         | '.'
                         | '！'
@@ -291,7 +292,11 @@ fn render_direct_response(tool: &str, raw_output: &str) -> String {
             }
             let location = data.get("location").and_then(Value::as_str).unwrap_or("");
             let day = data.get("day").and_then(Value::as_str).unwrap_or("today");
-            let day_label = if day == "tomorrow" { "明天" } else { "今天" };
+            let day_label = if day == "tomorrow" {
+                "明天"
+            } else {
+                "今天"
+            };
             let desc = data
                 .get("current_condition")
                 .and_then(|value| value.get("weatherDesc"))

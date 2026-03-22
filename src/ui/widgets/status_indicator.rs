@@ -89,9 +89,7 @@ impl Renderable for StatusIndicator {
         let mut primary = vec![
             Span::styled(
                 format!(" {} ", self.spinner_frame()),
-                Style::default()
-                    .fg(theme::UI_TEXT)
-                    .bg(theme::PANEL_BG_SOFT),
+                Style::default().fg(theme::UI_TEXT).bg(theme::PANEL_BG_SOFT),
             ),
             Span::raw(" "),
             Span::styled(&self.header, Style::default().fg(theme::UI_TEXT)),

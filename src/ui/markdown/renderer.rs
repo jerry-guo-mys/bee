@@ -3,7 +3,7 @@
 //! 使用 pulldown-cmark 解析 Markdown，渲染为 Ratatui Line
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::ui::theme;
@@ -40,6 +40,10 @@ impl MarkdownRenderer {
         self.rendered_lines.clone()
     }
 
+    pub fn set_width(&mut self, width: usize) {
+        self.width = width.max(20);
+    }
+
     fn current_style(&self) -> Style {
         self.style_stack.last().copied().unwrap_or_default()
     }
@@ -61,18 +65,23 @@ impl MarkdownRenderer {
             Event::End(tag) => self.handle_end_tag(tag),
             Event::Text(text) => self.current_line.push_str(&text),
             Event::Code(code) => {
-                let style = Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC);
+                let style = Style::default()
+                    .fg(theme::ACCENT_CYAN)
+                    .bg(theme::PANEL_BG_SOFT);
                 self.push_style(style);
                 self.current_line.push_str(&code);
                 self.pop_style();
             }
-            Event::Html(_) | Event::FootnoteReference(_) | Event::InlineHtml(_) | Event::TaskListMarker(_) => {}
+            Event::Html(_)
+            | Event::FootnoteReference(_)
+            | Event::InlineHtml(_)
+            | Event::TaskListMarker(_) => {}
             Event::SoftBreak | Event::HardBreak => self.flush_line(),
             Event::Rule => {
                 self.flush_line();
                 self.rendered_lines.push(Line::from(Span::styled(
                     "─".repeat(self.width.min(80)),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::TEXT_SUBTLE),
                 )));
             }
         }
@@ -83,14 +92,22 @@ impl MarkdownRenderer {
             Tag::Paragraph => {}
             Tag::Heading { level, .. } => {
                 let style = match level {
-                    HeadingLevel::H1 => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                    HeadingLevel::H2 => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-                    _ => Style::default().add_modifier(Modifier::BOLD),
+                    HeadingLevel::H1 => Style::default()
+                        .fg(theme::TEXT_CREAM)
+                        .add_modifier(Modifier::BOLD),
+                    HeadingLevel::H2 => Style::default()
+                        .fg(theme::TEXT_PRIMARY)
+                        .add_modifier(Modifier::BOLD),
+                    _ => Style::default()
+                        .fg(theme::TEXT_SOFT)
+                        .add_modifier(Modifier::BOLD),
                 };
                 self.push_style(style);
             }
             Tag::BlockQuote => {
-                let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC);
+                let style = Style::default()
+                    .fg(theme::TEXT_SOFT)
+                    .add_modifier(Modifier::ITALIC);
                 self.push_style(style);
                 self.current_line.push_str("│ ");
             }
@@ -98,16 +115,24 @@ impl MarkdownRenderer {
                 if let CodeBlockKind::Fenced(lang) = kind {
                     self.code_block_lang = Some(lang.to_string());
                 }
-                let style = Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC);
+                let style = Style::default()
+                    .fg(theme::TEXT_SOFT)
+                    .bg(theme::PANEL_BG_SOFT);
                 self.push_style(style);
             }
             Tag::Emphasis => self.push_style(Style::default().add_modifier(Modifier::ITALIC)),
             Tag::Strong => self.push_style(Style::default().add_modifier(Modifier::BOLD)),
-            Tag::Strikethrough => self.push_style(Style::default().add_modifier(Modifier::CROSSED_OUT)),
-            Tag::Link { .. } => {
-                self.push_style(Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED));
+            Tag::Strikethrough => {
+                self.push_style(Style::default().add_modifier(Modifier::CROSSED_OUT))
             }
-            Tag::Image { .. } => self.push_style(Style::default().fg(Color::Magenta)),
+            Tag::Link { .. } => {
+                self.push_style(
+                    Style::default()
+                        .fg(theme::ACCENT_BLUE)
+                        .add_modifier(Modifier::UNDERLINED),
+                );
+            }
+            Tag::Image { .. } => self.push_style(Style::default().fg(theme::ACCENT_PURPLE)),
             Tag::List(_) => {}
             Tag::Item => self.current_line.push_str("  • "),
             Tag::Table(_) | Tag::TableHead | Tag::TableRow | Tag::TableCell => {}

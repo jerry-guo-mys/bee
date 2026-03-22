@@ -58,6 +58,31 @@ pub struct CommandPopup {
     max_display: usize,
 }
 
+fn fuzzy_score(query: &str, candidate: &str) -> Option<i32> {
+    if query.is_empty() {
+        return Some(0);
+    }
+
+    let query = query.to_lowercase();
+    let candidate = candidate.to_lowercase();
+    let mut score = 0i32;
+    let mut search_from = 0usize;
+
+    for ch in query.chars() {
+        let found = candidate[search_from..].find(ch)?;
+        score += if found == 0 { 4 } else { 1 };
+        search_from += found + 1;
+    }
+
+    if candidate.starts_with(&query) {
+        score += 8;
+    } else if candidate.contains(&query) {
+        score += 4;
+    }
+
+    Some(score - candidate.len() as i32 / 8)
+}
+
 impl CommandPopup {
     pub fn new() -> Self {
         Self {
@@ -72,12 +97,13 @@ impl CommandPopup {
         self.filtered.clear();
         self.selected = 0;
 
-        let prefix_lower = prefix.to_lowercase();
-        for (i, cmd) in AVAILABLE_COMMANDS.iter().enumerate() {
-            if cmd.name.to_lowercase().starts_with(&prefix_lower) {
-                self.filtered.push(i);
-            }
-        }
+        let mut scored: Vec<(usize, i32)> = AVAILABLE_COMMANDS
+            .iter()
+            .enumerate()
+            .filter_map(|(i, cmd)| fuzzy_score(prefix, cmd.name).map(|score| (i, score)))
+            .collect();
+        scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        self.filtered = scored.into_iter().map(|(i, _)| i).collect();
 
         self.visible = !self.filtered.is_empty();
     }
@@ -139,8 +165,7 @@ impl Renderable for CommandPopup {
         for (i, &cmd_idx) in self.filtered.iter().take(self.max_display).enumerate() {
             let cmd = &AVAILABLE_COMMANDS[cmd_idx];
             let style = if i == self.selected {
-                Style::default()
-                    .fg(theme::UI_TEXT)
+                Style::default().fg(theme::UI_TEXT)
             } else {
                 Style::default().fg(theme::UI_TEXT_DIM)
             };
