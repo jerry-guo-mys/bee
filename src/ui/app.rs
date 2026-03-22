@@ -411,7 +411,7 @@ pub async fn run_app(
     mut state_rx: watch::Receiver<UiState>,
     mut stream_rx: tokio::sync::broadcast::Receiver<String>,
     mut event_rx: mpsc::UnboundedReceiver<ReactEvent>,
-    cmd_tx: mpsc::UnboundedSender<crate::core::Command>,
+    cmd_tx: mpsc::UnboundedSender<crate::application::Command>,
 ) -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -472,7 +472,7 @@ pub async fn run_app(
                 input_state.update_cursor();
                 match ev {
                     super::event::AppEvent::Command(cmd) => {
-                        if matches!(cmd, crate::core::Command::Quit) {
+                        if matches!(cmd, crate::application::Command::Quit) {
                             break;
                         }
                     }

@@ -1,7 +1,7 @@
 //! Bee - Rust personal agent system
 
 use anyhow::Context;
-use bee::{core::create_agent, ui::run_app};
+use bee::{application::create_agent, ui::run_app};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 

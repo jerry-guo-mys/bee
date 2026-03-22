@@ -152,7 +152,7 @@ impl AgentBuilder {
 
     /// 构建 LLM 客户端
     pub fn build_llm(&self) -> Arc<dyn LlmClient> {
-        crate::core::orchestrator::create_llm_from_config(&self.config)
+        crate::application::orchestrator::create_llm_from_config(&self.config)
     }
 
     /// 构建 Critic（可选，解决问题 4.3：配置化与模型分离）
