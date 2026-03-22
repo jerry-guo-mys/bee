@@ -12,7 +12,7 @@ use crate::config::AppConfig;
 use crate::core::{create_agent_builder, AgentPhase, SessionSupervisor, UiState};
 use crate::llm::{create_deepseek_client, LlmClient, OpenAiClient};
 use crate::memory::{InMemoryLongTerm, SqlitePersistence};
-use crate::react::{react_loop, ContextManager};
+use crate::react::{react_loop, ContextManager, ReactEvent};
 
 /// 从 UI 发往编排器的用户命令
 #[derive(Debug, Clone)]
@@ -72,6 +72,7 @@ pub async fn create_agent(
     mpsc::UnboundedSender<Command>,
     watch::Receiver<UiState>,
     broadcast::Receiver<String>,
+    mpsc::UnboundedReceiver<ReactEvent>,
 )> {
     // 使用统一的 AgentBuilder 构建所有组件（解决问题 1.1）
     let builder = create_agent_builder(config_path);
@@ -90,6 +91,7 @@ pub async fn create_agent(
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<Command>();
     let (state_tx, state_rx) = watch::channel(UiState::default());
     let (stream_tx, stream_rx) = broadcast::channel::<String>(16);
+    let (event_tx, event_rx) = mpsc::unbounded_channel::<ReactEvent>();
 
     let long_term = Arc::new(InMemoryLongTerm::default());
     let mut context = ContextManager::new(cfg.app.max_context_turns).with_long_term(long_term);
@@ -154,7 +156,7 @@ pub async fn create_agent(
                                 &mut context,
                                 &input,
                                 Some(&stream_tx),
-                                None,
+                                Some(&event_tx),
                                 cancel_token,
                                 critic.as_ref(),
                                 Some(&task_scheduler),
@@ -216,5 +218,5 @@ pub async fn create_agent(
         }
     });
 
-    Ok((cmd_tx, state_rx, stream_rx))
+    Ok((cmd_tx, state_rx, stream_rx, event_rx))
 }

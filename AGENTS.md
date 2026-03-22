@@ -7,9 +7,13 @@ Guidelines for AI coding agents working in this Rust personal AI agent system.
 ```bash
 cargo run                          # Run TUI (default)
 cargo run --bin bee-web --features web
+cargo run --bin bee-whatsapp --features whatsapp
+cargo run --bin bee-lark --features lark
+cargo run --bin bee-gateway --features gateway
 cargo run --bin bee-evolution      # Evolution testing
-cargo build --release
-cargo check                        # Fast type check
+cargo build --release              # Optimized release build
+cargo check                        # Fast type check (no codegen)
+cargo build --features browser     # Build with browser support
 ```
 
 ## Test Commands
@@ -20,6 +24,14 @@ cargo test test_name               # Run single test by name
 cargo test test_name -- --nocapture  # Run with output
 cargo test module_name::           # Run by module pattern
 cargo test -- --ignored            # Run ignored tests
+cargo test -- --test-threads=1     # Run tests sequentially
+```
+
+**Running a single test:**
+```bash
+cargo test test_parse_input        # Run test by exact name
+cargo test code_edit::tests::      # Run all tests in module
+cargo test --test integration      # Run integration tests only
 ```
 
 ## Lint/Format
@@ -70,36 +82,25 @@ pub enum AgentError {
 }
 ```
 
-### Async Patterns
-- Use `tokio` runtime with `#[tokio::main]`
-- Use `async-trait` for async traits
+### Async Patterns & Testing
+- Use `tokio` runtime with `#[tokio::main]` and `async-trait` for async traits
 - Use `tokio::sync` primitives (mpsc, broadcast, CancellationToken)
-
-### Testing
-Tests are inline in `#[cfg(test)]` modules. Use `tokio::runtime` for async:
-
+- Tests are inline in `#[cfg(test)]` modules:
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_feature() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            // async test code
-        });
+        rt.block_on(async { /* async test code */ });
     }
 }
 ```
 
-### Documentation
-- Use `//!` for module-level docs (Chinese preferred)
-- Use `///` for item-level docs
-- Document public APIs thoroughly
-
-### Logging
-Use `tracing` crate:
+### Documentation & Logging
+- Use `//!` for module-level docs (Chinese preferred), `///` for item-level docs
+- Use `tracing` crate for logging:
 ```rust
 tracing::info!("Processing: {}", value);
 tracing::warn!("Condition met: {:?}", condition);
@@ -119,7 +120,12 @@ src/
 ├── tools/           # Tool implementations & executor
 ├── skills/          # Skills system
 ├── ui/              # Ratatui TUI components
-└── config/          # Configuration loading
+├── config/          # Configuration loading
+├── workflow/        # Workflow engine & graph
+├── gateway/         # WebSocket gateway
+├── evolution/       # Evolution/testing engine
+├── integrations/    # WhatsApp, Lark integrations
+└── observability/   # Tracing & logging
 ```
 
 ## Cargo Features
@@ -139,8 +145,8 @@ use crate::tools::BrowserTool;
 - `tokio` - Async runtime
 - `anyhow`/`thiserror` - Error handling
 - `serde`/`serde_json` - Serialization
-- `async-openai` - OpenAI API client
+- `async-openai` - OpenAI/DeepSeek clients
 - `ratatui`/`crossterm` - TUI
 - `axum`/`tower` - Web server
 - `rusqlite`/`sqlx` - SQLite persistence
-- `tracing` - Logging
+- `tracing-subscriber` - Logging

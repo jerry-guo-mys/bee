@@ -23,7 +23,11 @@ use std::sync::Arc;
 #[async_trait]
 pub trait WorkflowTaskExecutor: Send + Sync {
     /// 执行单个任务
+    #[cfg(feature = "gateway")]
     async fn execute(&self, task: &BackgroundTask) -> Result<String, String>;
+
+    #[cfg(not(feature = "gateway"))]
+    async fn execute(&self, task_id: &str) -> Result<String, String>;
 }
 
 /// 工作流引擎
@@ -259,7 +263,13 @@ mod tests {
     #[cfg(feature = "gateway")]
     #[async_trait]
     impl WorkflowTaskExecutor for MockExecutor {
+        #[cfg(feature = "gateway")]
         async fn execute(&self, _task: &BackgroundTask) -> Result<String, String> {
+            Ok("success".to_string())
+        }
+
+        #[cfg(not(feature = "gateway"))]
+        async fn execute(&self, _task_id: &str) -> Result<String, String> {
             Ok("success".to_string())
         }
     }
