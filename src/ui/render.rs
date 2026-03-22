@@ -20,6 +20,9 @@ use super::widgets::{
 };
 
 const WIDE_LAYOUT_WIDTH: u16 = 124;
+const CONTENT_LEFT_PADDING: u16 = 1;
+const CONTENT_RIGHT_PADDING: u16 = 1;
+const SCROLLBAR_GAP: u16 = 1;
 
 pub struct RenderContext {
     pub markdown_renderer: MarkdownRenderer,
@@ -124,12 +127,7 @@ pub fn draw(
         };
     }
     ctx.status_indicator.update_elapsed();
-    ctx.status_indicator.inline_message = live_state.process_lines.last().cloned().or_else(|| {
-        state
-            .active_tool
-            .as_ref()
-            .map(|tool| format!("tool {tool}"))
-    });
+    ctx.status_indicator.inline_message = None;
     ctx.status_indicator.details = None;
     ctx.status_indicator.details_max_lines = 0;
 
@@ -146,33 +144,81 @@ pub fn draw(
 
     let root = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(8),
-            Constraint::Length(status_height),
-            Constraint::Length(composer_height),
-        ])
+        .constraints([Constraint::Min(1)])
         .margin(1)
         .split(area);
 
-    let (conversation_container, rail_area) = if root[0].width >= WIDE_LAYOUT_WIDTH {
+    let Some(root_area) = root.first().copied() else {
+        out.0 = 0;
+        out.1 = 0;
+        return;
+    };
+
+    let (page_container, rail_area) = if root_area.width >= WIDE_LAYOUT_WIDTH {
         let cols = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
             .spacing(1)
-            .split(root[0]);
-        (cols[0], Some(cols[1]))
+            .split(root_area);
+        if cols.len() >= 2 {
+            (cols[0], Some(cols[1]))
+        } else {
+            (root_area, None)
+        }
     } else {
-        (root[0], None)
+        (root_area, None)
     };
 
-    let content_width = conversation_container.width.saturating_sub(2) as usize;
-    let content_height = conversation_container.height as usize;
-    let conversation_area = Rect::new(
-        conversation_container.x + 1,
-        conversation_container.y,
-        conversation_container.width.saturating_sub(2),
-        conversation_container.height,
+    if page_container.width == 0 || page_container.height == 0 {
+        out.0 = 0;
+        out.1 = 0;
+        return;
+    }
+
+    let body = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(status_height),
+            Constraint::Length(composer_height),
+        ])
+        .split(page_container);
+
+    let content_x = page_container.x.saturating_add(CONTENT_LEFT_PADDING);
+    let base_content_columns = page_container
+        .width
+        .saturating_sub(CONTENT_LEFT_PADDING + CONTENT_RIGHT_PADDING);
+    let base_conversation_area =
+        Rect::new(content_x, body[0].y, base_content_columns, body[0].height);
+    let content_height = base_conversation_area.height as usize;
+    let base_content_width = base_conversation_area.width as usize;
+
+    let mut conv_measure = ConversationView::new(
+        state,
+        conversation_scroll,
+        base_content_width,
+        content_height,
+        &mut ctx.markdown_renderer,
+        live_state,
     );
+    let total_lines = conv_measure.total_lines();
+    let needs_scrollbar = total_lines > content_height && content_height > 0;
+    let scrollbar_reserve = if needs_scrollbar {
+        SCROLLBAR_GAP + 1
+    } else {
+        0
+    };
+    let content_columns = page_container
+        .width
+        .saturating_sub(CONTENT_LEFT_PADDING + CONTENT_RIGHT_PADDING + scrollbar_reserve);
+    let conversation_area = Rect::new(content_x, body[0].y, content_columns, body[0].height);
+    let scrollbar_area = Rect::new(
+        conversation_area.x + conversation_area.width + SCROLLBAR_GAP,
+        conversation_area.y,
+        1,
+        conversation_area.height,
+    );
+    let content_width = conversation_area.width as usize;
 
     let mut conv_view = ConversationView::new(
         state,
@@ -183,24 +229,13 @@ pub fn draw(
         live_state,
     );
     conv_view.render(conversation_area, f.buffer_mut());
-    let total_lines = conv_view.total_lines();
-    render_conversation_scrollbar(
-        conversation_area,
-        f.buffer_mut(),
-        conversation_scroll,
-        total_lines,
-        content_height,
-    );
-
-    if let Some(rail_area) = rail_area {
-        let mut rail = ActivityRail::new(state);
-        rail.render(rail_area, f.buffer_mut());
-    }
 
     if status_height > 0 {
-        ctx.status_indicator.render(root[1], f.buffer_mut());
+        let status_area = Rect::new(content_x, body[1].y, content_columns, body[1].height);
+        ctx.status_indicator.render(status_area, f.buffer_mut());
     }
 
+    let composer_area = Rect::new(content_x, body[2].y, content_columns, body[2].height);
     let mut input = InputArea {
         state,
         input_buffer,
@@ -208,14 +243,14 @@ pub fn draw(
         agents,
         models,
     };
-    input.render(root[2], f.buffer_mut());
+    input.render(composer_area, f.buffer_mut());
 
     if command_popup.is_visible() {
         let popup_height = command_popup.display_height() as u16 + 1;
         let popup_area = Rect::new(
-            root[2].x + 2,
-            root[2].y.saturating_sub(popup_height),
-            root[2].width.min(52),
+            composer_area.x + 2,
+            composer_area.y.saturating_sub(popup_height),
+            composer_area.width.min(52),
             popup_height,
         );
         command_popup.render(popup_area, f.buffer_mut());
@@ -224,12 +259,27 @@ pub fn draw(
     if file_popup.is_visible() {
         let popup_height = file_popup.display_height() as u16 + 1;
         let popup_area = Rect::new(
-            root[2].x + 2,
-            root[2].y.saturating_sub(popup_height),
-            root[2].width.min(64),
+            composer_area.x + 2,
+            composer_area.y.saturating_sub(popup_height),
+            composer_area.width.min(64),
             popup_height,
         );
         file_popup.render(popup_area, f.buffer_mut());
+    }
+
+    if needs_scrollbar {
+        render_conversation_scrollbar(
+            scrollbar_area,
+            f.buffer_mut(),
+            conversation_scroll,
+            total_lines,
+            content_height,
+        );
+    }
+
+    if let Some(rail_area) = rail_area {
+        let mut rail = ActivityRail::new(state);
+        rail.render(rail_area, f.buffer_mut());
     }
 
     out.0 = total_lines;
