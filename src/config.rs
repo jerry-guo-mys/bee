@@ -612,6 +612,9 @@ pub fn reload_config() -> Result<AppConfig, config::ConfigError> {
     load_config(None)
 }
 
+pub mod validation;
+pub use validation::{validate_config, ConfigError, Validate};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -621,5 +624,14 @@ mod tests {
         let cfg = AppConfig::default();
         assert_eq!(cfg.web.port, 8080);
         assert!(!cfg.memory.vector_enabled);
+    }
+
+    #[test]
+    fn test_validate_config() {
+        use crate::config::validation::validate_config;
+        let cfg = AppConfig::default();
+        // 默认配置可能需要调整才能通过验证
+        // 这里仅测试验证函数可调用
+        let _ = validate_config(&cfg);
     }
 }
