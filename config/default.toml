@@ -10,12 +10,14 @@ max_context_turns = 20
 # - deepseek-reasoner: 思考模式（DeepSeek-R1），适合复杂推理、代码、数学
 # OpenAI:   https://api.openai.com/v1, 模型 gpt-4o-mini 等
 provider = "deepseek"
-model = "deepseek-reasoner"
+model = "deepseek-chat"
 base_url = "https://api.deepseek.com"
 
 [llm.deepseek]
-model = "deepseek-reasoner"
-# 可选 deepseek-chat（常规）、deepseek-reasoner（思考/推理，更强）
+# 常规对话模型（快速、便宜）
+model = "deepseek-chat"
+# 推理模型（复杂任务自动启用）
+reasoner_model = "deepseek-reasoner"
 
 [llm.openai]
 model = "gpt-4o-mini"
@@ -25,6 +27,15 @@ model = "gpt-4o-mini"
 request = 120
 # 流式请求：整体允许的最长时间（复杂推理/多步 ReAct 可能较久）
 stream = 600
+
+[llm.router]
+# 启用自动模型路由（根据任务类型自动选择）
+enabled = true
+# 默认策略：balanced（平衡）、best_quality（最佳质量）、fastest（最快速度）、lowest_cost（最低成本）
+default_strategy = "balanced"
+# 指令前缀覆盖：
+# - /think 或 /推理：强制使用推理模型
+# - /fast 或 /快速：强制使用快速模型
 
 [tools]
 filesystem_root = "./workspace"

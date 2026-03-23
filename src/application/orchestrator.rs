@@ -10,7 +10,10 @@ use tokio::sync::{broadcast, mpsc, watch, Mutex};
 use super::agent_service::{AgentService, AgentServiceImpl};
 use crate::config::AppConfig;
 use crate::core::{AgentPhase, SessionSupervisor, UiState};
-use crate::llm::{create_deepseek_client, LlmClient, OpenAiClient};
+use crate::llm::{
+    create_deepseek_client, LlmClient, ModelCapabilities, ModelRouter, OpenAiClient,
+    RoutingLlmClient,
+};
 use crate::memory::SqlitePersistence;
 use crate::react::ReactEvent;
 
@@ -28,23 +31,56 @@ pub enum Command {
 }
 
 /// 根据配置与环境变量选择 LLM 后端（DeepSeek / OpenAI 兼容 / Mock）
+/// 使用模型路由器自动选择最合适的模型
 pub fn create_llm_from_config(cfg: &AppConfig) -> Arc<dyn LlmClient> {
     let provider = cfg.llm.provider.to_lowercase();
     let use_deepseek = std::env::var("DEEPSEEK_API_KEY").is_ok()
         || (provider == "deepseek" && std::env::var("OPENAI_API_KEY").is_ok());
     let use_openai = std::env::var("OPENAI_API_KEY").is_ok() && provider != "deepseek";
 
+    let mut router = ModelRouter::new();
+
+    // 添加 DeepSeek 模型（如果有 API Key）
     if use_deepseek {
-        let model = cfg
+        let chat_model = cfg
             .llm
             .deepseek
             .model
             .clone()
             .or_else(|| Some(cfg.llm.model.clone()))
             .unwrap_or_else(|| "deepseek-chat".to_string());
-        tracing::info!("Using DeepSeek LLM ({})", model);
-        Arc::new(create_deepseek_client(Some(&model)))
-    } else if use_openai {
+
+        // 尝试添加 DeepSeek Chat（快速模型）
+        tracing::info!("Using DeepSeek Chat LLM ({})", chat_model);
+        let chat_client: Arc<dyn LlmClient> = Arc::new(create_deepseek_client(Some(&chat_model)));
+        router.add_model(
+            ModelCapabilities::new("deepseek-chat")
+                .with_code(85)
+                .with_reasoning(75)
+                .with_speed(90)
+                .with_cost(85),
+            chat_client,
+        );
+
+        // 如果配置了 Reasoner 模型，也添加它（推理模型）
+        if let Some(reasoner_model) = cfg.llm.deepseek.model.clone() {
+            if reasoner_model != chat_model && reasoner_model.contains("reasoner") {
+                tracing::info!("Using DeepSeek Reasoner LLM ({})", reasoner_model);
+                let reasoner_client: Arc<dyn LlmClient> = Arc::new(create_deepseek_client(Some(&reasoner_model)));
+                router.add_model(
+                    ModelCapabilities::new("deepseek-reasoner")
+                        .with_code(95)
+                        .with_reasoning(98)
+                        .with_speed(40)
+                        .with_cost(30),
+                    reasoner_client,
+                );
+            }
+        }
+    }
+
+    // 添加 OpenAI 模型（如果有 API Key）
+    if use_openai {
         let model = cfg
             .llm
             .openai
@@ -53,15 +89,29 @@ pub fn create_llm_from_config(cfg: &AppConfig) -> Arc<dyn LlmClient> {
             .unwrap_or_else(|| "gpt-4o-mini".to_string());
         let base = cfg.llm.base_url.as_deref();
         tracing::info!("Using OpenAI LLM ({})", model);
-        Arc::new(OpenAiClient::new(
+        let openai_client: Arc<dyn LlmClient> = Arc::new(OpenAiClient::new(
             base,
             &model,
             std::env::var("OPENAI_API_KEY").ok().as_deref(),
-        ))
-    } else {
-        tracing::warn!("No API key set or provider unknown, using Mock LLM");
-        Arc::new(crate::llm::MockLlmClient)
+        ));
+        router.add_model(
+            ModelCapabilities::new(&model)
+                .with_code(80)
+                .with_reasoning(85)
+                .with_speed(75)
+                .with_cost(70),
+            openai_client,
+        );
     }
+
+    // 如果没有添加任何模型，使用 Mock
+    if router.model_count() == 0 {
+        tracing::warn!("No API key set or provider unknown, using Mock LLM");
+        return Arc::new(crate::llm::MockLlmClient);
+    }
+
+    // 使用路由客户端包装路由器
+    Arc::new(RoutingLlmClient::new(router))
 }
 
 /// 创建 Agent 运行时：返回命令发送端、状态接收端、流接收端
