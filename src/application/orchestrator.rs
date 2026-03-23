@@ -189,8 +189,13 @@ pub async fn create_agent(
 
                             match result {
                                 Ok(response) => {
-                                    // 追加助手回复到历史
-                                    conversation_history.extend(response.messages);
+                                    // 只保留最后一条 Assistant 消息（最终回复）
+                                    // response.messages 包含了所有历史消息（包括用户消息），不能直接使用
+                                    if let Some(last_msg) = response.messages.last() {
+                                        if last_msg.role == crate::memory::Role::Assistant {
+                                            conversation_history.push(last_msg.clone());
+                                        }
+                                    }
                                     let history_clone = conversation_history.clone();
                                     let _ = state_tx.send(UiState {
                                         phase: AgentPhase::Idle,
