@@ -433,6 +433,8 @@ pub async fn run_app(
     let models: Vec<&str> = DEFAULT_MODELS.to_vec();
     let mut render_ctx = RenderContext::new();
     let mut state = state_rx.borrow().clone();
+    let mut last_scroll_activity: Option<Instant> = None;
+    const SCROLLBAR_VISIBLE_DURATION: Duration = Duration::from_millis(800);
 
     loop {
         clamp_cursor(&mut input_state, &input_buffer);
@@ -441,9 +443,13 @@ pub async fn run_app(
         if state.history.len() != last_history_len {
             last_history_len = state.history.len();
             conversation_scroll = usize::MAX;
+            last_scroll_activity = Some(Instant::now());
         }
 
         let mut scroll_info = (0usize, 0usize);
+        let scrollbar_visible = last_scroll_activity
+            .map(|t| t.elapsed() < SCROLLBAR_VISIBLE_DURATION)
+            .unwrap_or(false);
         terminal.draw(|f| {
             draw(
                 f,
@@ -458,6 +464,7 @@ pub async fn run_app(
                 &live_state,
                 &mut command_popup,
                 &mut file_popup,
+                scrollbar_visible,
             );
         })?;
         let (total_lines, viewport_height) = scroll_info;
@@ -480,9 +487,11 @@ pub async fn run_app(
                         match mouse.kind {
                             MouseEventKind::ScrollUp => {
                                 conversation_scroll = conversation_scroll.saturating_sub(3);
+                                last_scroll_activity = Some(Instant::now());
                             }
                             MouseEventKind::ScrollDown => {
                                 conversation_scroll = conversation_scroll.saturating_add(3);
+                                last_scroll_activity = Some(Instant::now());
                             }
                             _ => {}
                         }
@@ -672,6 +681,7 @@ pub async fn run_app(
                                         input_state.model_index = input_state.model_index.saturating_sub(1);
                                     } else {
                                         conversation_scroll = conversation_scroll.saturating_sub(1);
+                                        last_scroll_activity = Some(Instant::now());
                                     }
                                 }
                                 KeyCode::Down => {
@@ -704,6 +714,7 @@ pub async fn run_app(
                                         input_state.model_index = (input_state.model_index + 1).min(models.len().saturating_sub(1));
                                     } else {
                                         conversation_scroll = conversation_scroll.saturating_add(1);
+                                        last_scroll_activity = Some(Instant::now());
                                     }
                                 }
                                 KeyCode::Tab => {
@@ -731,9 +742,11 @@ pub async fn run_app(
                                 }
                                 KeyCode::PageUp => {
                                     conversation_scroll = conversation_scroll.saturating_sub(10);
+                                    last_scroll_activity = Some(Instant::now());
                                 }
                                 KeyCode::PageDown => {
                                     conversation_scroll = conversation_scroll.saturating_add(10);
+                                    last_scroll_activity = Some(Instant::now());
                                 }
                                 KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                     event_handler.send_clear();

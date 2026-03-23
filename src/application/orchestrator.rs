@@ -107,6 +107,7 @@ pub async fn create_agent(
     let session_id = uuid::Uuid::new_v4().to_string();
     let session_id_clone = session_id.clone();
     let agent_service_clone = agent_service.clone();
+    let mut conversation_history: Vec<crate::memory::Message> = Vec::new();
 
     tokio::spawn(async move {
         loop {
@@ -116,10 +117,18 @@ pub async fn create_agent(
                         Command::Submit(input) => {
                             let _cancel_token = supervisor.reset_cancel_token();
 
-                            // 更新为 Thinking 状态
+                            // 先添加用户消息到历史
+                            let user_msg = crate::memory::Message {
+                                role: crate::memory::Role::User,
+                                content: input.clone(),
+                            };
+                            conversation_history.push(user_msg);
+
+                            // 更新为 Thinking 状态（保留历史）
+                            let history_clone = conversation_history.clone();
                             let _ = state_tx.send(UiState {
                                 phase: AgentPhase::Thinking,
-                                history: vec![],
+                                history: history_clone,
                                 active_tool: None,
                                 input_locked: true,
                                 error_message: None,
@@ -130,9 +139,12 @@ pub async fn create_agent(
 
                             match result {
                                 Ok(response) => {
+                                    // 追加助手回复到历史
+                                    conversation_history.extend(response.messages);
+                                    let history_clone = conversation_history.clone();
                                     let _ = state_tx.send(UiState {
                                         phase: AgentPhase::Idle,
-                                        history: response.messages,
+                                        history: history_clone,
                                         active_tool: None,
                                         input_locked: false,
                                         error_message: None,
@@ -141,7 +153,7 @@ pub async fn create_agent(
                                 Err(e) => {
                                     let _ = state_tx.send(UiState {
                                         phase: AgentPhase::Error,
-                                        history: vec![],
+                                        history: conversation_history.clone(),
                                         active_tool: None,
                                         input_locked: false,
                                         error_message: Some(e.to_string()),
@@ -154,6 +166,7 @@ pub async fn create_agent(
                         }
                         Command::Clear => {
                             let _ = agent_service_clone.clear(&session_id_clone).await;
+                            conversation_history.clear();
                             let _ = state_tx.send(UiState {
                                 phase: AgentPhase::Idle,
                                 history: vec![],

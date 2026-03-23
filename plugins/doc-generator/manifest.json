@@ -1,0 +1,52 @@
+{
+  "metadata": {
+    "id": "doc-generator",
+    "name": "Documentation Generator",
+    "version": "1.0.0",
+    "description": "自动生成代码文档的插件，支持 Markdown 和 HTML 格式",
+    "author": "Bee Team",
+    "license": "MIT",
+    "homepage": "https://github.com/bee/doc-generator",
+    "repository": "https://github.com/bee/doc-generator",
+    "keywords": ["documentation", "generator", "markdown", "api"],
+    "categories": ["development", "documentation"],
+    "dependencies": [],
+    "capabilities": ["read_workspace", "write_files"],
+    "configuration": {
+      "output_format": "markdown",
+      "include_private": false,
+      "generate_toc": true,
+      "output_dir": "./docs"
+    }
+  },
+  "files": [
+    "src/main.rs",
+    "src/generator.rs",
+    "src/templates.rs"
+  ],
+  "entry_point": "src/main.rs",
+  "signature": null,
+  "api_version": "1.0.0",
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "output_format": {
+        "type": "string",
+        "enum": ["markdown", "html", "both"],
+        "default": "markdown"
+      },
+      "include_private": {
+        "type": "boolean",
+        "default": false
+      },
+      "generate_toc": {
+        "type": "boolean",
+        "default": true
+      },
+      "output_dir": {
+        "type": "string",
+        "default": "./docs"
+      }
+    }
+  }
+}
