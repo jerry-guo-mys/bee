@@ -139,15 +139,17 @@ impl<'a> ConversationView<'a> {
 
     fn build_text_lines(&mut self) -> Vec<Line<'static>> {
         let mut text_lines: Vec<Line<'static>> = Vec::new();
+        let mut needs_spacing = false;
 
         for message in self.state.history.iter() {
             // 只显示 User 和 Assistant 的消息，隐藏 System 和 Tool
             match message.role {
                 Role::Assistant => {
                     // 添加间隔
-                    if !text_lines.is_empty() {
+                    if needs_spacing {
                         text_lines.push(Line::from(Span::raw("")));
                     }
+                    needs_spacing = true;
 
                     // 助手消息用 Markdown 渲染，带左侧标识
                     let markdown_lines = self.markdown_renderer.render(&message.content);
@@ -161,9 +163,10 @@ impl<'a> ConversationView<'a> {
                 }
                 Role::User => {
                     // 添加间隔
-                    if !text_lines.is_empty() {
+                    if needs_spacing {
                         text_lines.push(Line::from(Span::raw("")));
                     }
+                    needs_spacing = true;
 
                     // 用户消息带前缀标识
                     let wrapped = Self::wrap_text(&message.content, self.content_width.saturating_sub(4).max(24));
