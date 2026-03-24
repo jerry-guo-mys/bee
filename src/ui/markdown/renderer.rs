@@ -142,16 +142,24 @@ impl MarkdownRenderer {
 
     fn handle_end_tag(&mut self, tag: TagEnd) {
         match tag {
-            TagEnd::Paragraph => self.flush_line(),
+            TagEnd::Paragraph => {
+                self.flush_line();
+                // 添加段间距（空行）
+                self.rendered_lines.push(Line::from(""));
+            }
             TagEnd::Heading { .. } => {
                 self.pop_style();
                 self.flush_line();
+                // 添加段间距（空行）
+                self.rendered_lines.push(Line::from(""));
             }
             TagEnd::BlockQuote => self.pop_style(),
             TagEnd::CodeBlock => {
                 self.pop_style();
                 self.code_block_lang = None;
                 self.flush_line();
+                // 添加段间距（空行）
+                self.rendered_lines.push(Line::from(""));
             }
             TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => self.pop_style(),
             TagEnd::Link | TagEnd::Image => self.pop_style(),
@@ -191,19 +199,20 @@ mod tests {
     fn test_render_plain_text() {
         let mut renderer = MarkdownRenderer::new(80);
         let lines = renderer.render("Hello, World!");
-        assert_eq!(lines.len(), 1);
+        // 段落结束后会添加一个空行
+        assert_eq!(lines.len(), 2);
     }
     #[test]
     fn test_render_bold() {
         let mut renderer = MarkdownRenderer::new(80);
         let lines = renderer.render("**bold**");
-        assert_eq!(lines.len(), 1);
+        assert_eq!(lines.len(), 2);
     }
     #[test]
     fn test_render_italic() {
         let mut renderer = MarkdownRenderer::new(80);
         let lines = renderer.render("*italic*");
-        assert_eq!(lines.len(), 1);
+        assert_eq!(lines.len(), 2);
     }
     #[test]
     fn test_render_heading() {
@@ -215,6 +224,6 @@ mod tests {
     fn test_render_code() {
         let mut renderer = MarkdownRenderer::new(80);
         let lines = renderer.render("`inline code`");
-        assert_eq!(lines.len(), 1);
+        assert_eq!(lines.len(), 2);
     }
 }
