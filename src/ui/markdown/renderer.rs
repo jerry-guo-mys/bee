@@ -15,6 +15,8 @@ pub struct MarkdownRenderer {
     current_line: String,
     rendered_lines: Vec<Line<'static>>,
     code_block_lang: Option<String>,
+    in_list_item: bool,
+    list_depth: usize,
 }
 
 impl MarkdownRenderer {
@@ -25,6 +27,8 @@ impl MarkdownRenderer {
             current_line: String::new(),
             rendered_lines: Vec::new(),
             code_block_lang: None,
+            in_list_item: false,
+            list_depth: 0,
         }
     }
 
@@ -32,6 +36,8 @@ impl MarkdownRenderer {
         self.rendered_lines.clear();
         self.current_line.clear();
         self.style_stack = vec![Style::default().fg(theme::TEXT_CREAM)];
+        self.in_list_item = false;
+        self.list_depth = 0;
         let parser = Parser::new(markdown);
         for event in parser {
             self.handle_event(event);
@@ -93,10 +99,13 @@ impl MarkdownRenderer {
             Tag::Heading { level, .. } => {
                 let style = match level {
                     HeadingLevel::H1 => Style::default()
-                        .fg(theme::TEXT_CREAM)
+                        .fg(theme::ACCENT_GREEN)
                         .add_modifier(Modifier::BOLD),
                     HeadingLevel::H2 => Style::default()
-                        .fg(theme::TEXT_PRIMARY)
+                        .fg(theme::ACCENT_BLUE)
+                        .add_modifier(Modifier::BOLD),
+                    HeadingLevel::H3 => Style::default()
+                        .fg(theme::TEXT_CREAM)
                         .add_modifier(Modifier::BOLD),
                     _ => Style::default()
                         .fg(theme::TEXT_SOFT)
@@ -106,14 +115,21 @@ impl MarkdownRenderer {
             }
             Tag::BlockQuote => {
                 let style = Style::default()
-                    .fg(theme::TEXT_SOFT)
+                    .fg(theme::ACCENT_PURPLE)
                     .add_modifier(Modifier::ITALIC);
                 self.push_style(style);
-                self.current_line.push_str("│ ");
+                self.current_line.push_str("▍ ");
             }
             Tag::CodeBlock(kind) => {
                 if let CodeBlockKind::Fenced(lang) = kind {
                     self.code_block_lang = Some(lang.to_string());
+                    // 渲染代码块开始标记
+                    self.flush_line();
+                    self.rendered_lines.push(Line::from(Span::styled(
+                        format!("┌─[ {} ]", lang),
+                        Style::default().fg(theme::ACCENT_CYAN),
+                    )));
+                    self.current_line.push_str("│ ");
                 }
                 let style = Style::default()
                     .fg(theme::TEXT_SOFT)
@@ -133,8 +149,15 @@ impl MarkdownRenderer {
                 );
             }
             Tag::Image { .. } => self.push_style(Style::default().fg(theme::ACCENT_PURPLE)),
-            Tag::List(_) => {}
-            Tag::Item => self.current_line.push_str("  • "),
+            Tag::List(_) => {
+                self.list_depth += 1;
+            }
+            Tag::Item => {
+                self.in_list_item = true;
+                // 根据嵌套深度添加缩进
+                let indent = "  ".repeat(self.list_depth - 1);
+                self.current_line.push_str(&format!("{}• ", indent));
+            }
             Tag::Table(_) | Tag::TableHead | Tag::TableRow | Tag::TableCell => {}
             Tag::FootnoteDefinition(_) | Tag::HtmlBlock | Tag::MetadataBlock(_) => {}
         }
@@ -153,18 +176,38 @@ impl MarkdownRenderer {
                 // 添加段间距（空行）
                 self.rendered_lines.push(Line::from(""));
             }
-            TagEnd::BlockQuote => self.pop_style(),
+            TagEnd::BlockQuote => {
+                self.pop_style();
+                self.flush_line();
+            }
             TagEnd::CodeBlock => {
                 self.pop_style();
-                self.code_block_lang = None;
+                // 渲染代码块结束标记
                 self.flush_line();
+                if let Some(ref _lang) = self.code_block_lang {
+                    self.rendered_lines.push(Line::from(Span::styled(
+                        "└──────────",
+                        Style::default().fg(theme::ACCENT_CYAN),
+                    )));
+                }
+                self.code_block_lang = None;
                 // 添加段间距（空行）
                 self.rendered_lines.push(Line::from(""));
             }
             TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => self.pop_style(),
             TagEnd::Link | TagEnd::Image => self.pop_style(),
-            TagEnd::List(_) => {}
-            TagEnd::Item => self.flush_line(),
+            TagEnd::List(_) => {
+                self.list_depth -= 1;
+                // 列表结束后添加空行
+                if self.list_depth == 0 {
+                    self.flush_line();
+                    self.rendered_lines.push(Line::from(""));
+                }
+            }
+            TagEnd::Item => {
+                self.flush_line();
+                self.in_list_item = false;
+            }
             TagEnd::Table | TagEnd::TableHead | TagEnd::TableRow | TagEnd::TableCell => {}
             TagEnd::FootnoteDefinition | TagEnd::HtmlBlock | TagEnd::MetadataBlock(_) => {}
         }
