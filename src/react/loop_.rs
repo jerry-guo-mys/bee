@@ -719,12 +719,9 @@ async fn react_loop_impl(
                     }
                 }
                 // 将工具调用与结果写回对话，供下一轮 Plan 使用
-                context.push_message(Message::assistant(format!(
-                    "Tool call: {} | Result: {}",
-                    tool_name, observation
-                )));
-                context.push_message(Message::user(format!(
-                    "Observation from {}: {}",
+                // 使用 Tool 角色存储，避免在 UI 中直接显示原始工具调用格式
+                context.push_message(Message::tool(format!(
+                    "Tool: {} | Result: {}",
                     tool_name, observation
                 )));
                 if tool_name == "github_repo_inspect" {

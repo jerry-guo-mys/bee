@@ -3,7 +3,6 @@
 //! 实现 newline-gated Markdown 累积：只有完整的逻辑行才会被提交渲染
 
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
 
 /// Markdown 流收集器
 pub struct MarkdownStreamCollector {
@@ -11,18 +10,15 @@ pub struct MarkdownStreamCollector {
     buffer: String,
     /// 上次提交的位置
     last_commit_pos: usize,
-    /// 渲染宽度
-    width: usize,
     /// 当前工作目录（用于相对路径）
     cwd: Option<String>,
 }
 
 impl MarkdownStreamCollector {
-    pub fn new(width: usize) -> Self {
+    pub fn new(_width: usize) -> Self {
         Self {
             buffer: String::new(),
             last_commit_pos: 0,
-            width,
             cwd: None,
         }
     }

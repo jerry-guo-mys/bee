@@ -151,8 +151,8 @@ impl Session {
 
 /// 会话管理器
 pub struct SessionManager {
-    /// 所有会话（session_id -> Session）
-    sessions: RwLock<HashMap<SessionId, Session>>,
+    /// 所有会话（session_id -> Arc<RwLock<Session>>）
+    sessions: RwLock<HashMap<SessionId, Arc<RwLock<Session>>>>,
     /// 用户到会话的映射（user_id -> session_id）
     user_sessions: RwLock<HashMap<String, SessionId>>,
     /// 最大上下文轮数
@@ -173,26 +173,30 @@ impl SessionManager {
 
     /// 获取或创建用户的会话
     pub async fn get_or_create(&self, user_id: &str, client: ClientInfo) -> SessionId {
-        let user_sessions = self.user_sessions.read().await;
-
-        if let Some(session_id) = user_sessions.get(user_id) {
-            let mut sessions = self.sessions.write().await;
-            if let Some(session) = sessions.get_mut(session_id) {
-                session.add_client(client);
-                return session_id.clone();
+        // 先检查是否已存在会话
+        {
+            let user_sessions = self.user_sessions.read().await;
+            if let Some(session_id) = user_sessions.get(user_id) {
+                let sessions = self.sessions.read().await;
+                if let Some(session_arc) = sessions.get(session_id) {
+                    let mut session = session_arc.write().await;
+                    session.add_client(client);
+                    return session_id.clone();
+                }
             }
         }
-        drop(user_sessions);
 
+        // 创建新会话
         let mut session = Session::new(user_id.to_string(), self.max_context_turns);
         session.apply_client_scope(&client);
         session.add_client(client);
         let session_id = session.id.clone();
+        let session_arc = Arc::new(RwLock::new(session));
 
         self.sessions
             .write()
             .await
-            .insert(session_id.clone(), session);
+            .insert(session_id.clone(), Arc::clone(&session_arc));
         self.user_sessions
             .write()
             .await
@@ -204,14 +208,7 @@ impl SessionManager {
     /// 获取会话
     pub async fn get(&self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
         let sessions = self.sessions.read().await;
-        if sessions.contains_key(session_id) {
-            drop(sessions);
-            Some(Arc::new(RwLock::new(
-                self.sessions.write().await.remove(session_id).unwrap(),
-            )))
-        } else {
-            None
-        }
+        sessions.get(session_id).cloned()
     }
 
     /// 获取会话（可变引用）
@@ -219,33 +216,45 @@ impl SessionManager {
     where
         F: FnOnce(&mut Session) -> R,
     {
-        let mut sessions = self.sessions.write().await;
-        sessions.get_mut(session_id).map(f)
+        let sessions = self.sessions.read().await;
+        if let Some(session_arc) = sessions.get(session_id) {
+            let mut session = session_arc.write().await;
+            Some(f(&mut *session))
+        } else {
+            None
+        }
     }
 
     /// 移除客户端连接
     pub async fn remove_client(&self, session_id: &str, platform: SpokeType) {
-        let mut sessions = self.sessions.write().await;
-        if let Some(session) = sessions.get_mut(session_id) {
+        let sessions = self.sessions.read().await;
+        if let Some(session_arc) = sessions.get(session_id) {
+            let mut session = session_arc.write().await;
             session.remove_client(platform);
         }
     }
 
     /// 清理过期会话
     pub async fn cleanup_expired(&self) -> usize {
-        let mut sessions = self.sessions.write().await;
-        let mut user_sessions = self.user_sessions.write().await;
+        let sessions = self.sessions.read().await;
 
         let expired: Vec<_> = sessions
             .iter()
-            .filter(|(_, s)| s.is_expired(self.session_timeout))
-            .map(|(id, s)| (id.clone(), s.user_id.clone()))
+            .filter(|(_, s)| s.try_read().map(|s| s.is_expired(self.session_timeout)).unwrap_or(false))
+            .map(|(id, _)| id.clone())
             .collect();
 
-        for (session_id, user_id) in &expired {
+        drop(sessions);
+
+        let mut sessions = self.sessions.write().await;
+        let mut user_sessions = self.user_sessions.write().await;
+
+        for session_id in &expired {
             sessions.remove(session_id);
-            user_sessions.remove(user_id);
         }
+
+        // 清理 user_sessions 中指向已删除会话的映射
+        user_sessions.retain(|_, sid| sessions.contains_key(sid));
 
         expired.len()
     }
@@ -264,5 +273,124 @@ impl SessionManager {
 impl Default for SessionManager {
     fn default() -> Self {
         Self::new(20, 3600)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gateway::message::ClientInfo;
+
+    #[tokio::test]
+    async fn test_get_does_not_remove_session() {
+        // 验证 get 方法不会从管理器中移除会话（修复问题 1）
+        let manager = SessionManager::new(10, 3600);
+        let client = ClientInfo {
+            client_id: "test_client".to_string(),
+            platform: SpokeType::Web,
+            display_name: Some("Test".to_string()),
+            metadata: None,
+        };
+
+        // 创建会话
+        let session_id = manager.get_or_create("user1", client.clone()).await;
+
+        // 第一次获取会话
+        let session1 = manager.get(&session_id).await;
+        assert!(session1.is_some(), "Should get session on first call");
+
+        // 第二次获取会话 - 应该仍然能获取到（不会被 remove）
+        let session2 = manager.get(&session_id).await;
+        assert!(session2.is_some(), "Should still get session on second call");
+
+        // 验证两次获取的是同一个 Arc
+        assert!(Arc::ptr_eq(&session1.unwrap(), &session2.unwrap()));
+    }
+
+    #[tokio::test]
+    async fn test_get_or_create_concurrent_safety() {
+        // 验证并发调用 get_or_create 的安全性（修复问题 5）
+        let manager = Arc::new(SessionManager::new(10, 3600));
+        let client = ClientInfo {
+            client_id: "test_client".to_string(),
+            platform: SpokeType::Web,
+            display_name: Some("Test".to_string()),
+            metadata: None,
+        };
+
+        // 并发创建多个会话
+        let mut handles = vec![];
+        for i in 0..5 {
+            let mgr = Arc::clone(&manager);
+            let cli = client.clone();
+            handles.push(tokio::spawn(async move {
+                mgr.get_or_create(&format!("user{}", i), cli).await
+            }));
+        }
+
+        // 等待所有任务完成
+        let session_ids: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.unwrap())
+            .collect();
+
+        // 验证每个会话 ID 都不同
+        let unique_count = session_ids.iter().collect::<std::collections::HashSet<_>>().len();
+        assert_eq!(unique_count, 5, "All session IDs should be unique");
+    }
+
+    #[tokio::test]
+    async fn test_with_session_modifies_original() {
+        // 验证 with_session 能正确修改原始会话
+        let manager = SessionManager::new(10, 3600);
+        let client = ClientInfo {
+            client_id: "test_client".to_string(),
+            platform: SpokeType::Web,
+            display_name: Some("Test".to_string()),
+            metadata: None,
+        };
+
+        let session_id = manager.get_or_create("user1", client.clone()).await;
+
+        // 使用 with_session 修改会话状态
+        manager
+            .with_session(&session_id, |session| {
+                session.set_status(super::SessionStatus::Processing);
+            })
+            .await;
+
+        // 验证修改已生效
+        let session = manager.get(&session_id).await.unwrap();
+        let session = session.read().await;
+        assert_eq!(session.status, super::SessionStatus::Processing);
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_expired_removes_from_both_maps() {
+        // 验证清理过期会话时同时清理两个映射
+        let manager = SessionManager::new(10, 0); // 0 秒过期时间，便于测试
+        let client = ClientInfo {
+            client_id: "test_client".to_string(),
+            platform: SpokeType::Web,
+            display_name: Some("Test".to_string()),
+            metadata: None,
+        };
+
+        let session_id = manager.get_or_create("user1", client.clone()).await;
+
+        // 先移除客户端连接，使会话可以被清理
+        manager.remove_client(&session_id, SpokeType::Web).await;
+
+        // 等待一小段时间让会话过期
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+        // 清理过期会话
+        let removed = manager.cleanup_expired().await;
+        assert_eq!(removed, 1, "Should remove 1 expired session");
+
+        // 验证会话已从两个映射中删除
+        assert!(manager.get(&session_id).await.is_none());
+        assert!(manager.get_user_session("user1").await.is_none());
     }
 }

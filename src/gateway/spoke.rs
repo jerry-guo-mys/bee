@@ -207,6 +207,7 @@ pub struct ApiPluginSpoke {
     endpoint: String,
     method: String,
     headers: std::collections::HashMap<String, String>,
+    client: reqwest::Client,
 }
 
 #[allow(dead_code)]
@@ -218,6 +219,7 @@ impl ApiPluginSpoke {
             endpoint,
             method,
             headers: std::collections::HashMap::new(),
+            client: reqwest::Client::new(),
         }
     }
 
@@ -244,12 +246,11 @@ impl CapabilitySpoke for ApiPluginSpoke {
     }
 
     async fn execute(&self, input: serde_json::Value) -> Result<serde_json::Value, String> {
-        let client = reqwest::Client::new();
         let mut request = match self.method.to_uppercase().as_str() {
-            "GET" => client.get(&self.endpoint),
-            "POST" => client.post(&self.endpoint).json(&input),
-            "PUT" => client.put(&self.endpoint).json(&input),
-            "DELETE" => client.delete(&self.endpoint),
+            "GET" => self.client.get(&self.endpoint),
+            "POST" => self.client.post(&self.endpoint).json(&input),
+            "PUT" => self.client.put(&self.endpoint).json(&input),
+            "DELETE" => self.client.delete(&self.endpoint),
             _ => return Err(format!("Unsupported HTTP method: {}", self.method)),
         };
 
@@ -263,6 +264,8 @@ impl CapabilitySpoke for ApiPluginSpoke {
             .map_err(|e| format!("API request failed: {}", e))?;
 
         let body = response
+            .error_for_status()
+            .map_err(|e| format!("API request failed with status {}: {}", e.status().unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR), e))?
             .text()
             .await
             .map_err(|e| format!("Failed to read response: {}", e))?;
@@ -362,12 +365,16 @@ impl SpokeAdapter for HttpSpoke {
     async fn send(&self, _client_id: &str, message: GatewayMessage) -> Result<(), String> {
         if let Some(url) = &self.callback_url {
             let client = reqwest::Client::new();
-            client
+            let response = client
                 .post(url)
                 .json(&message)
                 .send()
                 .await
                 .map_err(|e| format!("HTTP callback failed: {}", e))?;
+
+            response
+                .error_for_status()
+                .map_err(|e| format!("HTTP callback failed with status {}: {}", e.status().unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR), e))?;
         }
         Ok(())
     }

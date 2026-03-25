@@ -45,6 +45,9 @@ pub enum AgentError {
 
     #[error("Path escape attempt: {0}")]
     PathEscape(String),
+
+    #[error("Orchestration failed: {0}")]
+    OrchestrationFailed(String),
 }
 
 /// 恢复引擎根据错误类型给出的建议动作

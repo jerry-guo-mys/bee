@@ -11,12 +11,24 @@ use serde::{Deserialize, Serialize};
 
 /// 消息角色（与 LLM API 一致）
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Role {
     User,
     Assistant,
     System,
     /// 工具调用结果（解决问题 4.2：分离工具调用与对话历史）
     Tool,
+}
+
+impl std::fmt::Display for Role {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Role::User => write!(f, "user"),
+            Role::Assistant => write!(f, "assistant"),
+            Role::System => write!(f, "system"),
+            Role::Tool => write!(f, "tool"),
+        }
+    }
 }
 
 /// 单条消息

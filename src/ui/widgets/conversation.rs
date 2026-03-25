@@ -1,4 +1,4 @@
-//! 对话历史渲染组件
+//! 对话历史渲染组件 - 简洁模式
 
 use ratatui::{
     buffer::Buffer,
@@ -15,10 +15,6 @@ use crate::ui::app::LiveConversationState;
 use crate::ui::markdown::MarkdownRenderer;
 use crate::ui::theme;
 use crate::ui::Renderable;
-
-const MAX_DISPLAY_CHARS: usize = 600;
-const MAX_TOOL_DISPLAY_CHARS: usize = 280;
-const COMPACT_EVENT_LINES: usize = 2;
 
 pub struct ConversationView<'a> {
     pub state: &'a UiState,
@@ -46,24 +42,6 @@ impl<'a> ConversationView<'a> {
             markdown_renderer,
             live_state,
         }
-    }
-
-    fn is_tool_result(content: &str) -> bool {
-        content.starts_with("Tool call:") || content.starts_with("Observation from ")
-    }
-
-    fn truncate_for_display(content: &str) -> String {
-        let limit = if Self::is_tool_result(content) {
-            MAX_TOOL_DISPLAY_CHARS
-        } else {
-            MAX_DISPLAY_CHARS
-        };
-        let chars: Vec<char> = content.chars().collect();
-        if chars.len() <= limit {
-            return content.to_string();
-        }
-        let head: String = chars.iter().take(limit).collect();
-        format!("{}\n... [truncated, {} chars total]", head, chars.len())
     }
 
     fn wrap_text(s: &str, width: usize) -> Vec<String> {
@@ -128,26 +106,6 @@ impl<'a> ConversationView<'a> {
         lines
     }
 
-    fn meta_line(role: &Role, idx: usize, chars: usize) -> Line<'static> {
-        let role_name = match role {
-            Role::User => "you",
-            Role::Assistant => "assistant",
-            Role::System => "system",
-            Role::Tool => "tool",
-        };
-        Line::from(vec![
-            Span::styled(format!("{role_name} "), Style::default().fg(theme::UI_TEXT)),
-            Span::styled(
-                format!("#{idx:02}"),
-                Style::default().fg(theme::UI_TEXT_DIM),
-            ),
-            Span::styled(
-                format!(" · {chars} chars"),
-                Style::default().fg(theme::TEXT_SUBTLE),
-            ),
-        ])
-    }
-
     fn assistant_line(line: Line<'static>) -> Line<'static> {
         let mut spans = vec![Span::styled("  ", Style::default().fg(theme::TEXT_SUBTLE))];
         if line.spans.is_empty() {
@@ -156,20 +114,6 @@ impl<'a> ConversationView<'a> {
             spans.extend(line.spans);
         }
         Line::from(spans)
-    }
-
-    fn event_line(line: String) -> Line<'static> {
-        Line::from(vec![
-            Span::styled("  ", Style::default().fg(theme::TEXT_SUBTLE)),
-            Span::styled(line, Style::default().fg(theme::TEXT_SOFT)),
-        ])
-    }
-
-    fn user_line(line: String) -> Line<'static> {
-        Line::from(vec![
-            Span::styled("  ", Style::default().fg(theme::TEXT_SUBTLE)),
-            Span::styled(line, Style::default().fg(theme::TEXT_PRIMARY)),
-        ])
     }
 
     fn loosen_lines(lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
@@ -181,37 +125,6 @@ impl<'a> ConversationView<'a> {
             spaced.push(Self::assistant_line(line));
         }
         spaced
-    }
-
-    fn compact_event_lines(content: &str, width: usize) -> Vec<Line<'static>> {
-        let mut wrapped = Self::wrap_text(content, width.max(20));
-        if wrapped.len() > COMPACT_EVENT_LINES {
-            wrapped.truncate(COMPACT_EVENT_LINES);
-            if let Some(last) = wrapped.last_mut() {
-                last.push_str(" …");
-            }
-        }
-        wrapped.into_iter().map(Self::event_line).collect()
-    }
-
-    fn process_meta_line() -> Line<'static> {
-        Line::from(vec![
-            Span::styled("process ", Style::default().fg(theme::UI_TEXT)),
-            Span::styled("live", Style::default().fg(theme::TEXT_SUBTLE)),
-        ])
-    }
-
-    fn process_lines(&self) -> Vec<Line<'static>> {
-        self.live_state
-            .process_lines
-            .iter()
-            .map(|line| {
-                Line::from(vec![
-                    Span::styled("  · ", Style::default().fg(theme::TEXT_SUBTLE)),
-                    Span::styled(line.clone(), Style::default().fg(theme::TEXT_SOFT)),
-                ])
-            })
-            .collect()
     }
 
     fn live_response_lines(&mut self) -> Vec<Line<'static>> {
@@ -226,53 +139,62 @@ impl<'a> ConversationView<'a> {
 
     fn build_text_lines(&mut self) -> Vec<Line<'static>> {
         let mut text_lines: Vec<Line<'static>> = Vec::new();
+        let mut needs_spacing = false;
 
-        for (idx, message) in self.state.history.iter().enumerate() {
-            if idx > 0 {
-                text_lines.push(Line::from(Span::raw("")));
-            }
-            let display_text = Self::truncate_for_display(&message.content);
-            text_lines.push(Self::meta_line(
-                &message.role,
-                idx + 1,
-                message.content.chars().count(),
-            ));
-            let lines = match message.role {
+        for message in self.state.history.iter() {
+            // 只显示 User 和 Assistant 的消息，隐藏 System 和 Tool
+            match message.role {
                 Role::Assistant => {
-                    let markdown_lines = self.markdown_renderer.render(&display_text);
-                    Self::loosen_lines(markdown_lines)
+                    // 添加间隔
+                    if needs_spacing {
+                        text_lines.push(Line::from(Span::raw("")));
+                    }
+                    needs_spacing = true;
+
+                    // 助手消息用 Markdown 渲染，带左侧标识
+                    let markdown_lines = self.markdown_renderer.render(&message.content);
+                    for line in markdown_lines {
+                        let mut spans = vec![
+                            Span::styled("▌ ", Style::default().fg(theme::ACCENT_BLUE)),
+                        ];
+                        spans.extend(line.spans);
+                        text_lines.push(Line::from(spans));
+                    }
                 }
                 Role::User => {
-                    Self::wrap_text(&display_text, self.content_width.saturating_sub(2).max(24))
-                        .into_iter()
-                        .map(Self::user_line)
-                        .collect()
+                    // 添加间隔
+                    if needs_spacing {
+                        text_lines.push(Line::from(Span::raw("")));
+                    }
+                    needs_spacing = true;
+
+                    // 用户消息带前缀标识
+                    let wrapped = Self::wrap_text(&message.content, self.content_width.saturating_sub(4).max(24));
+                    for (line_idx, line) in wrapped.into_iter().enumerate() {
+                        let prefix = if line_idx == 0 {
+                            Span::styled("❯ ", Style::default().fg(theme::ACCENT_GREEN))
+                        } else {
+                            Span::raw("  ")
+                        };
+                        text_lines.push(Line::from(vec![
+                            prefix,
+                            Span::styled(line, Style::default().fg(theme::TEXT_PRIMARY)),
+                        ]));
+                    }
                 }
                 Role::System | Role::Tool => {
-                    Self::compact_event_lines(&display_text, self.content_width.saturating_sub(2))
+                    // 隐藏系统和工具消息
+                    continue;
                 }
-            };
-            text_lines.extend(lines);
-        }
-
-        if !self.live_state.process_lines.is_empty() {
-            if !text_lines.is_empty() {
-                text_lines.push(Line::from(Span::raw("")));
             }
-            text_lines.push(Self::process_meta_line());
-            text_lines.extend(self.process_lines());
         }
 
+        // 添加实时响应（如果有）
         let live_lines = self.live_response_lines();
         if !live_lines.is_empty() {
             if !text_lines.is_empty() {
                 text_lines.push(Line::from(Span::raw("")));
             }
-            text_lines.push(Self::meta_line(
-                &Role::Assistant,
-                self.state.history.len() + 1,
-                self.live_state.revealed_chars,
-            ));
             text_lines.extend(live_lines);
         }
 

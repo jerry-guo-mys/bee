@@ -1,0 +1,302 @@
+# Bee 告警系统配置
+# 定义告警规则、通知渠道和路由策略
+
+# 告警规则定义
+rules:
+  # LLM 相关告警
+  - name: llm_high_error_rate
+    description: "LLM 调用错误率过高"
+    metric: "bee_llm_calls_failure"
+    condition: "rate(error_rate) > 0.1"
+    threshold: 0.1
+    window: 5m
+    severity: critical
+    labels:
+      type: llm
+      category: error
+
+  - name: llm_high_latency
+    description: "LLM 调用延迟过高"
+    metric: "bee_llm_latency_ms_total"
+    condition: "avg(latency_ms) > 5000"
+    threshold: 5000
+    window: 5m
+    severity: warning
+    labels:
+      type: llm
+      category: performance
+
+  - name: llm_token_exhaustion
+    description: "Token 使用量异常"
+    metric: "bee_llm_prompt_tokens_total"
+    condition: "sum(tokens) > 1000000"
+    threshold: 1000000
+    window: 1h
+    severity: warning
+    labels:
+      type: llm
+      category: usage
+
+  # 工具执行相关告警
+  - name: tool_high_failure_rate
+    description: "工具执行失败率过高"
+    metric: "bee_tool_executions_failure"
+    condition: "rate(failure_rate) > 0.2"
+    threshold: 0.2
+    window: 5m
+    severity: critical
+    labels:
+      type: tool
+      category: error
+
+  - name: tool_slow_execution
+    description: "工具执行过慢"
+    metric: "bee_tool_execution_time_ms_total"
+    condition: "avg(execution_time_ms) > 10000"
+    threshold: 10000
+    window: 5m
+    severity: warning
+    labels:
+      type: tool
+      category: performance
+
+  - name: tool_policy_blocks
+    description: "工具策略拦截过多"
+    metric: "bee_tool_policy_blocks"
+    condition: "count(blocks) > 10"
+    threshold: 10
+    window: 10m
+    severity: warning
+    labels:
+      type: tool
+      category: security
+
+  # 会话相关告警
+  - name: high_active_sessions
+    description: "活跃会话数过高"
+    metric: "bee_session_active_sessions"
+    condition: "gauge(sessions) > 100"
+    threshold: 100
+    window: 5m
+    severity: warning
+    labels:
+      type: session
+      category: load
+
+  - name: session_error_rate
+    description: "会话错误率过高"
+    metric: "bee_session_requests_total"
+    condition: "rate(error_rate) > 0.1"
+    threshold: 0.1
+    window: 5m
+    severity: critical
+    labels:
+      type: session
+      category: error
+
+  # AI 行为质量告警
+  - name: ai_high_error_rate
+    description: "AI 行为错误率过高"
+    metric: "bee_behavior_error_rate"
+    condition: "gauge(error_rate) > 0.3"
+    threshold: 0.3
+    window: 10m
+    severity: critical
+    labels:
+      type: behavior
+      category: quality
+
+  - name: ai_low_completion_rate
+    description: "AI 任务完成率过低"
+    metric: "bee_behavior_completion_rate"
+    condition: "gauge(completion_rate) < 0.5"
+    threshold: 0.5
+    window: 30m
+    severity: warning
+    labels:
+      type: behavior
+      category: quality
+
+  # 系统资源告警
+  - name: memory_high_usage
+    description: "内存使用率过高"
+    metric: "process_resident_memory_bytes"
+    condition: "gauge(memory_mb) > 500"
+    threshold: 500
+    window: 5m
+    severity: warning
+    labels:
+      type: system
+      category: resource
+
+  - name: cpu_high_usage
+    description: "CPU 使用率过高"
+    metric: "process_cpu_seconds_total"
+    condition: "rate(cpu_usage) > 0.8"
+    threshold: 0.8
+    window: 5m
+    severity: warning
+    labels:
+      type: system
+      category: resource
+
+# 通知渠道配置
+notifications:
+  # 邮件通知
+  email:
+    enabled: false
+    smtp_host: "smtp.example.com"
+    smtp_port: 587
+    username: "alerts@example.com"
+    password_env: "SMTP_PASSWORD"
+    from: "bee-alerts@example.com"
+    recipients:
+      - "admin@example.com"
+      - "ops@example.com"
+
+  # Slack 通知
+  slack:
+    enabled: false
+    webhook_url_env: "SLACK_WEBHOOK_URL"
+    channel: "#bee-alerts"
+    username: "Bee Bot"
+
+  # 钉钉通知
+  dingtalk:
+    enabled: false
+    webhook_url_env: "DINGTALK_WEBHOOK_URL"
+    secret_env: "DINGTALK_SECRET"
+
+  # 企业微信通知
+  wecom:
+    enabled: false
+    webhook_url_env: "WECOM_WEBHOOK_URL"
+
+  # PagerDuty 通知
+  pagerduty:
+    enabled: false
+    routing_key_env: "PAGERDUTY_ROUTING_KEY"
+
+# 告警路由策略
+routing:
+  # 默认路由
+  default:
+    receiver: email
+    group_by:
+      - alert_type
+      - severity
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+
+  # 按严重性路由
+  routes:
+    - match:
+        severity: critical
+      receiver: pagerduty
+      continue: true
+      notify_immediately: true
+
+    - match:
+        severity: warning
+      receiver: slack
+      group_wait: 1m
+      group_interval: 10m
+
+    - match:
+        type: security
+      receiver: dingtalk
+      notify_immediately: true
+
+    - match:
+        type: performance
+      receiver: slack
+      group_wait: 5m
+
+# 告警抑制规则
+inhibit_rules:
+  # 当系统资源告警时，抑制相关的性能告警
+  - source_match:
+      type: system
+    target_match:
+      category: performance
+    equal:
+      - instance
+
+  # 当 critical 级别告警时，抑制相同指标的 warning 级别
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal:
+      - metric
+
+# 静默规则
+silence_rules:
+  # 维护时间段内静默
+  - matchers:
+      - name: type
+        value: maintenance
+    starts_at: "02:00"
+    ends_at: "06:00"
+    timezone: "Asia/Shanghai"
+
+# 告警模板
+templates:
+  # Slack 告警模板
+  slack:
+    title: "{{ if eq .Severity \"critical\" }}🚨 CRITICAL{{ else }}⚠️ WARNING{{ end }}: {{ .AlertName }}"
+    text: |
+      **告警详情**
+      - 告警名称：{{ .AlertName }}
+      - 告警级别：{{ .Severity }}
+      - 告警时间：{{ .Time }}
+      - 告警描述：{{ .Description }}
+
+      **指标信息**
+      - 指标名称：{{ .Metric }}
+      - 当前值：{{ .Value }}
+      - 阈值：{{ .Threshold }}
+      - 时间窗口：{{ .Window }}
+
+      **操作建议**
+      {{ .Runbook }}
+
+  # 邮件告警模板
+  email:
+    subject: "[Bee {{ .Severity | upper }}] {{ .AlertName }}"
+    body: |
+      <html>
+      <body>
+        <h2>Bee 系统告警</h2>
+        <table>
+          <tr><td>告警名称:</td><td>{{ .AlertName }}</td></tr>
+          <tr><td>告警级别:</td><td>{{ .Severity }}</td></tr>
+          <tr><td>告警时间:</td><td>{{ .Time }}</td></tr>
+          <tr><td>告警描述:</td><td>{{ .Description }}</td></tr>
+          <tr><td>指标名称:</td><td>{{ .Metric }}</td></tr>
+          <tr><td>当前值:</td><td>{{ .Value }}</td></tr>
+          <tr><td>阈值:</td><td>{{ .Threshold }}</td></tr>
+          <tr><td>时间窗口:</td><td>{{ .Window }}</td></tr>
+        </table>
+        <h3>操作建议</h3>
+        <p>{{ .Runbook }}</p>
+      </body>
+      </html>
+
+# 全局配置
+global:
+  # 告警评估间隔
+  evaluation_interval: 15s
+
+  # 告警保持时间（用于解决短暂抖动）
+  for: 1m
+
+  # 时区
+  timezone: Asia/Shanghai
+
+  # 是否启用告警
+  enabled: true
+
+  # 健康检查间隔
+  health_check_interval: 10s

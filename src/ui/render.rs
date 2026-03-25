@@ -109,6 +109,7 @@ pub fn draw(
     live_state: &LiveConversationState,
     command_popup: &mut CommandPopup,
     file_popup: &mut FilePopup,
+    scrollbar_visible: bool,
 ) {
     let area = f.area();
     Block::default()
@@ -267,7 +268,7 @@ pub fn draw(
         file_popup.render(popup_area, f.buffer_mut());
     }
 
-    if needs_scrollbar {
+    if needs_scrollbar && scrollbar_visible {
         render_conversation_scrollbar(
             scrollbar_area,
             f.buffer_mut(),

@@ -5,7 +5,6 @@
 
 pub mod builder;
 pub mod error;
-pub mod orchestrator;
 pub mod recovery;
 pub mod session_supervisor;
 pub mod shutdown;
@@ -14,7 +13,6 @@ pub mod task_scheduler;
 
 pub use builder::{create_agent_builder, AgentBuilder, AgentComponents};
 pub use error::{AgentError, RecoveryAction};
-pub use orchestrator::{create_agent, Command};
 pub use recovery::RecoveryEngine;
 pub use session_supervisor::SessionSupervisor;
 pub use shutdown::{

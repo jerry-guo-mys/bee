@@ -1,0 +1,54 @@
+{
+  "metadata": {
+    "id": "test-generator",
+    "name": "Test Generator",
+    "version": "1.0.0",
+    "description": "自动生成单元测试的插件，支持多种测试框架",
+    "author": "Bee Team",
+    "license": "MIT",
+    "homepage": "https://github.com/bee/test-generator",
+    "repository": "https://github.com/bee/test-generator",
+    "keywords": ["test", "generator", "unit-test", "automation"],
+    "categories": ["development", "testing"],
+    "dependencies": [],
+    "capabilities": ["read_workspace", "write_files", "analysis"],
+    "configuration": {
+      "test_framework": "cargo-test",
+      "coverage_target": 80,
+      "generate_integration_tests": true,
+      "test_output_dir": "./tests"
+    }
+  },
+  "files": [
+    "src/main.rs",
+    "src/generator.rs",
+    "src/strategies.rs"
+  ],
+  "entry_point": "src/main.rs",
+  "signature": null,
+  "api_version": "1.0.0",
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "test_framework": {
+        "type": "string",
+        "enum": ["cargo-test", "rstest", "proptest", "quickcheck"],
+        "default": "cargo-test"
+      },
+      "coverage_target": {
+        "type": "integer",
+        "minimum": 50,
+        "maximum": 100,
+        "default": 80
+      },
+      "generate_integration_tests": {
+        "type": "boolean",
+        "default": true
+      },
+      "test_output_dir": {
+        "type": "string",
+        "default": "./tests"
+      }
+    }
+  }
+}

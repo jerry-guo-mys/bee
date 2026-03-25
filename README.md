@@ -3,7 +3,7 @@
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.1.0-green.svg)](Cargo.toml)
-[![Tests](https://img.shields.io/badge/Tests-96%20passed-brightgreen.svg)](src/lib.rs)
+[![Tests](https://img.shields.io/badge/Tests-240%20passed-brightgreen.svg)](src/lib.rs)
 
 > 高性能、安全且具备长期记忆的 Rust 个人智能体系统
 
@@ -15,7 +15,7 @@ Bee 是一个基于 ReAct 架构的智能体，支持多工具协作、分层记
 
 - 🤖 **智能编排**: ReAct 循环 + Planner/Critic 双核心，自主规划与反思（20 步上限防止死循环）
 - 🧠 **分层记忆**: 短期对话（智能剪枝）+ 中期工作区 + 长期持久化记忆（向量检索 + 文件存储）
-- 🔍 **RAG 检索增强**: 文档分块、混合检索（向量+关键词 RRF 融合）、上下文增强生成
+- 🔍 **RAG 检索增强**: 文档分块、混合检索（向量 + 关键词 RRF 融合）、上下文增强生成
 - 🀄 **中文分词**: jieba-rs 智能分词，中英文混合检索优化
 - 🛠️ **丰富工具**: 沙箱文件系统、Shell 白名单、Web 搜索、代码读写/审查/Git 操作、浏览器控制
 - 📚 **深度研究**: 多轮自主搜索、信息源验证、知识图谱构建、结构化报告生成
@@ -142,9 +142,94 @@ model = "deepseek-reasoner"  # 或 "deepseek-chat"
 
 或在 `config/models.toml` 中注册更多模型，Web 界面可动态切换。
 
+### 自动模型路由
+
+系统支持智能模型路由，根据任务类型自动选择最合适的模型：
+
+**自动路由规则**：
+- 简单问答（<20 字） → 快速模型（deepseek-chat）
+- 代码相关（含编程关键词） → 代码模型
+- 复杂推理（含分析/解释/为什么等关键词） → 推理模型
+- 多问题（3+ 问号） → 推理模型
+- 长内容（>500 字） → 推理模型
+- 技术术语密集（3+ 术语） → 推理模型
+
+**指令前缀覆盖**：
+- `/think` 或 `/推理`：强制使用推理模型（deepseek-reasoner）
+- `/fast` 或 `/快速`：强制使用快速模型（deepseek-chat）
+
+**示例**：
+```bash
+# 简单问题（自动使用快速模型）
+"今天天气怎么样？"
+
+# 复杂推理（自动使用推理模型）
+"分析一下这个算法的时间复杂度和空间复杂度"
+
+# 强制使用推理模型
+"/think 请详细解释量子计算的原理"
+
+# 强制使用快速模型
+"/fast 2+2 等于几"
+```
+
 ---
 
 ## 🏗️ 架构
+
+### 架构分层依赖图
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    可执行入口层 (bin/)                        │
+│         bee (TUI) / bee-web / bee-lark / bee-gateway         │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    用户界面层 (ui/)                           │
+│         app / render / widgets / markdown / streaming        │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    应用服务层 (application/)                  │
+│    orchestrator / agent_service / task_queue / event_bus    │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    核心编排层 (core/)                         │
+│    builder / state / error / recovery / session_supervisor  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      领域层 (domain/)                         │
+│    cognitive / tool / memory / session / event              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│   记忆实现层     │ │    工具箱层      │ │   ReAct 循环层    │
+│   (memory/)     │ │   (tools/)      │ │   (react/)      │
+└─────────────────┘ └─────────────────┘ └─────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   基础设施层 (infrastructure/)                │
+│    memory / persistence / pool / session                    │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     LLM 适配层 (llm/)                         │
+│    traits / openai / deepseek / mock / router               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 完整架构视图
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
@@ -171,13 +256,13 @@ model = "deepseek-reasoner"  # 或 "deepseek-chat"
                                │
     ┌──────────────────────────┼──────────────────────────┐
     ▼                          ▼                          ▼
-┌────────────────┐   ┌──────────────────┐   ┌────────────────────┐
+┌────────────────   ┌──────────────────┐   ┌────────────────────┐
 │   认知层        │   │     工具层        │   │      记忆层         │
-│ Planner        │   │ 沙箱文件系统      │   │ 对话记忆(智能剪枝)   │
+│ Planner        │   │ 沙箱文件系统      │   │ 对话记忆 (智能剪枝)   │
 │ Critic         │   │ Shell 白名单      │   │ 中期工作区           │
-│ ReAct Loop     │   │ 代码读写/审查     │   │ 长期记忆(文件+向量)  │
+│ ReAct Loop     │   │ 代码读写/审查     │   │ 长期记忆 (文件 + 向量)  │
 │ (20 步上限)    │   │ Git Diff/Commit   │   │ 用户记忆             │
-│                │   │ Web/深度搜索      │   │ 学习经验(Learnings)  │
+│                │   │ Web/深度搜索      │   │ 学习经验 (Learnings)  │
 │                │   │ 知识图谱          │   │ RAG Pipeline         │
 │                │   │ 报告生成器        │   │ Token Budget         │
 └────────────────┘   └──────────────────┘   └────────────────────┘
@@ -205,7 +290,7 @@ model = "deepseek-reasoner"  # 或 "deepseek-chat"
 |------|------|
 | **AgentBuilder** | 统一 Agent 组件构建，支持自定义 Prompt 和配置参数注入 |
 | **多模型路由** | 根据任务类型（代码/推理/摘要）自动选择最优模型 |
-| **RAG Pipeline** | 文档分块 → 向量存储 → 混合检索（向量+关键词 RRF）→ 上下文增强 |
+| **RAG Pipeline** | 文档分块 → 向量存储 → 混合检索（向量 + 关键词 RRF）→ 上下文增强 |
 | **智能剪枝** | 对话超长时保留系统消息，优先移除工具输出，Token Budget 管理 |
 | **技能系统** | TOML 定义技能，SkillSelector 按任务选择，SkillLoader 动态注册工具 |
 | **自我进化** | Analyzer 分析代码质量 → Planner 生成改进计划 → Executor 执行 → Git 提交 |
@@ -221,111 +306,119 @@ bee/
 ├── src/
 │   ├── main.rs            # TUI 入口
 │   ├── lib.rs             # Library 导出
-│   ├── agent.rs           # Headless Agent 运行时（供非 TUI 前端调用）
-│   ├── config.rs          # 应用配置加载
 │   ├── bin/               # 附加二进制
 │   │   ├── web.rs             # Web 服务器 (Axum SSE)
 │   │   ├── whatsapp.rs        # WhatsApp Webhook
 │   │   ├── lark.rs            # 飞书 Webhook
 │   │   ├── gateway.rs         # WebSocket 网关
 │   │   └── evolution_test.rs  # 进化引擎测试
-│   ├── core/              # 核心编排
-│   │   ├── orchestrator.rs    # 会话编排器
-│   │   ├── builder.rs         # AgentBuilder 统一构建
-│   │   ├── session_supervisor.rs  # 会话监管
-│   │   ├── task_scheduler.rs  # 任务调度器
+│   ├── application/       # 应用服务层
+│   │   ├── orchestrator.rs    # Agent 编排器
+│   │   ├── agent_service.rs   # Agent 服务实现
+│   │   ├── task_queue.rs      # 工作窃取任务队列
+│   │   ├── event_bus.rs       # 应用事件总线
+│   │   └── stream.rs          # 流式响应服务
+│   ├── core/              # 核心编排层
+│   │   ├── builder.rs         # Agent 组件构建器
+│   │   ├── state.rs           # 状态投影 (UiState, AgentPhase)
+│   │   ├── error.rs           # 核心错误定义
 │   │   ├── recovery.rs        # 恢复引擎
-│   │   ├── shutdown.rs        # 优雅关闭
-│   │   ├── state.rs           # 状态管理
-│   │   └── error.rs           # 错误类型
-│   ├── llm/               # LLM 客户端
-│   │   ├── deepseek.rs        # DeepSeek 客户端
-│   │   ├── openai.rs          # OpenAI 兼容客户端
-│   │   ├── router.rs          # 多模型路由器
-│   │   ├── embedding.rs       # Embedding 向量化
-│   │   ├── traits.rs          # LlmError + 重试策略
-│   │   └── mock.rs            # Mock 测试客户端
-│   ├── memory/            # 记忆系统
-│   │   ├── conversation.rs    # 智能剪枝对话记忆
-│   │   ├── working.rs         # 中期工作区
-│   │   ├── long_term.rs       # 长期记忆（文件 + 向量）
-│   │   ├── user_memory.rs     # 用户个性化记忆
-│   │   ├── learnings.rs       # 学习经验积累
+│   │   ├── session_supervisor.rs  # 会话监管器
+│   │   ├── task_scheduler.rs  # 任务调度器
+│   │   └── shutdown.rs        # 优雅关闭协调器
+│   ├── domain/            # 领域层（业务核心）
+│   │   ├── cognitive/         # 认知领域 (Planner, Critic, ReAct)
+│   │   ├── tool/              # 工具领域 (Tool, Registry, Executor)
+│   │   ├── memory/            # 记忆领域 (Conversation, Working)
+│   │   ├── session/           # 会话领域
+│   │   └── event/             # 领域事件
+│   ├── memory/            # 记忆实现层
+│   │   ├── conversation.rs    # 对话记忆 (智能剪枝)
+│   │   ├── working.rs         # 工作记忆
+│   │   ├── long_term.rs       # 长期记忆 (文件 + 向量)
+│   │   ├── user_memory.rs     # 用户记忆
+│   │   ├── learnings.rs       # 学习经验
 │   │   ├── rag.rs             # RAG Pipeline
 │   │   ├── tokenizer.rs       # 中文分词 (jieba-rs)
-│   │   ├── token_budget.rs    # Token 预算管理
+│   │   ├── token_budget.rs    # Token 预算
 │   │   ├── markdown_store.rs  # Markdown 存储
-│   │   ├── persistence.rs     # 同步持久化
-│   │   ├── async_persistence.rs  # sqlx 异步 SQLite
-│   │   └── async_io.rs        # 异步文件 I/O
-│   ├── react/             # ReAct 认知循环
-│   │   ├── loop_.rs           # ReAct 主循环
+│   │   ├── persistence.rs     # SQLite 持久化
+│   │   └── async_persistence.rs  # 异步 SQLite
+│   ├── tools/             # 工具箱层 (30+ 工具)
+│   │   ├── groups/              # 工具分组
+│   │   │   ├── code.rs          # 代码工具组
+│   │   │   ├── filesystem.rs    # 文件系统工具组
+│   │   │   ├── git.rs           # Git 工具组
+│   │   │   └── web.rs           # Web 工具组
+│   │   ├── executor.rs      # 工具执行器
+│   │   ├── registry.rs      # 工具注册表
+│   │   └── [具体工具].rs    # 30+ 具体工具实现
+│   ├── react/             # ReAct 认知循环层
 │   │   ├── planner.rs         # 规划器
 │   │   ├── critic.rs          # 批评器
-│   │   ├── memory.rs          # 上下文管理
-│   │   └── events.rs          # 事件系统
-│   ├── skills/            # 技能系统
-│   │   ├── loader.rs          # 技能加载器
-│   │   └── selector.rs        # 技能选择器
-│   ├── tools/             # 工具箱 (27 个工具)
-│   │   ├── executor.rs        # 工具执行器
-│   │   ├── registry.rs        # 工具注册中心
-│   │   ├── schema.rs          # JSON Schema 定义
-│   │   ├── filesystem.rs      # 文件操作 (cat, ls)
-│   │   ├── shell.rs           # Shell 命令 (白名单)
-│   │   ├── search.rs          # Web 搜索
-│   │   ├── deep_search.rs     # 深度研究
-│   │   ├── code_read.rs       # 代码阅读
-│   │   ├── code_write.rs      # 代码编写
-│   │   ├── code_edit.rs       # 代码编辑
-│   │   ├── code_grep.rs       # 代码搜索
-│   │   ├── code_review.rs     # 代码审查
-│   │   ├── git_diff.rs        # Git Diff
-│   │   ├── git_commit.rs      # Git Commit
-│   │   ├── knowledge_graph.rs # 知识图谱
-│   │   ├── report_generator.rs# 报告生成
-│   │   ├── source_validator.rs# 信息源验证
-│   │   ├── test_run.rs        # 测试运行
-│   │   ├── test_check.rs      # 测试检查
-│   │   ├── browser.rs         # 浏览器控制
-│   │   ├── echo.rs            # Echo 调试
-│   │   ├── create.rs          # 文件创建
-│   │   ├── create_group.rs    # 分组创建
-│   │   ├── send.rs            # 消息发送
-│   │   ├── list_agents.rs     # 列出助手
-│   │   └── plugin.rs          # 插件工具
-│   ├── evolution/         # 自我进化引擎
-│   │   ├── analyzer.rs        # 代码质量分析
-│   │   ├── planner.rs         # 改进规划
-│   │   ├── executor.rs        # 计划执行
-│   │   ├── engine.rs          # 进化引擎
-│   │   ├── loop_.rs           # 进化循环
-│   │   └── types.rs           # 类型定义
-│   ├── gateway/           # WebSocket 网关 (feature-gated)
-│   │   ├── hub.rs             # Hub 中心节点
-│   │   ├── spoke.rs           # Spoke 边缘节点
-│   │   ├── session.rs         # 会话管理
-│   │   ├── session_store.rs   # 会话存储
-│   │   ├── persistent_session.rs  # 持久化会话
-│   │   ├── task_queue.rs      # 任务队列
-│   │   ├── runtime.rs         # 运行时
-│   │   ├── intent.rs          # 意图解析
-│   │   └── message.rs         # 消息类型
-│   ├── integrations/      # 第三方集成
-│   │   ├── whatsapp.rs        # WhatsApp API
-│   │   └── lark.rs            # 飞书 API
-│   ├── plugins/           # 插件系统
-│   ├── observability/     # 可观测性 (Metrics + Tracing)
-│   └── ui/                # TUI 界面 (Ratatui)
-├── static/                # Web UI 前端
-├── config/                # 配置与 Prompt 模板
+│   │   ├── loop_.rs           # ReAct 主循环
+│   │   ├── context.rs         # 上下文管理
+│   │   └── events.rs          # ReAct 事件
+│   ├── infrastructure/    # 基础设施层
+│   │   ├── memory/              # 内存存储
+│   │   ├── persistence/         # 持久化 (细粒度锁)
+│   │   ├── pool/                # 连接池 (SQLite, HTTP)
+│   │   └── session/             # 会话存储
+│   ├── llm/               # LLM 适配层
+│   │   ├── traits.rs            # LLM trait
+│   │   ├── openai.rs            # OpenAI 客户端
+│   │   ├── deepseek.rs          # DeepSeek 客户端
+│   │   ├── mock.rs              # Mock 客户端
+│   │   ├── router.rs            # LLM 路由
+│   │   └── embedding.rs         # Embedding
+│   ├── ui/                # 用户界面层
+│   │   ├── app.rs               # TUI 主循环
+│   │   ├── render.rs            # 渲染逻辑
+│   │   ├── event.rs             # 事件处理
+│   │   ├── theme.rs             # 主题定义
+│   │   ├── widgets/             # UI 组件
+│   │   ├── markdown/            # Markdown 渲染
+│   │   └── streaming/           # 流式输出
+│   ├── plugins/           # 插件系统层
+│   │   └── loader.rs            # 插件加载器
+│   ├── skills/            # 技能系统层
+│   ├── workflow/          # 工作流引擎层
+│   ├── messaging/         # 消息通道层
+│   ├── integrations/      # 外部集成层
+│   ├── observability/     # 可观测性层
+│   ├── gateway/           # 网关层 (WebSocket)
+│   ├── saas/              # 多租户 SaaS 层
+│   ├── service_contracts/ # 服务契约层
+│   ├── evolution/         # 自我进化层
+│   ├── container/         # 依赖注入容器层
+│   ├── config/            # 配置加载层
+│   ├── test_utils/        # 测试工具层
+│   └── tool_policy/       # 工具策略层
+├── config/                # 配置文件与模板
 │   ├── default.toml           # 主配置
 │   ├── models.toml            # 模型注册
 │   ├── assistants.toml        # 助手定义
+│   ├── alerts.yml             # 告警系统配置
 │   ├── prompts/               # System Prompt 模板
-│   └── skills/                # 技能插件 (搜索/写作/爆款/Claude 等)
-├── docs/                  # 项目文档
-└── workspace/             # 沙箱工作目录
+│   └── skills/                # 技能插件定义
+├── dashboards/            # Grafana 仪表板
+│   ├── bee-overview.json      # 系统概览
+│   └── bee-business.json      # 业务指标
+├── plugins/               # 示例插件
+│   ├── code-analyzer/         # 代码分析器
+│   ├── doc-generator/         # 文档生成器
+│   └── test-generator/        # 测试生成器
+├── benches/               # 性能基准测试
+│   ├── memory_store_bench.rs
+│   └── session_store_bench.rs
+├── tests/                 # 集成测试
+│   ├── error_recovery_test.rs
+│   ├── memory_persistence_test.rs
+│   ├── multi_session_test.rs
+│   ├── react_loop_test.rs
+│   ├── tool_execution_test.rs
+│   └── ...
+└── docs/                  # 项目文档
 ```
 
 ---
@@ -387,6 +480,23 @@ let config = PruneConfig {
 let pruned = conversation.prune();  // 返回被移除的消息供长期记忆使用
 ```
 
+### 细粒度锁持久化
+
+```rust
+// 基于键的细粒度读写锁，支持高并发
+let store: FineGrainedLockStore<String, Session> = FineGrainedLockStore::new();
+store.upsert("session_1".to_string(), session).await?;
+```
+
+### 连接池管理
+
+```rust
+// SQLite 连接池，信号量控制并发
+let pool = SqliteConnectionPool::in_memory()?;
+let guard = pool.get().await.unwrap();
+guard.execute(|conn| conn.execute("CREATE TABLE ...", [])?)?;
+```
+
 ---
 
 ## 📚 文档
@@ -402,7 +512,7 @@ let pruned = conversation.prune();  // 返回被移除的消息供长期记忆�
 ### 架构与设计
 - [🏗️ 架构改进](docs/ARCHITECTURE_IMPROVEMENTS.md) - 四阶段架构演进计划
 - [🔍 架构分析](docs/ARCHITECTURE_ANALYSIS.md) - 架构分析报告
-- [📐 架构白皮书](docs/Rust个人智能体系统(Bee)-架构设计白皮书.md) - 系统设计白皮书
+- [📐 架构白皮书](docs/Rust 个人智能体系统 (Bee)-架构设计白皮书.md) - 系统设计白皮书
 
 ### 功能模块
 - [📚 深度研究](docs/DEEP_RESEARCH.md) - 深度研究功能完整指南
@@ -430,7 +540,7 @@ cargo run
 # 生产构建
 cargo build --release
 
-# 运行测试（96 个测试）
+# 运行测试（240 个测试）
 cargo test
 
 # 代码检查
@@ -472,7 +582,7 @@ cargo run --bin bee-evolution
 | `core::session_supervisor` | 会话生命周期监管 |
 | `llm::router` | 多模型路由，按任务类型自动选择模型 |
 | `llm::embedding` | 向量化嵌入（Embedding API） |
-| `memory::rag` | RAG Pipeline，文档分块+混合检索 |
+| `memory::rag` | RAG Pipeline，文档分块 + 混合检索 |
 | `memory::long_term` | 长期记忆（文件存储 + 向量检索） |
 | `memory::user_memory` | 用户个性化记忆管理 |
 | `memory::tokenizer` | 中英文智能分词（jieba-rs） |
@@ -487,14 +597,15 @@ cargo run --bin bee-evolution
 ## 🔒 安全特性
 
 - **沙箱文件系统**: 只能访问 `workspace/` 目录
-- **Shell 白名单**: 仅允许配置的命令（默认: ls, grep, cat, head, tail, wc, find, cargo, rustc）
+- **Shell 白名单**: 仅允许配置的命令（默认：ls, grep, cat, head, tail, wc, find, cargo, rustc）
 - **域名白名单**: Web 搜索限制在允许域名内
 - **进化安全**: strict/balanced/permissive 三级安全模式，支持回滚与备份
 - **API Key 隔离**: 环境变量管理，不写入配置文件
+- **细粒度锁**: 基于键的读写锁，避免全局锁竞争
 
 ---
 
-## 🤝 贡献
+##  贡献
 
 欢迎 Issue 和 PR！
 

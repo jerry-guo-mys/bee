@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use bee::{
     config::load_config,
-    core::orchestrator::create_llm_from_config,
+    application::orchestrator::create_llm_from_config,
     evolution::{EvolutionConfig, EvolutionLoop},
     tools::{
         CatTool, CodeEditTool, CodeGrepTool, CodeReadTool, CodeWriteTool, EchoTool, GitCommitTool,
