@@ -177,6 +177,17 @@ pub enum SessionStatus {
     Disconnected,
 }
 
+impl std::fmt::Display for SessionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SessionStatus::Idle => write!(f, "idle"),
+            SessionStatus::Processing => write!(f, "processing"),
+            SessionStatus::WaitingInput => write!(f, "waiting_input"),
+            SessionStatus::Disconnected => write!(f, "disconnected"),
+        }
+    }
+}
+
 /// 历史消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryMessage {

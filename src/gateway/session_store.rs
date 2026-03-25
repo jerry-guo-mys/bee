@@ -95,7 +95,8 @@ impl SessionStore for MemorySessionStore {
     }
 
     async fn set_context(&self, session_id: &str, context: ContextManager) {
-        self.inner
+        let _ = self
+            .inner
             .with_session(session_id, |s| {
                 s.context = context;
             })
@@ -109,7 +110,8 @@ impl SessionStore for MemorySessionStore {
     }
 
     async fn set_scope(&self, session_id: &str, scope: SessionScope) {
-        self.inner
+        let _ = self
+            .inner
             .with_session(session_id, |s| {
                 s.scope = scope;
             })
@@ -165,7 +167,7 @@ impl SessionStore for MemorySessionStore {
                 };
                 limited
                     .iter()
-                    .map(|m| (format!("{:?}", m.role), m.content.clone()))
+                    .map(|m| (m.role.to_string(), m.content.clone()))
                     .collect()
             })
             .await
@@ -208,7 +210,8 @@ impl SessionStore for PersistentSessionStore {
     }
 
     async fn set_context(&self, session_id: &str, context: ContextManager) {
-        self.inner
+        let _ = self
+            .inner
             .with_session(session_id, |s| {
                 s.context = context;
             })
@@ -222,7 +225,8 @@ impl SessionStore for PersistentSessionStore {
     }
 
     async fn set_scope(&self, session_id: &str, scope: SessionScope) {
-        self.inner
+        let _ = self
+            .inner
             .with_session(session_id, |s| {
                 s.scope = scope;
             })
@@ -268,7 +272,7 @@ impl SessionStore for PersistentSessionStore {
                 };
                 limited
                     .iter()
-                    .map(|m| (format!("{:?}", m.role), m.content.clone()))
+                    .map(|m| (m.role.to_string(), m.content.clone()))
                     .collect()
             })
             .await

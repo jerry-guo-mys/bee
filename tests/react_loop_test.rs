@@ -149,4 +149,95 @@ mod tests {
         assert!(matches!(messages[0].role, bee::memory::Role::User));
         assert!(matches!(messages[4].role, bee::memory::Role::Assistant));
     }
+
+    #[test]
+    fn test_tool_message_role_not_assistant() {
+        // 验证工具消息使用 Role::Tool 而非 Role::Assistant
+        // 这是为了确保 TUI 不会将工具调用结果显示为原始文本
+        let mut context = ContextManager::new(5);
+
+        context.push_message(Message::user("Run echo command"));
+        context.push_message(Message::assistant("I'll run the echo tool."));
+
+        // 工具结果应该使用 Role::Tool
+        context.push_message(Message::tool("Tool: echo | Result: Hello"));
+
+        // 验证工具消息的角色是 Tool 而不是 Assistant
+        let messages = context.conversation.messages();
+        let tool_msg = messages.iter().find(|m| m.content.contains("Tool: echo"));
+
+        assert!(tool_msg.is_some(), "Should find tool message");
+        assert_eq!(tool_msg.unwrap().role, bee::memory::Role::Tool,
+                   "Tool message should use Role::Tool, not Role::Assistant");
+
+        // 验证没有 Assistant 角色包含工具调用文本
+        let assistant_with_tool: Vec<_> = messages.iter()
+            .filter(|m| matches!(m.role, bee::memory::Role::Assistant))
+            .filter(|m| m.content.contains("Tool call:") || m.content.contains("Tool:"))
+            .collect();
+
+        assert!(assistant_with_tool.is_empty(),
+                "No Assistant message should contain tool call text");
+    }
+
+    #[tokio::test]
+    async fn test_react_loop_with_echo_tool() {
+        // 真实调用 echo 工具验证工具消息的角色
+        use bee::react::ContextManager;
+        use bee::llm::MockLlmClient;
+        use bee::react::{react_loop, Planner};
+        use bee::tools::{EchoTool, ToolExecutor, ToolRegistry};
+        use bee::core::RecoveryEngine;
+        use std::sync::Arc;
+
+        // 创建 Mock LLM（返回固定的工具调用响应）
+        let llm = Arc::new(MockLlmClient);
+        let planner = Planner::new(llm, "You are a test assistant.".to_string());
+
+        // 注册 Echo 工具
+        let mut registry = ToolRegistry::new();
+        registry.register(EchoTool);
+        let executor = ToolExecutor::new(registry, 30);
+
+        let recovery = RecoveryEngine::new();
+        let mut context = ContextManager::new(10);
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+
+        // 执行 ReAct 循环
+        let result = react_loop(
+            &planner,
+            &executor,
+            &recovery,
+            &mut context,
+            "Say hello",
+            None,
+            None,
+            cancel_token,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        // 验证执行成功
+        assert!(result.is_ok(), "ReAct loop should complete successfully");
+
+        // 验证消息历史
+        let messages = context.conversation.messages();
+
+        // 检查是否存在 Tool 角色的消息（如果有工具调用）
+        let tool_messages: Vec<_> = messages.iter()
+            .filter(|m| matches!(m.role, bee::memory::Role::Tool))
+            .collect();
+
+        // 检查 Assistant 角色是否包含工具调用文本（不应该）
+        let assistant_tool_calls: Vec<_> = messages.iter()
+            .filter(|m| matches!(m.role, bee::memory::Role::Assistant))
+            .filter(|m| m.content.contains("Tool call:") || m.content.contains("Tool: echo"))
+            .collect();
+
+        assert!(assistant_tool_calls.is_empty(),
+                "Assistant messages should not contain tool call text");
+    }
 }

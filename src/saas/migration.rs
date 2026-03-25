@@ -560,7 +560,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             workspace.join("sessions").join("session-1---default.json"),
-            r#"{"messages":[{"role":"User","content":"hello"},{"role":"Assistant","content":"world"}],"max_turns":20}"#,
+            r#"{"messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"world"}],"max_turns":20}"#,
         )
         .unwrap();
 
@@ -596,7 +596,7 @@ mod tests {
 
         std::fs::write(
             workspace.join("sessions").join("session-1---auto.json"),
-            r#"{"messages":[{"role":"User","content":"hello"}],"max_turns":20}"#,
+            r#"{"messages":[{"role":"user","content":"hello"}],"max_turns":20}"#,
         )
         .unwrap();
 
