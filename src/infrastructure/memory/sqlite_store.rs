@@ -7,6 +7,7 @@ use rusqlite::{params, Connection, Result as SqliteResult};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::task::spawn_blocking;
 
 use crate::domain::memory::store::MemoryStore;
 use crate::memory::{Message, Role};
@@ -92,35 +93,54 @@ impl SqliteMemoryStore {
 #[async_trait]
 impl MemoryStore for SqliteMemoryStore {
     async fn append(&self, conversation_id: &str, message: &Message) -> Result<(), String> {
-        let conn = self.conn.lock().await;
-        let role = SqliteMemoryStore::message_to_row(message);
-        conn.execute(
-            "INSERT INTO messages (conversation_id, role, content) VALUES (?1, ?2, ?3)",
-            params![conversation_id, role, &message.content],
-        )
-        .map_err(|e| format!("Failed to insert message: {}", e))?;
+        let conn = self.conn.clone();
+        let conversation_id = conversation_id.to_string();
+        let role = SqliteMemoryStore::message_to_row(message).to_string();
+        let content = message.content.clone();
+
+        spawn_blocking(move || {
+            let conn = conn.blocking_lock();
+            conn.execute(
+                "INSERT INTO messages (conversation_id, role, content) VALUES (?1, ?2, ?3)",
+                params![conversation_id, role, content],
+            )
+            .map_err(|e| format!("Failed to insert message: {}", e))?;
+            Ok::<(), String>(())
+        })
+        .await
+        .map_err(|e| format!("Blocking task failed: {}", e))?
+        ?;
         Ok(())
     }
 
     async fn load(&self, conversation_id: &str, limit: usize) -> Result<Vec<Message>, String> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn
-            .prepare("SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY id")
-            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+        let conn = self.conn.clone();
+        let conversation_id = conversation_id.to_string();
 
-        let message_iter = stmt
-            .query_map(params![conversation_id], |row| {
-                let role: String = row.get(0)?;
-                let content: String = row.get(1)?;
-                Ok(SqliteMemoryStore::row_to_message(&role, &content))
-            })
-            .map_err(|e| format!("Failed to query messages: {}", e))?;
+        let messages = spawn_blocking(move || {
+            let conn = conn.blocking_lock();
+            let mut stmt = conn
+                .prepare("SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY id")
+                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
-        let mut messages: Vec<Message> = message_iter
-            .filter_map(|r| r.ok())
-            .collect();
+            let message_iter = stmt
+                .query_map(params![conversation_id], |row| {
+                    let role: String = row.get(0)?;
+                    let content: String = row.get(1)?;
+                    Ok(SqliteMemoryStore::row_to_message(&role, &content))
+                })
+                .map_err(|e| format!("Failed to query messages: {}", e))?;
+
+            let messages: Vec<Message> = message_iter
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok::<Vec<Message>, String>(messages)
+        })
+        .await
+        .map_err(|e| format!("Blocking task failed: {}", e))??;
 
         // 应用限制
+        let mut messages = messages;
         if limit > 0 && limit < messages.len() {
             messages = messages.into_iter().rev().take(limit).rev().collect();
         }
@@ -129,12 +149,21 @@ impl MemoryStore for SqliteMemoryStore {
     }
 
     async fn delete(&self, conversation_id: &str) -> Result<(), String> {
-        let conn = self.conn.lock().await;
-        conn.execute(
-            "DELETE FROM messages WHERE conversation_id = ?1",
-            params![conversation_id],
-        )
-        .map_err(|e| format!("Failed to delete messages: {}", e))?;
+        let conn = self.conn.clone();
+        let conversation_id = conversation_id.to_string();
+
+        spawn_blocking(move || {
+            let conn = conn.blocking_lock();
+            conn.execute(
+                "DELETE FROM messages WHERE conversation_id = ?1",
+                params![conversation_id],
+            )
+            .map_err(|e| format!("Failed to delete messages: {}", e))?;
+            Ok::<(), String>(())
+        })
+        .await
+        .map_err(|e| format!("Blocking task failed: {}", e))?
+        ?;
         Ok(())
     }
 }

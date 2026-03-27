@@ -2,13 +2,14 @@
 
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast, mpsc};
 
 use crate::config::AppConfig;
 use crate::core::{AgentComponents, AgentError};
 use crate::domain::session::{Session, SessionConfig, SessionStatus};
 use crate::memory::{Message, SqlitePersistence};
-use crate::react::{react_loop, ContextManager};
+use crate::react::{react_loop, ContextManager, ReactEvent};
+use tracing;
 
 /// Agent 响应
 #[derive(Debug, Clone)]
@@ -68,6 +69,8 @@ pub struct AgentServiceImpl {
     components: Arc<AgentComponents>,
     sqlite_persistence: Arc<Mutex<Option<SqlitePersistence>>>,
     sessions: Arc<Mutex<std::collections::HashMap<String, Session>>>,
+    stream_tx: broadcast::Sender<String>,
+    event_tx: mpsc::UnboundedSender<ReactEvent>,
 }
 
 impl AgentServiceImpl {
@@ -75,12 +78,16 @@ impl AgentServiceImpl {
         config: AppConfig,
         components: AgentComponents,
         sqlite_persistence: Arc<Mutex<Option<SqlitePersistence>>>,
+        stream_tx: broadcast::Sender<String>,
+        event_tx: mpsc::UnboundedSender<ReactEvent>,
     ) -> Self {
         Self {
             config,
             components: Arc::new(components),
             sqlite_persistence,
             sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            stream_tx,
+            event_tx,
         }
     }
 
@@ -133,13 +140,15 @@ impl AgentService for AgentServiceImpl {
         {
             let persistence = self.sqlite_persistence.lock().await;
             if let Some(ref p) = *persistence {
-                let _ = p.save_message(
+                if let Err(e) = p.save_message(
                     session_id,
                     &Message {
                         role: crate::memory::Role::User,
                         content: input.to_string(),
                     },
-                );
+                ) {
+                    tracing::warn!("Failed to save user message to SQLite: {}", e);
+                }
             }
         }
 
@@ -151,8 +160,8 @@ impl AgentService for AgentServiceImpl {
             &self.components.recovery,
             &mut context,
             input,
-            None,
-            None,
+            Some(&self.stream_tx),
+            Some(&self.event_tx),
             cancel_token,
             self.components.critic.as_ref(),
             Some(&self.components.task_scheduler),
@@ -168,7 +177,9 @@ impl AgentService for AgentServiceImpl {
                     if last_msg.role == crate::memory::Role::Assistant {
                         let persistence = self.sqlite_persistence.lock().await;
                         if let Some(ref p) = *persistence {
-                            let _ = p.save_message(session_id, last_msg);
+                            if let Err(e) = p.save_message(session_id, last_msg) {
+                                tracing::warn!("Failed to save assistant message to SQLite: {}", e);
+                            }
                         }
                     }
 
@@ -196,11 +207,25 @@ impl AgentService for AgentServiceImpl {
     }
 
     async fn clear(&self, session_id: &str) -> Result<(), AgentError> {
-        let mut sessions = self.sessions.lock().await;
-        if let Some(session) = sessions.get_mut(session_id) {
-            session.messages.clear();
-            session.state.message_count = 0;
+        // 清空内存
+        {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(session) = sessions.get_mut(session_id) {
+                session.messages.clear();
+                session.state.message_count = 0;
+            }
         }
+
+        // 同时清空 SQLite 中的消息
+        {
+            let persistence = self.sqlite_persistence.lock().await;
+            if let Some(ref p) = *persistence {
+                if let Err(e) = p.delete_messages(session_id) {
+                    tracing::warn!("Failed to delete messages from SQLite: {}", e);
+                }
+            }
+        }
+
         Ok(())
     }
 

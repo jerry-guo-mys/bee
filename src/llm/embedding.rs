@@ -67,9 +67,20 @@ impl EmbeddingProvider for OpenAiEmbedder {
     fn embed_sync(&self, text: &str) -> Result<Vec<f32>, String> {
         let text = text.to_string();
         let this = self.clone();
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(this.embed_async(&text))
-        })
+
+        // 检查当前是否有 running 的 tokio runtime
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                // 有 runtime：使用 block_in_place 避免阻塞 async 线程
+                tokio::task::block_in_place(|| handle.block_on(this.embed_async(&text)))
+            }
+            Err(_) => {
+                // 无 runtime：创建新 runtime 执行（适用于 sync 上下文调用）
+                let rt = tokio::runtime::Runtime::new()
+                    .map_err(|e| format!("Failed to create tokio runtime: {}", e))?;
+                rt.block_on(this.embed_async(&text))
+            }
+        }
     }
 }
 

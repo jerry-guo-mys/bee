@@ -63,7 +63,7 @@ mod tests {
     #[test]
     fn test_recovery_engine_network_timeout() {
         let engine = RecoveryEngine::new();
-        let err = AgentError::NetworkTimeout;
+        let err = AgentError::NetworkTimeout("test".to_string());
         let action = engine.handle(&err, &mut []);
 
         match action {

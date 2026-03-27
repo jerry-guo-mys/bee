@@ -224,23 +224,68 @@ impl CodeEditTool {
         file_path: &Path,
         edits: Vec<(String, String)>,
     ) -> Result<Vec<EditResult>, String> {
-        let mut results = Vec::new();
+        // 读取文件内容（只读一次）
+        let content = std::fs::read_to_string(file_path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
 
-        for (old_string, new_string) in edits {
-            match self.perform_edit(file_path, &old_string, &new_string) {
-                Ok(result) => results.push(result),
-                Err(e) => {
-                    results.push(EditResult {
-                        success: false,
-                        message: e,
-                        old_string,
-                        new_string,
-                        line_number: None,
-                    });
-                }
+        if content.len() > self.max_file_size {
+            return Err(format!(
+                "File too large: {} bytes (max: {})",
+                content.len(),
+                self.max_file_size
+            ));
+        }
+
+        // 第一阶段：验证所有编辑并计算位置
+        // 使用 (usize, String, String) 来拥有数据，避免生命周期问题
+        let mut validated_edits: Vec<(usize, String, String)> = Vec::new();
+        for (old_string, new_string) in &edits {
+            // 尝试精确匹配
+            if let Some(pos) = content.find(old_string) {
+                validated_edits.push((pos, old_string.clone(), new_string.clone()));
+            } else if let Some((pos, actual_old)) = self.find_with_indentation_tolerance(&content, old_string) {
+                validated_edits.push((pos, actual_old, new_string.clone()));
+            } else {
+                // 验证失败，返回错误且不修改文件
+                return Err(format!(
+                    "Could not find: \"{}\". All edits must succeed for atomic operation.",
+                    old_string.chars().take(50).collect::<String>()
+                ));
             }
         }
 
+        // 按位置排序（从后往前，避免位置偏移）
+        validated_edits.sort_by_key(|(pos, _, _)| std::cmp::Reverse(*pos));
+
+        // 第二阶段：一次性应用所有编辑
+        let mut result_content = content;
+        let mut results = Vec::new();
+
+        for (pos, old_string, new_string) in validated_edits {
+            let line_number = result_content[..pos].lines().count() + 1;
+
+            result_content = format!(
+                "{}{}{}",
+                &result_content[..pos],
+                new_string,
+                &result_content[pos + old_string.len()..]
+            );
+
+            results.push(EditResult {
+                success: true,
+                message: format!("Successfully edited at line {}", line_number),
+                old_string,
+                new_string,
+                line_number: Some(line_number),
+            });
+        }
+
+        // 第三阶段：写入文件
+        std::fs::write(file_path, result_content)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+
+        // 结果已经按从后往前的顺序，需要反转回原顺序
+        results.reverse();
         Ok(results)
     }
 }

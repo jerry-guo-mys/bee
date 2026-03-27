@@ -83,8 +83,8 @@ pub struct Hub {
     shutdown: tokio::sync::watch::Sender<bool>,
     /// 后台任务队列
     task_queue: Arc<TaskQueue>,
-    /// 任务完成通知接收器
-    notification_rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<TaskNotification>>>>,
+    /// 任务完成通知接收器（使用 Mutex 保护 Option 以便 take()）
+    notification_rx: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<TaskNotification>>>>,
     /// 用户记忆管理器
     user_memory: Arc<UserMemoryManager>,
 }
@@ -159,7 +159,7 @@ impl Hub {
             spokes: Arc::new(RwLock::new(Vec::new())),
             shutdown: shutdown_tx,
             task_queue: Arc::new(task_queue),
-            notification_rx: Arc::new(RwLock::new(Some(notification_rx))),
+            notification_rx: Arc::new(tokio::sync::Mutex::new(Some(notification_rx))),
             user_memory,
         }
     }
@@ -182,6 +182,9 @@ impl Hub {
             .map_err(|e| format!("Failed to bind: {}", e))?;
 
         tracing::info!("Gateway listening on ws://{}", addr);
+
+        // 启动任务完成通知处理器
+        self.start_notification_handler().await;
 
         let mut shutdown_rx = self.shutdown.subscribe();
         let connections = Arc::clone(&self.connections);
@@ -303,12 +306,13 @@ impl Hub {
         &self.user_memory
     }
 
-    /// 启动任务完成通知处理
-    pub async fn start_notification_handler(&self) {
+    /// 启动任务完成通知处理（仅在 start() 中调用一次）
+    async fn start_notification_handler(&self) {
         let connections = Arc::clone(&self.connections);
 
+        // 使用 take() 获取 receiver，确保只启动一次
         let notification_rx = {
-            let mut guard = self.notification_rx.write().await;
+            let mut guard = self.notification_rx.lock().await;
             guard.take()
         };
 
@@ -521,9 +525,9 @@ async fn handle_connection(
         }
     }
 
-    connections.write().await.remove(&client_id);
-
+    // 仅在认证成功后才清理 connections 和 session_store
     if let (Some(sid), Some(info)) = (&session_id, &client_info) {
+        connections.write().await.remove(&client_id);
         session_store.remove_client(sid, info.platform).await;
     }
 

@@ -42,7 +42,7 @@ impl TaskId {
 pub struct TaskScheduler {
     /// 工具并发限制（默认 3）
     tool_semaphore: Arc<Semaphore>,
-    /// 活跃任务
+    /// 活跃任务（TODO: 用于任务跟踪和取消，当前未实现）
     _active_tasks: HashMap<TaskId, TaskKind>,
 }
 
@@ -55,12 +55,20 @@ impl TaskScheduler {
     }
 
     /// 获取工具执行许可
+    ///
+    /// # Panics
+    /// 如果信号量被关闭（所有 permit 被遗忘或显式调用 `close()`），会 panic。
+    /// 在正常运行场景中不会发生，因为 `tool_semaphore` 由 `Arc` 持有且不会被关闭。
     pub async fn acquire_tool(&self) -> tokio::sync::OwnedSemaphorePermit {
         self.tool_semaphore
             .clone()
             .acquire_owned()
             .await
-            .expect("semaphore closed")
+            .unwrap_or_else(|_| {
+                // 信号量已关闭，记录错误并 panic
+                tracing::error!("task_scheduler: semaphore unexpectedly closed");
+                panic!("task_scheduler: semaphore closed")
+            })
     }
 
     /// 检查是否应取消

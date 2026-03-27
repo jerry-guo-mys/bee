@@ -220,4 +220,11 @@ impl SqlitePersistence {
             .execute("DELETE FROM sessions WHERE id = ?1", [session_id])?;
         Ok(())
     }
+
+    /// 删除会话的所有消息（用于 clear 操作）
+    pub fn delete_messages(&self, session_id: &str) -> SqliteResult<()> {
+        self.conn
+            .execute("DELETE FROM messages WHERE session_id = ?1", [session_id])?;
+        Ok(())
+    }
 }

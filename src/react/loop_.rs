@@ -19,17 +19,23 @@ const MAX_REACT_STEPS: usize = 20;
 const COMPACT_THRESHOLD: usize = 24;
 
 /// 从用户输入中提取「记住：xxx」类内容，用于写入 preferences
+/// 支持多种触发模式：「记住：」、「记住:」、「请记住：」等
 fn extract_remember_content(input: &str) -> Option<String> {
     let input = input.trim();
-    let idx = input.find("记住")?;
-    let after = input.get(idx + "记住".len()..)?;
-    let sep = after.find('：').or_else(|| after.find(':'))?;
-    let content = after.get(sep + 1..)?.trim();
-    if content.is_empty() {
-        None
-    } else {
-        Some(content.to_string())
+    // 支持多种触发模式
+    let patterns = ["请记住", "记住", "记一下"];
+    for pattern in patterns {
+        if let Some(idx) = input.find(pattern) {
+            let after = input.get(idx + pattern.len()..)?.trim_start();
+            // 支持全角「：」和半角「:」
+            let sep = after.find('：').or_else(|| after.find(':'))?;
+            let content = after.get(sep + 1..)?.trim();
+            if !content.is_empty() {
+                return Some(content.to_string());
+            }
+        }
     }
+    None
 }
 /// 流式回复时每段字符数（模拟打字效果）
 const CHUNK_CHARS: usize = 6;
@@ -138,6 +144,7 @@ fn send_event(tx: &Option<&tokio::sync::mpsc::UnboundedSender<ReactEvent>>, ev: 
 
 /// Context Compaction：将当前对话摘要写入长期记忆，并替换为一条摘要型 system 消息，避免 token 溢出。
 /// 可由 ReAct 循环在消息数超过阈值时自动调用，或由 Web API 手动触发。
+/// 保留最近 4 条原始消息，避免丢失关键上下文。
 pub async fn compact_context(
     planner: &Planner,
     context: &mut ContextManager,
@@ -151,10 +158,23 @@ pub async fn compact_context(
         return Ok(());
     }
     context.push_to_long_term(&format!("Conversation summary: {}", summary));
-    context.set_messages(vec![Message::system(format!(
+
+    // 保留最近 4 条原始消息 + 摘要，避免丢失关键上下文
+    const MIN_MESSAGES_TO_KEEP: usize = 4;
+    let recent_messages: Vec<Message> = messages
+        .iter()
+        .rev()
+        .take(MIN_MESSAGES_TO_KEEP)
+        .cloned()
+        .rev()
+        .collect();
+
+    let mut new_messages = vec![Message::system(format!(
         "Previous conversation summary:\n\n{}",
         summary
-    ))]);
+    ))];
+    new_messages.extend(recent_messages);
+    context.set_messages(new_messages);
     Ok(())
 }
 
@@ -261,6 +281,7 @@ async fn react_loop_impl(
     let (init_prompt, init_completion, _) = planner.token_usage();
 
     let mut step = 0;
+    // 注意：critic_retry_budget 在单个 async 任务中使用，无并发竞争，无需 Arc<Mutex>
     let mut critic_retry_budget = critic.map(|c| c.max_self_corrections()).unwrap_or(0);
     let mut last_llm_output = String::new();
     let query_kind_label = format!("{:?}", classify_query(user_input));

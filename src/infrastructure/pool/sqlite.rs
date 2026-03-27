@@ -65,6 +65,7 @@ impl PoolConfig {
 }
 
 /// PooledConnection 包装器
+#[derive(Clone)]
 pub struct PooledConnection {
     conn: Arc<Mutex<Connection>>,
     created_at: Instant,
@@ -113,8 +114,8 @@ impl PooledConnection {
 
 /// SQLite 连接池
 pub struct SqliteConnectionPool {
-    /// 连接列表
-    connections: Vec<PooledConnection>,
+    /// 连接列表（使用 Mutex 保护以支持动态添加）
+    connections: Arc<Mutex<Vec<PooledConnection>>>,
     /// 配置
     config: PoolConfig,
     /// 信号量，控制并发连接数
@@ -128,18 +129,20 @@ impl SqliteConnectionPool {
     pub fn new(database_path: impl Into<String>, config: PoolConfig) -> SqliteResult<Self> {
         let database_path = database_path.into();
         let semaphore = Arc::new(Semaphore::new(config.max_connections));
+        let mut connections = Vec::new();
 
-        let mut pool = Self {
-            connections: Vec::new(),
+        // 初始化最小连接数
+        for _ in 0..config.min_connections {
+            let conn = Connection::open(&database_path)?;
+            connections.push(PooledConnection::new(conn));
+        }
+
+        Ok(Self {
+            connections: Arc::new(Mutex::new(connections)),
             config,
             semaphore,
             database_path,
-        };
-
-        // 初始化最小连接数
-        pool.initialize_min_connections()?;
-
-        Ok(pool)
+        })
     }
 
     /// 创建内存连接池（用于测试）
@@ -148,15 +151,6 @@ impl SqliteConnectionPool {
             .with_min_connections(1)
             .with_max_connections(4);
         Self::new(":memory:", config)
-    }
-
-    /// 初始化最小连接数
-    fn initialize_min_connections(&mut self) -> SqliteResult<()> {
-        for _ in 0..self.config.min_connections {
-            let conn = Connection::open(&self.database_path)?;
-            self.connections.push(PooledConnection::new(conn));
-        }
-        Ok(())
     }
 
     /// 获取连接
@@ -174,57 +168,72 @@ impl SqliteConnectionPool {
         };
 
         // 查找可用连接
-        let conn = self.find_available_connection().await;
+        let conn = self.find_available_connection().await?;
 
         Some(PooledConnectionGuard {
             conn,
             _permit: permit,
-            pool_size: self.connections.len(),
+            pool_size: self.connections.lock().await.len(),
         })
     }
 
     /// 查找可用连接
-    async fn find_available_connection(&self) -> Arc<Mutex<Connection>> {
+    async fn find_available_connection(&self) -> Option<Arc<Mutex<Connection>>> {
         // 优先使用现有连接
-        for pooled in &self.connections {
+        let connections = self.connections.lock().await;
+        for pooled in connections.iter() {
             if pooled.is_healthy() && !pooled.is_expired(&self.config) {
-                return pooled.get().await.unwrap();
+                return pooled.get().await.ok();
             }
         }
 
         // 没有可用连接，创建新连接（如果未达上限）
-        if self.connections.len() < self.config.max_connections {
+        drop(connections);
+        let mut connections = self.connections.lock().await;
+
+        if connections.len() < self.config.max_connections {
             match Connection::open(&self.database_path) {
                 Ok(conn) => {
                     let pooled = PooledConnection::new(conn);
-                    let arc = pooled.get().await.unwrap();
-                    // 注意：这里简化处理，实际需要添加新连接到池中
-                    return arc;
+                    let arc = pooled.get().await.ok()?;
+                    // 添加新连接到池中
+                    connections.push(pooled);
+                    return Some(arc);
                 }
                 Err(_) => {
                     // 创建失败，返回第一个连接（即使不健康）
-                    if let Some(pooled) = self.connections.first() {
-                        return pooled.get().await.unwrap();
+                    let first = connections.first().cloned();
+                    drop(connections);
+                    if let Some(pooled) = first {
+                        return pooled.get().await.ok();
                     }
+                    return None;
                 }
             }
         }
 
         // 等待并返回第一个连接
-        self.connections[0].get().await.unwrap()
+        let first = connections.first().cloned();
+        drop(connections);
+        if let Some(pooled) = first {
+            pooled.get().await.ok()
+        } else {
+            None
+        }
     }
 
     /// 获取连接池状态
-    pub fn status(&self) -> PoolStatus {
-        let healthy = self.connections.iter().filter(|c| c.is_healthy()).count();
-        let expired = self
-            .connections
+    pub async fn status(&self) -> PoolStatus {
+        let connections = self.connections.lock().await;
+        let healthy = connections.iter().filter(|c| c.is_healthy()).count();
+        let expired = connections
             .iter()
             .filter(|c| c.is_expired(&self.config))
             .count();
+        let total = connections.len();
 
         PoolStatus {
-            total: self.connections.len(),
+            total,
             healthy,
             expired,
             in_use: self.config.max_connections - self.semaphore.available_permits(),
@@ -339,8 +348,9 @@ mod tests {
 
     #[test]
     fn test_in_memory_pool() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let pool = SqliteConnectionPool::in_memory().unwrap();
-        let status = pool.status();
+        let status = rt.block_on(pool.status());
 
         assert!(status.total >= 1);
         assert_eq!(status.healthy, status.total);
@@ -351,7 +361,7 @@ mod tests {
         let pool = SqliteConnectionPool::in_memory().unwrap();
 
         let guard = pool.get().await.unwrap();
-        let status = pool.status();
+        let status = pool.status().await;
 
         assert_eq!(status.in_use, 1);
         assert!(status.available > 0 || status.total < status.in_use);
@@ -400,7 +410,7 @@ mod tests {
 
     #[test]
     fn test_http_client_pool() {
-        let pool = HttpClientPool::new();
+        let _pool = HttpClientPool::new();
         // Client 创建成功即表示有效
         assert!(true);
     }

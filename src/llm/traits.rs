@@ -78,6 +78,18 @@ impl LlmError {
     }
 
     /// 从字符串错误消息解析 LlmError（兼容旧代码）
+    ///
+    /// **注意**: 此方法通过字符串匹配解析错误，可能存在误判。
+    /// 优先使用结构化错误响应（如 convert_openai_error），仅在无法获取结构化错误时使用此方法。
+    ///
+    /// 支持的错误类型匹配：
+    /// - AuthError: "unauthorized", "invalid api key", "authentication"
+    /// - RateLimited: "rate limit", "too many requests"
+    /// - ContextLengthExceeded: "context length", "maximum context", "token limit"
+    /// - ModelNotFound: "model" + "not found"
+    /// - Timeout: "timeout"
+    /// - NetworkError: "network", "connection"
+    /// - 其他：ApiError
     pub fn from_string(s: &str) -> Self {
         let s_lower = s.to_lowercase();
         if s_lower.contains("unauthorized")
@@ -174,8 +186,11 @@ impl RetryConfig {
         if let Some(suggested) = error.retry_delay_ms() {
             return suggested.min(self.max_delay_ms);
         }
-        let delay = (self.initial_delay_ms as f64
-            * self.backoff_multiplier.powi(retry_count as i32)) as u64;
+        // 使用 powi 计算指数，然后用 saturating 转换防止溢出
+        let multiplier = self.backoff_multiplier.powi(retry_count as i32);
+        // 限制最大值，防止 f64 溢出
+        let multiplier = multiplier.min(self.max_delay_ms as f64 / self.initial_delay_ms as f64);
+        let delay = (self.initial_delay_ms as f64 * multiplier) as u64;
         delay.min(self.max_delay_ms)
     }
 }

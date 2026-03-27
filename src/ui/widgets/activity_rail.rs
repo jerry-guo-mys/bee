@@ -84,14 +84,9 @@ impl<'a> ActivityRail<'a> {
             .history
             .iter()
             .rev()
-            .filter(|message| message.role != Role::User && message.role != Role::Assistant)
+            .filter(|message| message.role == Role::System)
             .take(4)
         {
-            let label = match message.role {
-                Role::System => "system",
-                Role::Tool => "tool",
-                Role::User | Role::Assistant => unreachable!(),
-            };
             let snippet = message
                 .content
                 .lines()
@@ -101,14 +96,14 @@ impl<'a> ActivityRail<'a> {
                 .take(34)
                 .collect::<String>();
             rows.push(Line::from(vec![
-                Span::styled(format!("{label} "), Style::default().fg(theme::UI_TEXT_DIM)),
+                Span::styled("system ", Style::default().fg(theme::UI_TEXT_DIM)),
                 Span::styled(snippet, Style::default().fg(theme::UI_TEXT)),
             ]));
         }
 
         if rows.is_empty() {
             rows.push(Line::from(Span::styled(
-                "no recent system activity",
+                "no recent activity",
                 Style::default().fg(theme::UI_TEXT_DIM),
             )));
         }

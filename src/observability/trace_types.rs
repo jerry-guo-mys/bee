@@ -133,7 +133,7 @@ impl OperationKind {
 }
 
 /// Span 状态枚举
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SpanStatus {
     /// Span 正在进行中
