@@ -5,6 +5,8 @@
 //! - 工具执行时间
 //! - 请求完整生命周期追踪
 
+pub mod trace_types;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
