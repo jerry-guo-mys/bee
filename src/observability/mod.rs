@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tracing::warn;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use uuid::Uuid;
 
@@ -53,6 +54,10 @@ pub async fn init_tracing_system() -> Result<Arc<TraceCollector>, String> {
     let config = TraceCollectorConfig::default();
     let collector = Arc::new(TraceCollector::new(config).await?);
     trace_layer::init_trace_collection(collector.clone());
+    // 设置为全局实例
+    if let Err(_) = TraceCollector::set_global(collector.clone()) {
+        warn!("Failed to set global trace collector (already set)");
+    }
     Ok(collector)
 }
 

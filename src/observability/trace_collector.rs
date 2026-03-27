@@ -571,7 +571,20 @@ pub struct TraceCollector {
     event_tx: Option<Sender<TraceEvent>>,
 }
 
+/// 全局 TraceCollector 实例
+static GLOBAL_TRACE_COLLECTOR: std::sync::OnceLock<Arc<TraceCollector>> = std::sync::OnceLock::new();
+
 impl TraceCollector {
+    /// 获取全局 TraceCollector 实例
+    pub fn get_global() -> Option<Arc<TraceCollector>> {
+        GLOBAL_TRACE_COLLECTOR.get().cloned()
+    }
+
+    /// 设置全局 TraceCollector 实例
+    pub fn set_global(collector: Arc<TraceCollector>) -> Result<(), ()> {
+        GLOBAL_TRACE_COLLECTOR.set(collector).map_err(|_| ())
+    }
+
     /// 创建新的 TraceCollector
     pub async fn new(config: TraceCollectorConfig) -> Result<Self, String> {
         let memory_store = Arc::new(RwLock::new(VecDeque::with_capacity(config.max_memory_traces)));
