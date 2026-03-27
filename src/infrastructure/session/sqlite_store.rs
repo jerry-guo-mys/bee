@@ -5,6 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, Result as SqliteResult};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::task::spawn_blocking;
 
 use crate::domain::session::store::SessionStore;
 use crate::domain::session::{Session, SessionConfig, SessionId, SessionState, SessionStatus};
@@ -74,7 +75,7 @@ impl SqliteSessionStore {
             "thinking" => SessionStatus::Thinking,
             "executing" => SessionStatus::Executing,
             "responding" => SessionStatus::Responding,
-            "error" => SessionStatus::Error("Unknown error".to_string()),
+            "error" => SessionStatus::Error("Session error (see logs for details)".to_string()),
             _ => SessionStatus::Idle,
         };
         session
@@ -84,38 +85,52 @@ impl SqliteSessionStore {
 #[async_trait]
 impl SessionStore for SqliteSessionStore {
     async fn create(&self, config: SessionConfig) -> Result<SessionId, String> {
-        let conn = self.conn.lock().await;
+        let conn = self.conn.clone();
         let id = config.id.0.clone();
         let max_turns = config.max_turns as i64;
-        let system_prompt = &config.system_prompt;
+        let system_prompt = config.system_prompt.clone();
 
-        conn.execute(
-            "INSERT INTO sessions (id, max_turns, system_prompt, status, message_count) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, max_turns, system_prompt, "idle", 0],
-        )
-        .map_err(|e| format!("Failed to create session: {}", e))?;
-        Ok(SessionId(id))
+        spawn_blocking(move || {
+            let conn = conn.blocking_lock();
+            conn.execute(
+                "INSERT INTO sessions (id, max_turns, system_prompt, status, message_count) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id, max_turns, system_prompt, "idle", 0],
+            )
+            .map_err(|e| format!("Failed to create session: {}", e))?;
+            Ok::<SessionId, String>(SessionId(id))
+        })
+        .await
+        .map_err(|e| format!("Blocking task failed: {}", e))?
     }
 
     async fn get(&self, id: &SessionId) -> Result<Option<Session>, String> {
-        let conn = self.conn.lock().await;
+        let conn = self.conn.clone();
+        let id = id.0.clone();
 
-        let mut stmt = conn
-            .prepare("SELECT id, max_turns, system_prompt, message_count, status FROM sessions WHERE id = ?1")
-            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+        let result = spawn_blocking(move || {
+            let conn = conn.blocking_lock();
 
-        let result: Option<(String, i64, String, i64, String)> = stmt
-            .query_row(params![&id.0], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                ))
-            })
-            .optional()
-            .map_err(|e| format!("Failed to query session: {}", e))?;
+            let mut stmt = conn
+                .prepare("SELECT id, max_turns, system_prompt, message_count, status FROM sessions WHERE id = ?1")
+                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+            let result: Option<(String, i64, String, i64, String)> = stmt
+                .query_row(params![&id], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                })
+                .optional()
+                .map_err(|e| format!("Failed to query session: {}", e))?;
+
+            Ok::<Option<(String, i64, String, i64, String)>, String>(result)
+        })
+        .await
+        .map_err(|e| format!("Blocking task failed: {}", e))??;
 
         Ok(result.map(|(id, max_turns, system_prompt, message_count, status)| {
             SqliteSessionStore::row_to_session(&id, max_turns, system_prompt, message_count, status)
@@ -123,28 +138,38 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn get_state(&self, id: &SessionId) -> Result<Option<SessionState>, String> {
-        let conn = self.conn.lock().await;
+        let conn = self.conn.clone();
+        let id_str = id.0.clone();
+        let id_for_result = id_str.clone();
 
-        let mut stmt = conn
-            .prepare("SELECT status, message_count FROM sessions WHERE id = ?1")
-            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+        let result = spawn_blocking(move || {
+            let conn = conn.blocking_lock();
 
-        let result: Option<(String, i64)> = stmt
-            .query_row(params![&id.0], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })
-            .optional()
-            .map_err(|e| format!("Failed to query state: {}", e))?;
+            let mut stmt = conn
+                .prepare("SELECT status, message_count FROM sessions WHERE id = ?1")
+                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+            let result: Option<(String, i64)> = stmt
+                .query_row(params![&id_str], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })
+                .optional()
+                .map_err(|e| format!("Failed to query state: {}", e))?;
+
+            Ok::<Option<(String, i64)>, String>(result)
+        })
+        .await
+        .map_err(|e| format!("Blocking task failed: {}", e))??;
 
         Ok(result.map(|(status, message_count)| {
             SessionState {
-                id: id.clone(),
+                id: SessionId(id_for_result),
                 status: match status.as_str() {
                     "idle" => SessionStatus::Idle,
                     "thinking" => SessionStatus::Thinking,
                     "executing" => SessionStatus::Executing,
                     "responding" => SessionStatus::Responding,
-                    "error" => SessionStatus::Error("Unknown error".to_string()),
+                    "error" => SessionStatus::Error("Session error (see logs for details)".to_string()),
                     _ => SessionStatus::Idle,
                 },
                 message_count: message_count as usize,
@@ -153,10 +178,10 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn update(&self, session: Session) -> Result<(), String> {
-        let conn = self.conn.lock().await;
-        let id = &session.config.id.0;
+        let conn = self.conn.clone();
+        let id = session.config.id.0.clone();
         let max_turns = session.config.max_turns as i64;
-        let system_prompt = &session.config.system_prompt;
+        let system_prompt = session.config.system_prompt.clone();
         let message_count = session.state.message_count as i64;
         let status = match &session.state.status {
             SessionStatus::Idle => "idle",
@@ -166,44 +191,67 @@ impl SessionStore for SqliteSessionStore {
             SessionStatus::Error(_) => "error",
         };
 
-        conn.execute(
-            "UPDATE sessions SET max_turns = ?2, system_prompt = ?3, message_count = ?4, status = ?5, updated_at = (strftime('%s', 'now')) WHERE id = ?1",
-            params![id, max_turns, system_prompt, message_count, status],
-        )
-        .map_err(|e| format!("Failed to update session: {}", e))?;
+        spawn_blocking(move || {
+            let conn = conn.blocking_lock();
+            conn.execute(
+                "UPDATE sessions SET max_turns = ?2, system_prompt = ?3, message_count = ?4, status = ?5, updated_at = (strftime('%s', 'now')) WHERE id = ?1",
+                params![id, max_turns, system_prompt, message_count, status],
+            )
+            .map_err(|e| format!("Failed to update session: {}", e))?;
+            Ok::<(), String>(())
+        })
+        .await
+        .map_err(|e| format!("Blocking task failed: {}", e))?
+        ?;
         Ok(())
     }
 
     async fn delete(&self, id: &SessionId) -> Result<(), String> {
-        let conn = self.conn.lock().await;
+        let conn = self.conn.clone();
+        let id = id.0.clone();
 
-        conn.execute(
-            "DELETE FROM sessions WHERE id = ?1",
-            params![&id.0],
-        )
-        .map_err(|e| format!("Failed to delete session: {}", e))?;
+        spawn_blocking(move || {
+            let conn = conn.blocking_lock();
+            conn.execute(
+                "DELETE FROM sessions WHERE id = ?1",
+                params![&id],
+            )
+            .map_err(|e| format!("Failed to delete session: {}", e))?;
+            Ok::<(), String>(())
+        })
+        .await
+        .map_err(|e| format!("Blocking task failed: {}", e))?
+        ?;
         Ok(())
     }
 
     async fn list(&self) -> Result<Vec<SessionId>, String> {
-        let conn = self.conn.lock().await;
+        let conn = self.conn.clone();
 
-        let mut stmt = conn
-            .prepare("SELECT id FROM sessions ORDER BY created_at DESC")
-            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+        let ids = spawn_blocking(move || {
+            let conn = conn.blocking_lock();
 
-        let ids = stmt
-            .query_map([], |row| row.get(0))
-            .map_err(|e| format!("Failed to query sessions: {}", e))?;
+            let mut stmt = conn
+                .prepare("SELECT id FROM sessions ORDER BY created_at DESC")
+                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
-        let mut result = Vec::new();
-        for id_result in ids {
-            if let Ok(id) = id_result {
-                result.push(SessionId(id));
+            let ids = stmt
+                .query_map([], |row| row.get(0))
+                .map_err(|e| format!("Failed to query sessions: {}", e))?;
+
+            let mut result = Vec::new();
+            for id_result in ids {
+                if let Ok(id) = id_result {
+                    result.push(SessionId(id));
+                }
             }
-        }
 
-        Ok(result)
+            Ok::<Vec<SessionId>, String>(result)
+        })
+        .await
+        .map_err(|e| format!("Blocking task failed: {}", e))??;
+
+        Ok(ids)
     }
 }
 

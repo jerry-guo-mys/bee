@@ -179,7 +179,9 @@ impl CapabilitySpoke for SkillSpoke {
     async fn execute(&self, input: serde_json::Value) -> Result<serde_json::Value, String> {
         if let Some(script_path) = &self.script_path {
             let input_str = serde_json::to_string(&input).unwrap_or_default();
-            let output = tokio::process::Command::new("python3")
+            // 支持配置 Python 解释器，默认使用 python3
+            let python_cmd = std::env::var("PYTHON_CMD").unwrap_or_else(|_| "python3".to_string());
+            let output = tokio::process::Command::new(python_cmd)
                 .arg(script_path)
                 .arg(&input_str)
                 .output()
@@ -187,8 +189,9 @@ impl CapabilitySpoke for SkillSpoke {
                 .map_err(|e| format!("Script execution failed: {}", e))?;
 
             let stdout = String::from_utf8_lossy(&output.stdout);
+            // JSON 解析失败时返回明确错误
             let result: serde_json::Value = serde_json::from_str(&stdout)
-                .unwrap_or_else(|_| serde_json::Value::String(stdout.to_string()));
+                .map_err(|e| format!("Script output is not valid JSON: {}. Output: {}", e, stdout))?;
             Ok(result)
         } else {
             Ok(serde_json::json!({
@@ -265,7 +268,12 @@ impl CapabilitySpoke for ApiPluginSpoke {
 
         let body = response
             .error_for_status()
-            .map_err(|e| format!("API request failed with status {}: {}", e.status().unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR), e))?
+            .map_err(|e| {
+                // 记录详细错误日志，但返回通用错误消息
+                tracing::error!("API request failed: status={}, error={}",
+                    e.status().unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR), e);
+                "API request failed".to_string()
+            })?
             .text()
             .await
             .map_err(|e| format!("Failed to read response: {}", e))?;
@@ -302,6 +310,21 @@ impl WebSocketSpoke {
     pub fn bind_addr(&self) -> &str {
         &self.bind_addr
     }
+
+    /// 添加新的 WebSocket 连接
+    pub async fn add_connection(&self, client_id: String, tx: mpsc::UnboundedSender<String>) {
+        self.connections.write().await.insert(client_id, WebSocketConnection { tx });
+    }
+
+    /// 移除 WebSocket 连接
+    pub async fn remove_connection(&self, client_id: &str) {
+        self.connections.write().await.remove(client_id);
+    }
+
+    /// 获取连接数
+    pub async fn connection_count(&self) -> usize {
+        self.connections.read().await.len()
+    }
 }
 
 #[async_trait]
@@ -310,10 +333,20 @@ impl SpokeAdapter for WebSocketSpoke {
         SpokeType::Web
     }
 
+    /// 启动 WebSocket 服务器
+    ///
+    /// 注意：此方法目前仅启动占位，实际的 WebSocket 服务器逻辑在 Hub 中实现。
+    /// 如果需要独立的 WebSocket 端点，需要在此实现完整的 accept 循环。
     async fn start(
         &self,
         _message_tx: mpsc::UnboundedSender<(ClientInfo, GatewayMessage)>,
     ) -> Result<(), String> {
+        tracing::info!("WebSocketSpoke listening on {}", self.bind_addr);
+        // 实际的 WebSocket 服务器逻辑在 Hub 中实现
+        // 如果需要独立的端点，需要在此实现：
+        // 1. TcpListener::bind
+        // 2. accept 循环
+        // 3. 为每个连接调用 add_connection
         Ok(())
     }
 
@@ -325,8 +358,10 @@ impl SpokeAdapter for WebSocketSpoke {
             conn.tx
                 .send(json)
                 .map_err(|e| format!("Send error: {}", e))?;
+            Ok(())
+        } else {
+            Err(format!("Client {} not found", client_id))
         }
-        Ok(())
     }
 
     async fn stop(&self) {
@@ -383,6 +418,9 @@ impl SpokeAdapter for HttpSpoke {
 }
 
 /// TUI Spoke（用于终端界面）
+///
+/// 注意：TUI 是单实例端点，因此 `send` 方法中的 `client_id` 参数未使用。
+/// 这符合 `SpokeAdapter` trait 的统一接口设计，但在 TUI 场景下可以忽略。
 #[allow(dead_code)]
 pub struct TuiSpoke {
     tx: Arc<tokio::sync::RwLock<Option<mpsc::UnboundedSender<GatewayMessage>>>>,

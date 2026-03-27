@@ -170,14 +170,17 @@ impl AgentRuntime {
                             success: false,
                         },
                     ),
-                    ReactEvent::Error { text } => GatewayMessage::new(
-                        Some(session_id_owned.clone()),
-                        MessageType::Error {
-                            request_id: Some(request_id_clone.clone()),
-                            code: "react_error".to_string(),
-                            message: text,
-                        },
-                    ),
+                    ReactEvent::Error { text } => {
+                        tracing::error!("React error: {}", text); // 完整日志记录
+                        GatewayMessage::new(
+                            Some(session_id_owned.clone()),
+                            MessageType::Error {
+                                request_id: Some(request_id_clone.clone()),
+                                code: "react_error".to_string(),
+                                message: "An internal error occurred".to_string(), // 脱敏消息
+                            },
+                        )
+                    }
                     _ => continue,
                 };
                 if response_tx_clone.send(msg).is_err() {
@@ -231,11 +234,9 @@ impl AgentRuntime {
         assistant_id: Option<&str>,
         _model: Option<&str>,
     ) -> Result<String, AgentError> {
-        let cancel_token = self
-            .session_store
-            .new_cancel_token(session_id)
-            .await
-            .unwrap_or_else(tokio_util::sync::CancellationToken::new);
+        // 获取取消令牌（会话不存在时拒绝请求）
+        let cancel_token = self.session_store.new_cancel_token(session_id).await
+            .ok_or_else(|| AgentError::SessionNotFound(session_id.to_string()))?;
         let scope = self
             .session_store
             .get_scope(session_id)

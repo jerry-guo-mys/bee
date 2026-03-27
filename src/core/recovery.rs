@@ -33,12 +33,24 @@ impl RecoveryEngine {
             AgentError::ToolExecutionFailed(msg) => {
                 RecoveryAction::AskUser(format!("工具执行失败: {msg}"))
             }
-            AgentError::NetworkTimeout => {
-                RecoveryAction::RetryWithPrompt("网络请求超时，请重试。".to_string())
+            AgentError::NetworkTimeout(msg) => {
+                RecoveryAction::RetryWithPrompt(format!("网络请求超时：{}，请重试。", msg))
             }
             AgentError::LlmError(_) => RecoveryAction::DowngradeModel,
             AgentError::Cancelled => RecoveryAction::Abort,
-            _ => RecoveryAction::Abort,
+            // 显式处理各错误类型，避免通配符导致非预期终止
+            AgentError::ToolNotFound(name) => {
+                RecoveryAction::AskUser(format!("工具 '{name}' 未找到，是否需要安装或跳过？"))
+            }
+            AgentError::ConfigError(msg) => RecoveryAction::AskUser(format!("配置错误：{msg}")),
+            AgentError::PathEscape(_) => RecoveryAction::Abort,
+            AgentError::OrchestrationFailed(msg) => {
+                RecoveryAction::AskUser(format!("编排失败：{msg}"))
+            }
+            AgentError::SuggestDowngradeModel(_) => RecoveryAction::DowngradeModel,
+            AgentError::SessionNotFound(id) => {
+                RecoveryAction::AskUser(format!("会话 '{id}' 未找到"))
+            }
         }
     }
 }
@@ -111,7 +123,7 @@ mod tests {
     #[test]
     fn test_recovery_network_timeout() {
         let engine = RecoveryEngine::new();
-        let err = AgentError::NetworkTimeout;
+        let err = AgentError::NetworkTimeout("LLM request".to_string());
         let action = engine.handle(&err, &mut []);
         assert!(matches!(action, RecoveryAction::RetryWithPrompt(_)));
     }

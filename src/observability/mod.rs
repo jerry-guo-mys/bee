@@ -5,11 +5,21 @@
 //! - 工具执行时间
 //! - 请求完整生命周期追踪
 
+pub mod trace_types;
+pub mod trace_collector;
+pub mod trace_layer;
+pub mod trace_renderer;
+
+pub use trace_collector::{TraceCollector, TraceCollectorConfig, TraceEvent, RequestTraceSummary};
+pub use trace_types::{RequestTrace, SpanTrace, TraceStatus, SpanStatus, OperationKind, TraceMetadata, AttributeValue};
+pub use trace_renderer::{AsciiRenderer, RenderConfig};
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tracing::warn;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use uuid::Uuid;
 
@@ -37,6 +47,18 @@ where
 
 pub fn init_metrics() {
     tracing::info!("Metrics system initialized");
+}
+
+/// 初始化全链路追踪系统
+pub async fn init_tracing_system() -> Result<Arc<TraceCollector>, String> {
+    let config = TraceCollectorConfig::default();
+    let collector = Arc::new(TraceCollector::new(config).await?);
+    trace_layer::init_trace_collection(collector.clone());
+    // 设置为全局实例
+    if let Err(_) = TraceCollector::set_global(collector.clone()) {
+        warn!("Failed to set global trace collector (already set)");
+    }
+    Ok(collector)
 }
 
 /// 全局指标收集器

@@ -157,8 +157,33 @@ impl PersistentSessionManager {
             let agent_instance_id: Option<String> = row.get("agent_instance_id");
             let assistant_id: Option<String> = row.get("assistant_id");
             let model_id: Option<String> = row.get("model_id");
+            let created_at_str: String = row.get("created_at");
+            let updated_at_str: String = row.get("updated_at");
 
             let messages = self.load_messages(&session_id).await?;
+
+            // 从 RFC3339 时间戳计算 Instant
+            let now = chrono::Utc::now();
+            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
+                .map(|dt| {
+                    let elapsed_ms = now.signed_duration_since(dt.to_utc()).num_milliseconds();
+                    std::time::Instant::now()
+                        - std::time::Duration::from_millis(elapsed_ms.max(0) as u64)
+                })
+                .unwrap_or_else(|_| {
+                    tracing::warn!("Failed to parse created_at: {}", created_at_str);
+                    std::time::Instant::now()
+                });
+            let last_active = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
+                .map(|dt| {
+                    let elapsed_ms = now.signed_duration_since(dt.to_utc()).num_milliseconds();
+                    std::time::Instant::now()
+                        - std::time::Duration::from_millis(elapsed_ms.max(0) as u64)
+                })
+                .unwrap_or_else(|_| {
+                    tracing::warn!("Failed to parse updated_at: {}", updated_at_str);
+                    std::time::Instant::now()
+                });
 
             let mut session = Session {
                 id: session_id.clone(),
@@ -167,8 +192,8 @@ impl PersistentSessionManager {
                 context: ContextManager::new(self.max_context_turns),
                 status: SessionStatus::Idle,
                 cancel_token: None,
-                last_active: Instant::now(),
-                created_at: Instant::now(),
+                last_active,
+                created_at,
                 assistant_id,
                 model_id,
                 scope: SessionScope {
@@ -227,12 +252,14 @@ impl PersistentSessionManager {
         Ok(messages)
     }
 
-    /// 保存消息到数据库
+    /// 保存消息到数据库（使用事务保证原子性）
     async fn save_message(
         &self,
         session_id: &str,
         message: &crate::memory::Message,
     ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+
         let role_str = match message.role {
             crate::memory::Role::User => "user",
             crate::memory::Role::Assistant => "assistant",
@@ -248,15 +275,16 @@ impl PersistentSessionManager {
         .bind(role_str)
         .bind(&message.content)
         .bind(&now)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query("UPDATE gateway_sessions SET updated_at = ? WHERE id = ?")
             .bind(&now)
             .bind(session_id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
+        tx.commit().await?;
         Ok(())
     }
 
@@ -364,6 +392,17 @@ impl PersistentSessionManager {
         for (session_id, user_id) in &expired {
             sessions.remove(session_id);
             user_sessions.remove(user_id);
+        }
+
+        // 同时删除数据库记录
+        for (session_id, _) in &expired {
+            if let Err(e) = sqlx::query("DELETE FROM gateway_sessions WHERE id = ?")
+                .bind(session_id)
+                .execute(&self.pool)
+                .await
+            {
+                tracing::warn!("Failed to delete expired session {}: {}", session_id, e);
+            }
         }
 
         expired.len()

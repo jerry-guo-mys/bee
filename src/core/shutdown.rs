@@ -35,7 +35,7 @@ pub enum ShutdownReason {
 impl ShutdownManager {
     /// 创建新的关闭管理器
     pub fn new() -> Self {
-        let (reason_tx, _) = broadcast::channel(1);
+        let (reason_tx, _) = broadcast::channel(16);
         Self {
             shutdown_token: CancellationToken::new(),
             reason_tx,
@@ -49,7 +49,9 @@ impl ShutdownManager {
 
     /// 触发关闭
     pub fn shutdown(&self, reason: ShutdownReason) {
-        let _ = self.reason_tx.send(reason);
+        if let Err(e) = self.reason_tx.send(reason) {
+            tracing::debug!("No shutdown subscribers: {}", e);
+        }
         self.shutdown_token.cancel();
     }
 

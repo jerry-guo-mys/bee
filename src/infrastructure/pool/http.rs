@@ -69,8 +69,8 @@ impl HttpClientPool {
     }
 
     /// 创建默认配置的 HTTP 连接池
-    pub fn with_default_config() -> Self {
-        Self::new(HttpClientPoolConfig::default()).expect("Failed to create HTTP client pool")
+    pub fn with_default_config() -> Result<Self, reqwest::Error> {
+        Self::new(HttpClientPoolConfig::default())
     }
 
     /// 获取 HTTP 客户端
@@ -100,7 +100,7 @@ impl HttpClientPool {
                         url,
                         attempt + 1,
                         self.config.max_retries,
-                        last_error.as_ref().unwrap()
+                        last_error.as_ref().expect("logic error: last_error should be set")
                     );
 
                     if attempt < self.config.max_retries - 1 {
@@ -110,7 +110,9 @@ impl HttpClientPool {
             }
         }
 
-        Err(HttpClientPoolError::RequestFailed(last_error.unwrap()))
+        Err(HttpClientPoolError::RequestFailed(
+            last_error.expect("retry loop should always set last_error")
+        ))
     }
 
     /// 执行 POST 请求（带重试）
@@ -137,7 +139,7 @@ impl HttpClientPool {
                         url,
                         attempt + 1,
                         self.config.max_retries,
-                        last_error.as_ref().unwrap()
+                        last_error.as_ref().expect("logic error: last_error should be set")
                     );
 
                     if attempt < self.config.max_retries - 1 {
@@ -147,7 +149,9 @@ impl HttpClientPool {
             }
         }
 
-        Err(HttpClientPoolError::RequestFailed(last_error.unwrap()))
+        Err(HttpClientPoolError::RequestFailed(
+            last_error.expect("retry loop should always set last_error")
+        ))
     }
 
     /// 获取连接池状态
@@ -162,7 +166,7 @@ impl HttpClientPool {
 
 impl Default for HttpClientPool {
     fn default() -> Self {
-        Self::with_default_config()
+        Self::with_default_config().expect("Failed to create HTTP client pool with default config")
     }
 }
 
@@ -203,18 +207,18 @@ mod tests {
 
     #[test]
     fn test_http_client_pool_creation() {
-        let pool = HttpClientPool::with_default_config();
+        let pool = HttpClientPool::with_default_config().expect("Failed to create HTTP client pool");
         // Client 创建成功即表示有效
         assert!(true);
     }
 
     #[test]
     fn test_http_client_pool_status() {
-        let pool = HttpClientPool::with_default_config();
-        let status = pool.status();
+        let _pool = HttpClientPool::with_default_config().expect("Failed to create HTTP client pool");
+        let _status = _pool.status();
 
-        assert_eq!(status.pool_max_idle_per_host, 10);
-        assert_eq!(status.pool_idle_timeout, Duration::from_secs(90));
-        assert_eq!(status.timeout, Duration::from_secs(30));
+        assert_eq!(_pool.config().pool_max_idle_per_host, 10);
+        assert_eq!(_pool.config().pool_idle_timeout, Duration::from_secs(90));
+        assert_eq!(_pool.config().timeout, Duration::from_secs(30));
     }
 }

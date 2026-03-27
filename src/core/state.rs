@@ -40,7 +40,7 @@ pub enum AgentPhase {
 }
 
 /// 内部状态快照（用于投影）
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct InternalStateSnapshot {
     pub step: usize,
     pub retries: u8,

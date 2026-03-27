@@ -93,25 +93,49 @@ impl OpenAiClient {
                     ChatCompletionRequestSystemMessageArgs::default()
                         .content(m.content.clone())
                         .build()
-                        .unwrap(),
+                        .unwrap_or_else(|e| {
+                            tracing::warn!("Failed to build system message: {}", e);
+                            ChatCompletionRequestSystemMessageArgs::default()
+                                .content("")
+                                .build()
+                                .unwrap()
+                        }),
                 ),
                 crate::memory::Role::User => ChatCompletionRequestMessage::User(
                     ChatCompletionRequestUserMessageArgs::default()
                         .content(m.content.clone())
                         .build()
-                        .unwrap(),
+                        .unwrap_or_else(|e| {
+                            tracing::warn!("Failed to build user message: {}", e);
+                            ChatCompletionRequestUserMessageArgs::default()
+                                .content("")
+                                .build()
+                                .unwrap()
+                        }),
                 ),
                 crate::memory::Role::Assistant => ChatCompletionRequestMessage::Assistant(
                     ChatCompletionRequestAssistantMessageArgs::default()
                         .content(m.content.clone())
                         .build()
-                        .unwrap(),
+                        .unwrap_or_else(|e| {
+                            tracing::warn!("Failed to build assistant message: {}", e);
+                            ChatCompletionRequestAssistantMessageArgs::default()
+                                .content("")
+                                .build()
+                                .unwrap()
+                        }),
                 ),
                 crate::memory::Role::Tool => ChatCompletionRequestMessage::User(
                     ChatCompletionRequestUserMessageArgs::default()
                         .content(format!("[Tool Result]\n{}", m.content))
                         .build()
-                        .unwrap(),
+                        .unwrap_or_else(|e| {
+                            tracing::warn!("Failed to build tool message: {}", e);
+                            ChatCompletionRequestUserMessageArgs::default()
+                                .content("[Tool Result]\n".to_string())
+                                .build()
+                                .unwrap()
+                        }),
                 ),
             })
             .collect()
@@ -157,6 +181,8 @@ impl LlmClient for OpenAiClient {
     async fn complete(&self, messages: &[Message]) -> Result<String, LlmError> {
         let start = Instant::now();
         let metrics = Metrics::global();
+
+        tracing::info!(target: "bee::llm", model = %self.model, "LLM call starting");
 
         let request = CreateChatCompletionRequestArgs::default()
             .model(&self.model)
@@ -230,12 +256,16 @@ impl LlmClient for OpenAiClient {
             let usage = usage.clone();
 
             result.map_err(convert_openai_error).map(move |response| {
-                // 累积 token 使用
+                // 仅在 response 包含最终 usage 时累积（流式响应只在最后一个 chunk 包含完整 usage）
+                // async-openai 的流式响应中，只有最后一个 chunk 包含 usage 字段
                 if let Some(usage_info) = &response.usage {
-                    usage.add(
-                        usage_info.prompt_tokens as u64,
-                        usage_info.completion_tokens as u64,
-                    );
+                    // 确保只在有实际 token 时累积，避免重复计算
+                    if usage_info.prompt_tokens > 0 || usage_info.completion_tokens > 0 {
+                        usage.add(
+                            usage_info.prompt_tokens as u64,
+                            usage_info.completion_tokens as u64,
+                        );
+                    }
                 }
 
                 let content = response
@@ -245,6 +275,7 @@ impl LlmClient for OpenAiClient {
                     .unwrap_or_default();
 
                 // 在流结束时记录 metrics
+                // 流结束标志：choices 为空（服务端发送 [DONE]）或 content 为空且无更多 chunk
                 if response.choices.is_empty() || content.is_empty() {
                     let latency = start.elapsed();
                     let (prompt, completion, _total) = usage.get();

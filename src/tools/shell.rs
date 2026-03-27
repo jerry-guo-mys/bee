@@ -15,20 +15,63 @@ use crate::tools::{
     ToolMetadata, ToolOutputShape, ToolRisk, ToolScope, ToolUseCase,
 };
 
-/// 禁止的命令/子串（即使白名单中有同名，也不允许带这些参数）
+/// 禁止的命令子串（简单快速检查）
 const FORBIDDEN_SUBSTR: &[&str] = &[
-    "rm -rf",
-    "rm -fr",
-    "rm -r",
-    "wget ",
-    "curl | sh",
-    "chmod 777",
-    "chmod +s",
     "mkfs",
     "dd if=",
     "> /dev/sd",
     ":(){ :|:& };:", // fork bomb
 ];
+
+/// 禁止的命令/参数模式（使用正则匹配）
+fn is_forbidden_command(raw: &str) -> Result<(), String> {
+    let raw_lower = raw.to_lowercase();
+
+    // 检查禁止的子串
+    for forbidden in FORBIDDEN_SUBSTR {
+        if raw_lower.contains(forbidden) {
+            return Err(format!("Forbidden pattern: {}", forbidden));
+        }
+    }
+
+    // 解析命令和参数，检查变体绕过
+    let parts: Vec<&str> = raw_lower.split_whitespace().collect();
+    if parts.is_empty() {
+        return Ok(());
+    }
+
+    let cmd = parts[0];
+    let args = &parts[1..];
+
+    // 检查 rm 命令的危险参数组合
+    if cmd == "rm" || cmd.ends_with("/rm") {
+        let has_recursive = args.iter().any(|a| a.starts_with("-r") || *a == "--recursive");
+        let has_force = args.iter().any(|a| a.starts_with("-f") || *a == "--force");
+        let has_root = args.iter().any(|a| *a == "/" || a.starts_with("/*"));
+        let has_home = args.iter().any(|a| a.starts_with("~") || a.starts_with("$HOME"));
+
+        if has_recursive && has_force {
+            return Err("Forbidden pattern: rm with -r and -f flags".to_string());
+        }
+        if has_recursive && (has_root || has_home) {
+            return Err("Forbidden pattern: rm -r on root or home directory".to_string());
+        }
+    }
+
+    // 检查 chmod 危险模式
+    if cmd == "chmod" || cmd.ends_with("/chmod") {
+        if args.iter().any(|a| *a == "777" || a.starts_with("777") || *a == "+s") {
+            return Err("Forbidden pattern: chmod with dangerous permissions".to_string());
+        }
+    }
+
+    // 检查 wget/curl 管道执行
+    if (cmd == "wget" || cmd == "curl") && raw_lower.contains("| sh") {
+        return Err("Forbidden pattern: downloading and executing script".to_string());
+    }
+
+    Ok(())
+}
 
 /// Shell 工具：仅允许白名单内命令
 pub struct ShellTool {
@@ -48,19 +91,26 @@ impl ShellTool {
         }
     }
 
-    /// 解析命令：只取第一个 token 作为命令名
+    /// 解析命令：提取实际命令名（处理路径和前缀）
     fn command_name<'a>(&self, raw: &'a str) -> &'a str {
-        raw.split_whitespace().next().unwrap_or("")
+        let first = raw.split_whitespace().next().unwrap_or("");
+        // 处理路径如 /bin/ls -> ls
+        let cmd = first.rsplit('/').next().unwrap_or(first);
+        // 处理 sudo/doas 前缀
+        if cmd == "sudo" || cmd == "doas" {
+            // 获取 sudo 后面的命令
+            raw.split_whitespace().nth(1).unwrap_or("")
+        } else {
+            cmd
+        }
     }
 
     fn is_allowed(&self, raw: &str) -> Result<(), String> {
-        let raw_lower = raw.to_lowercase();
-        for forbidden in FORBIDDEN_SUBSTR {
-            if raw_lower.contains(forbidden) {
-                return Err(format!("Forbidden pattern: {}", forbidden));
-            }
-        }
-        let name = self.command_name(&raw_lower);
+        // 首先检查禁止的命令和参数模式
+        is_forbidden_command(raw)?;
+
+        // 提取命令名并检查白名单
+        let name = self.command_name(raw);
         if name.is_empty() {
             return Err("Empty command".to_string());
         }

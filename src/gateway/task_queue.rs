@@ -607,17 +607,16 @@ impl TaskExecutor {
         let process_fn = Arc::new(process_fn);
 
         while let Some(task_id) = pending_rx.recv().await {
-            let permit = semaphore.clone().acquire_owned().await;
-            if permit.is_err() {
-                continue;
-            }
-            let permit = permit.unwrap();
+            let permit = match semaphore.clone().acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => continue, // 信号量已关闭，跳过此任务
+            };
 
             let queue = Arc::clone(&self.queue);
             let process_fn = Arc::clone(&process_fn);
 
             tokio::spawn(async move {
-                let _permit = permit;
+                let _permit = permit; // 持有 permit 直到任务完成
 
                 let task = match queue.get(&task_id).await {
                     Some(t) if t.status == TaskStatus::Pending => t,

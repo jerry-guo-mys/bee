@@ -140,23 +140,22 @@ pub async fn create_agent(
     }
     let sqlite_persistence = Arc::new(Mutex::new(SqlitePersistence::new(&sqlite_db_path).ok()));
 
-    // 创建 Agent 服务
-    let agent_service = Arc::new(AgentServiceImpl::new(
-        cfg.clone(),
-        components,
-        sqlite_persistence.clone(),
-    ));
-
     // 三通道：UI -> Core 命令；Core -> UI 状态快照；Core -> UI Token 流
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<Command>();
     let (state_tx, state_rx) = watch::channel(UiState::default());
-    let (_stream_tx, stream_rx) = broadcast::channel::<String>(16);
-    let (_event_tx, event_rx) = mpsc::unbounded_channel::<ReactEvent>();
+    let (stream_tx, stream_rx) = broadcast::channel::<String>(16);
+    let (event_tx, event_rx) = mpsc::unbounded_channel::<ReactEvent>();
 
     let supervisor = SessionSupervisor::new();
     let session_id = uuid::Uuid::new_v4().to_string();
     let session_id_clone = session_id.clone();
-    let agent_service_clone = agent_service.clone();
+    let agent_service_clone = Arc::new(AgentServiceImpl::new(
+        cfg.clone(),
+        components,
+        sqlite_persistence.clone(),
+        stream_tx.clone(),
+        event_tx.clone(),
+    ));
     let mut conversation_history: Vec<crate::memory::Message> = Vec::new();
 
     tokio::spawn(async move {

@@ -908,6 +908,16 @@ async fn main() -> anyhow::Result<()> {
         .with(fmt::layer())
         .init();
 
+    // 初始化全链路追踪系统
+    match bee::observability::init_tracing_system().await {
+        Ok(_collector) => {
+            tracing::info!("Tracing system initialized");
+        }
+        Err(e) => {
+            tracing::warn!("Tracing system initialization failed: {}", e);
+        }
+    }
+
     let cfg = load_config(None).unwrap_or_default();
     let workspace = cfg
         .app
@@ -1044,6 +1054,8 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(index))
         .route("/metrics", get(serve_metrics_dashboard))
+        .route("/traces", get(serve_traces_page))
+        .route("/traces.html", get(serve_traces_page))
         .route("/js/marked.min.js", get(serve_marked_js))
         .route("/js/highlight.min.js", get(serve_highlight_js))
         .route("/css/github-dark.min.css", get(serve_highlight_css))
@@ -1106,6 +1118,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/metrics", get(api_metrics))
         .route("/api/metrics/prometheus", get(api_metrics_prometheus))
         .route("/api/events", get(api_events_sse))
+        .route("/api/traces/recent", get(api_traces_recent))
+        .route("/api/traces/:request_id", get(api_traces_get))
         .route("/swarm", get(serve_swarm_page))
         .route("/tasks", get(serve_tasks_page))
         .with_state(Arc::clone(&state));
@@ -3404,6 +3418,89 @@ async fn serve_swarm_page() -> Html<&'static str> {
 /// GET /tasks：任务看板页
 async fn serve_tasks_page() -> Html<&'static str> {
     Html(include_str!("../../static/tasks.html"))
+}
+
+async fn serve_traces_page() -> Html<&'static str> {
+    Html(include_str!("../../static/traces.html"))
+}
+
+/// GET /api/traces/recent：获取最近的追踪列表
+async fn api_traces_recent(
+    Query(params): Query<TracesRecentParams>,
+) -> Json<serde_json::Value> {
+    use bee::observability::TraceCollector;
+
+    let limit = params.limit.unwrap_or(50);
+
+    // 尝试从全局获取 TraceCollector
+    match TraceCollector::get_global() {
+        Some(collector) => {
+            let summaries = collector.get_recent_summaries(limit).await;
+            Json(serde_json::json!({
+                "traces": summaries
+            }))
+        }
+        None => {
+            // 返回空列表
+            Json(serde_json::json!({
+                "traces": []
+            }))
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct TracesRecentParams {
+    limit: Option<usize>,
+}
+
+/// GET /api/traces/{request_id}: 获取单个追踪详情
+async fn api_traces_get(
+    Path(request_id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    use bee::observability::TraceCollector;
+
+    match TraceCollector::get_global() {
+        Some(collector) => {
+            match collector.get_by_request_id(&request_id).await {
+                Some(trace) => {
+                    // 转换为 JSON 格式
+                    let json = serde_json::json!({
+                        "request_id": trace.request_id,
+                        "session_id": trace.session_id,
+                        "status": format!("{:?}", trace.status).to_lowercase(),
+                        "start_timestamp_ms": trace.start_timestamp_ms,
+                        "end_timestamp_ms": trace.end_timestamp_ms,
+                        "duration_ms": trace.duration_ms,
+                        "input_summary": trace.input_summary,
+                        "output_summary": trace.output_summary,
+                        "error_message": trace.error_message,
+                        "react_steps_total": trace.react_steps_total,
+                        "llm_calls_count": trace.llm_calls_count,
+                        "tool_executions_count": trace.tool_executions_count,
+                        "total_tokens": trace.total_tokens,
+                        "spans": trace.spans.iter().map(|span| {
+                            serde_json::json!({
+                                "span_id": span.span_id,
+                                "parent_span_id": span.parent_span_id,
+                                "operation_kind": span.operation_kind.as_str(),
+                                "operation_name": span.operation_name,
+                                "start_timestamp_ms": span.start_timestamp_ms,
+                                "duration_ms": span.duration_ms,
+                                "status": format!("{:?}", span.status).to_lowercase(),
+                                "attributes": span.attributes,
+                                "error_message": span.error_message,
+                                "react_step": span.react_step,
+                            })
+                        }).collect::<Vec<_>>()
+                    });
+                    Ok(Json(json))
+                }
+                None => Err(StatusCode::NOT_FOUND),
+            }
+        }
+        None => Err(StatusCode::NOT_FOUND),
+    }
 }
 
 /// GET /api/metrics：返回 JSON 格式的 metrics

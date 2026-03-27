@@ -30,7 +30,9 @@ impl AppEventBus {
 
     /// 发布事件
     pub fn publish(&self, event: AppEvent) {
-        let _ = self.sender.send(event);
+        if let Err(e) = self.sender.send(event) {
+            tracing::debug!("Event bus publish failed (no subscribers): {:?}", e);
+        }
     }
 
     /// 订阅事件
@@ -49,14 +51,14 @@ impl Default for AppEventBus {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_event_bus_publish_subscribe() {
+    #[tokio::test]
+    async fn test_event_bus_publish_subscribe() {
         let bus = AppEventBus::new(10);
         let mut rx = bus.subscribe();
 
         bus.publish(AppEvent::MessageSubmitted("test".to_string()));
 
-        let event = rx.try_recv().unwrap();
+        let event = rx.recv().await.unwrap();
         match event {
             AppEvent::MessageSubmitted(msg) => assert_eq!(msg, "test"),
             _ => panic!("Unexpected event"),

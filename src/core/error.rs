@@ -12,8 +12,8 @@ pub enum AgentError {
     #[error("Cancelled by user")]
     Cancelled,
 
-    #[error("Network timeout")]
-    NetworkTimeout,
+    #[error("Network timeout: {0}")]
+    NetworkTimeout(String),
 
     #[error("Context window exceeded")]
     ContextWindowExceeded,
@@ -27,16 +27,18 @@ pub enum AgentError {
     #[error("Tool timeout: {0}")]
     ToolTimeout(String),
 
-    #[error("Hallucinated tool: {0}")]
+    /// LLM 幻觉出不存在的工具名
+    #[error("Hallucinated tool: {0} (model made up this tool name)")]
     HallucinatedTool(String),
 
-    #[error("Tool not found: {0}")]
+    /// 工具应该存在但未找到（如技能文件缺失）
+    #[error("Tool not found: {0} (tool exists but not loaded)")]
     ToolNotFound(String),
 
     #[error("LLM error: {0}")]
     LlmError(#[from] LlmError),
 
-    /// 恢复引擎建议降级模型（如 LLM 持续失败时），由上层决定是否切换轻量模型
+    /// 保留用于未来扩展：当 Agent 直接建议降级模型时（非 LlmError 触发）
     #[error("Suggest downgrade model: {0}")]
     SuggestDowngradeModel(String),
 
@@ -48,6 +50,9 @@ pub enum AgentError {
 
     #[error("Orchestration failed: {0}")]
     OrchestrationFailed(String),
+
+    #[error("Session not found: {0}")]
+    SessionNotFound(String),
 }
 
 /// 恢复引擎根据错误类型给出的建议动作
@@ -59,7 +64,8 @@ pub enum RecoveryAction {
     SummarizeAndPrune,
     /// 需要用户决策（如幻觉工具、超时）
     AskUser(String),
+    /// 降级到更轻量模型（如 LLM 持续失败时）
     DowngradeModel,
-    /// 终止当前任务
+    /// 终止当前任务（如用户取消或不可恢复错误）
     Abort,
 }

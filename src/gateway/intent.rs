@@ -103,7 +103,13 @@ impl IntentRecognizer {
             }
         }
 
-        self.llm_recognize(user_input).await.unwrap_or(Intent::Chat)
+        match self.llm_recognize(user_input).await {
+            Ok(intent) => intent,
+            Err(e) => {
+                tracing::warn!("LLM intent recognition failed: {}, falling back to Chat", e);
+                Intent::Chat
+            }
+        }
     }
 
     /// 快速规则匹配（不调用 LLM）
@@ -414,8 +420,13 @@ Output format: just the intent type, nothing else."#;
 /// 从文本中提取 URL
 fn extract_url(text: &str) -> Option<String> {
     for word in text.split_whitespace() {
-        if word.starts_with("http://") || word.starts_with("https://") {
-            return Some(word.to_string());
+        // 移除 URL 末尾的标点符号
+        let cleaned = word.trim_end_matches(|c: char| matches!(c, ',' | '.' | '!' | '?' | ')' | ']' | '}' | ';'));
+        // 移除 URL 开头的标点符号
+        let cleaned = cleaned.trim_start_matches(|c: char| matches!(c, '(' | '[' | '{' | '<' | '"' | '\''));
+
+        if cleaned.starts_with("http://") || cleaned.starts_with("https://") {
+            return Some(cleaned.to_string());
         }
     }
     None

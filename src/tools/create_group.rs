@@ -36,7 +36,10 @@ impl CreateGroupTool {
     }
 
     fn save_groups(&self, groups: &std::collections::HashMap<String, GroupInfo>) {
-        std::fs::create_dir_all(self.groups_path.parent().unwrap()).ok();
+        // 安全处理 parent()：如果路径无父目录则跳过创建
+        if let Some(parent) = self.groups_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         if let Ok(json) = serde_json::to_string_pretty(groups) {
             let _ = std::fs::write(&self.groups_path, json);
         }

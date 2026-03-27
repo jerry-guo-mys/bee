@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicUsize, AtomicU64, Ordering};
 use tokio::sync::{RwLock, OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
 
 /// 细粒度锁管理器
@@ -18,21 +19,43 @@ where
 {
     /// 锁映射表
     locks: Arc<RwLock<HashMap<K, Arc<RwLock<V>>>>>,
-    /// 统计信息
-    stats: Arc<RwLock<LockStats>>,
+    /// 统计信息（使用原子类型，无需锁）
+    stats: Arc<LockStats>,
 }
 
 /// 锁统计信息
-#[derive(Debug, Default, Clone)]
+#[derive(Debug)]
 pub struct LockStats {
     /// 当前锁数量
-    pub lock_count: usize,
+    pub lock_count: AtomicUsize,
     /// 读锁获取次数
-    pub read_acquisitions: u64,
+    pub read_acquisitions: AtomicU64,
     /// 写锁获取次数
-    pub write_acquisitions: u64,
+    pub write_acquisitions: AtomicU64,
     /// 锁等待次数
-    pub lock_waits: u64,
+    pub lock_waits: AtomicU64,
+}
+
+impl Default for LockStats {
+    fn default() -> Self {
+        Self {
+            lock_count: AtomicUsize::new(0),
+            read_acquisitions: AtomicU64::new(0),
+            write_acquisitions: AtomicU64::new(0),
+            lock_waits: AtomicU64::new(0),
+        }
+    }
+}
+
+impl Clone for LockStats {
+    fn clone(&self) -> Self {
+        Self {
+            lock_count: AtomicUsize::new(self.lock_count.load(Ordering::SeqCst)),
+            read_acquisitions: AtomicU64::new(self.read_acquisitions.load(Ordering::SeqCst)),
+            write_acquisitions: AtomicU64::new(self.write_acquisitions.load(Ordering::SeqCst)),
+            lock_waits: AtomicU64::new(self.lock_waits.load(Ordering::SeqCst)),
+        }
+    }
 }
 
 impl<K, V> FineGrainedLockStore<K, V>
@@ -44,7 +67,7 @@ where
     pub fn new() -> Self {
         Self {
             locks: Arc::new(RwLock::new(HashMap::new())),
-            stats: Arc::new(RwLock::new(LockStats::default())),
+            stats: Arc::new(LockStats::default()),
         }
     }
 
@@ -70,8 +93,8 @@ where
         let new_lock = Arc::new(RwLock::new(value));
         locks_write.insert(key, Arc::clone(&new_lock));
 
-        let mut stats = self.stats.write().await;
-        stats.lock_count = locks_write.len();
+        // 更新统计（原子操作）
+        self.stats.lock_count.store(locks_write.len(), Ordering::SeqCst);
 
         new_lock
     }
@@ -87,10 +110,8 @@ where
 
         drop(locks_read);
 
-        {
-            let mut stats = self.stats.write().await;
-            stats.read_acquisitions += 1;
-        }
+        // 使用原子类型更新统计，无需获取锁
+        self.stats.read_acquisitions.fetch_add(1, Ordering::SeqCst);
 
         let lock_clone = Arc::clone(&lock);
         let guard = lock_clone.read_owned().await;
@@ -108,10 +129,8 @@ where
 
         drop(locks_read);
 
-        {
-            let mut stats = self.stats.write().await;
-            stats.write_acquisitions += 1;
-        }
+        // 使用原子类型更新统计，无需获取锁
+        self.stats.write_acquisitions.fetch_add(1, Ordering::SeqCst);
 
         let lock_clone = Arc::clone(&lock);
         let guard = lock_clone.write_owned().await;
@@ -119,11 +138,29 @@ where
     }
 
     /// 插入或更新值
+    ///
+    /// 如果键已存在，返回旧值并更新为新值；如果键不存在，创建新键并返回 None
     pub async fn upsert(&self, key: K, value: V) -> Result<Option<V>, LockError> {
-        let lock = self.get_or_create_lock(key.clone(), value).await;
-        let guard = lock.write().await;
-        let old_value = guard.clone();
-        Ok(Some(old_value))
+        // 先检查键是否存在
+        let locks_read = self.locks.read().await;
+        if let Some(lock) = locks_read.get(&key) {
+            // 键已存在，更新并返回旧值
+            let lock_clone = Arc::clone(lock);
+            drop(locks_read);
+
+            let mut guard = lock_clone.write().await;
+            let old_value = guard.clone();
+            *guard = value;
+            return Ok(Some(old_value));
+        }
+
+        // 键不存在，需要创建新锁
+        drop(locks_read);
+
+        // 使用 get_or_create_lock 创建锁（传入 value 作为初始值）
+        // 这种情况下没有旧值，返回 None
+        let _lock = self.get_or_create_lock(key, value).await;
+        Ok(None)
     }
 
     /// 删除键
@@ -131,18 +168,22 @@ where
         let mut locks = self.locks.write().await;
 
         if let Some(lock) = locks.remove(key) {
-            {
-                let mut stats = self.stats.write().await;
-                stats.lock_count = locks.len();
-            }
+            // 更新统计（原子操作）
+            self.stats.lock_count.store(locks.len(), Ordering::SeqCst);
 
             // 尝试获取写锁以提取值
             let value = match Arc::try_unwrap(lock) {
                 Ok(rwlock) => Some(rwlock.into_inner()),
                 Err(arc_lock) => {
                     // 还有其他引用，需要等待获取锁
-                    let guard = arc_lock.write().await;
-                    Some(guard.clone())
+                    // 添加超时机制防止无限等待
+                    match tokio::time::timeout(
+                        tokio::time::Duration::from_secs(5),
+                        arc_lock.write_owned(),
+                    ).await {
+                        Ok(guard) => Some(guard.clone()),
+                        Err(_) => return Err(LockError::Timeout),
+                    }
                 }
             };
             return Ok(value);
@@ -159,8 +200,12 @@ where
 
     /// 获取统计信息
     pub async fn stats(&self) -> LockStats {
-        let stats = self.stats.read().await;
-        stats.clone()
+        LockStats {
+            lock_count: AtomicUsize::new(self.stats.lock_count.load(Ordering::SeqCst)),
+            read_acquisitions: AtomicU64::new(self.stats.read_acquisitions.load(Ordering::SeqCst)),
+            write_acquisitions: AtomicU64::new(self.stats.write_acquisitions.load(Ordering::SeqCst)),
+            lock_waits: AtomicU64::new(self.stats.lock_waits.load(Ordering::SeqCst)),
+        }
     }
 
     /// 获取锁数量

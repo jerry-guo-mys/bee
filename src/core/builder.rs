@@ -51,17 +51,25 @@ impl AgentBuilder {
 
     /// 从文件加载系统提示词
     pub fn with_system_prompt_from_file(mut self) -> Self {
-        self.system_prompt = [
-            "config/prompts/system.md",
-            "../config/prompts/system.md",
-            "config/prompts/default.md",
-            "../config/prompts/default.md",
-        ]
-        .into_iter()
-        .find_map(|p| std::fs::read_to_string(p).ok())
-        .unwrap_or_else(|| {
-            "You are Bee, a helpful AI assistant with access to various tools. If the user asks for an open-source address, repository link, GitHub URL, download page, homepage, or similar locator-style information, answer directly when possible or ask a short clarification question; do not call a tool first unless a tool is truly necessary to discover or verify the link. If the user asks a direct explanation question such as what a product or service is, what it does, or what its core functions are, answer directly from the conversation and available context unless the user explicitly asks for verification or browsing. For time-sensitive requests, prefer specialized fresh tools: weather for forecasts, news for headlines, exchange_rate for FX, market_quote for stock/index/crypto prices, and sports_score for live scores. For external GitHub repository architecture or stack questions, prefer github_repo_inspect, and after it returns structured fields like repo_summary, detected_stack, top_level_directories, key_files_found, or file_snippets, answer directly instead of inspecting the local workspace.".to_string()
-        });
+        // 尝试多个路径：从 workspace 根目录和当前目录
+        let prompt_paths = [
+            self.workspace.join("config/prompts/system.md"),
+            self.workspace.join("../config/prompts/system.md"),
+            self.workspace.join("config/prompts/default.md"),
+            self.workspace.join("../config/prompts/default.md"),
+        ];
+
+        self.system_prompt = prompt_paths
+            .iter()
+            .find_map(|p| {
+                std::fs::read_to_string(p)
+                    .inspect_err(|e| tracing::debug!("Failed to read system prompt from {}: {}", p.display(), e))
+                    .ok()
+            })
+            .unwrap_or_else(|| {
+                tracing::warn!("No prompt file found, using built-in default");
+                "You are Bee, a helpful AI assistant with access to various tools. If the user asks for an open-source address, repository link, GitHub URL, download page, homepage, or similar locator-style information, answer directly when possible or ask a short clarification question; do not call a tool first unless a tool is truly necessary to discover or verify the link. If the user asks a direct explanation question such as what a product or service is, what it does, or what its core functions are, answer directly from the conversation and available context unless the user explicitly asks for verification or browsing. For time-sensitive requests, prefer specialized fresh tools: weather for forecasts, news for headlines, exchange_rate for FX, market_quote for stock/index/crypto prices, and sports_score for live scores. For external GitHub repository architecture or stack questions, prefer github_repo_inspect, and after it returns structured fields like repo_summary, detected_stack, top_level_directories, key_files_found, or file_snippets, answer directly instead of inspecting the local workspace.".to_string()
+            });
         self
     }
 
@@ -157,12 +165,12 @@ impl AgentBuilder {
 
     /// 构建 Critic（可选，解决问题 4.3：配置化与模型分离）
     pub fn build_critic(&self, planner_llm: Arc<dyn LlmClient>) -> Option<Critic> {
-        // 检查配置是否启用 Critic
-        if !self.config.critic.enabled && !self.enable_critic {
+        // enable_critic 为 false 时不创建
+        if !self.enable_critic {
             return None;
         }
-        // enable_critic 为 false 时也不创建
-        if !self.enable_critic {
+        // 检查配置是否启用 Critic
+        if !self.config.critic.enabled {
             return None;
         }
 
@@ -191,9 +199,17 @@ impl AgentBuilder {
         };
 
         // 尝试从文件加载 prompt，否则使用配置中的模板
-        let critic_prompt = ["config/prompts/critic.md", "../config/prompts/critic.md"]
-            .into_iter()
-            .find_map(|p| std::fs::read_to_string(p).ok())
+        let critic_paths = [
+            self.workspace.join("config/prompts/critic.md"),
+            self.workspace.join("../config/prompts/critic.md"),
+        ];
+        let critic_prompt = critic_paths
+            .iter()
+            .find_map(|p| {
+                std::fs::read_to_string(p)
+                    .inspect_err(|e| tracing::debug!("Failed to read critic prompt from {}: {}", p.display(), e))
+                    .ok()
+            })
             .unwrap_or_else(|| self.config.critic.prompt_template.clone());
 
         // 创建修改后的配置副本，使用文件中的 prompt
@@ -204,18 +220,42 @@ impl AgentBuilder {
     }
 
     /// 构建技能加载器（返回 Arc 可共享）
+    ///
+    /// 注意：技能加载在调用时同步完成，确保返回的 SkillLoader 已就绪
     pub fn build_skill_loader(&self) -> Arc<SkillLoader> {
         let skill_loader = Arc::new(SkillLoader::from_default());
 
         if self.enable_skills {
             let loader = skill_loader.clone();
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    if let Err(e) = loader.load_all().await {
-                        tracing::warn!("Failed to load skills: {}", e);
+            // 检查是否在 runtime 上下文中
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => {
+                    // 在 runtime 内：使用 spawn_blocking 避免阻塞 async 任务
+                    let future = async move {
+                        if let Err(e) = loader.load_all().await {
+                            tracing::warn!("Failed to load skills: {}", e);
+                        }
+                    };
+                    // 如果当前是 multi-thread runtime，使用 spawn 并阻塞等待
+                    if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread {
+                        tokio::task::block_in_place(|| {
+                            handle.block_on(future);
+                        });
+                    } else {
+                        // 单线程 runtime (current_thread): 直接 block_on
+                        handle.block_on(future);
                     }
-                });
-            });
+                }
+                Err(_) => {
+                    // 无 runtime: 创建新 runtime
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(async {
+                        if let Err(e) = loader.load_all().await {
+                            tracing::warn!("Failed to load skills: {}", e);
+                        }
+                    });
+                }
+            }
         }
 
         skill_loader
