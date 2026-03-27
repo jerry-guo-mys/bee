@@ -45,6 +45,8 @@ impl ToolExecutor {
         let start = Instant::now();
         let args_preview = args_preview(&args);
         let metrics = Metrics::global();
+
+        tracing::info!(target: "bee::tool", tool = %tool_name, "Tool execution starting");
         let tool_timeout = self
             .registry
             .get(tool_name)

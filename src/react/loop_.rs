@@ -268,6 +268,8 @@ async fn react_loop_impl(
     system_prompt_override: Option<&str>,
     allowed_tools: Option<&[String]>,
 ) -> Result<ReactResult, AgentError> {
+    tracing::info!(target: "bee::react", "Starting ReAct loop");
+
     context.push_message(Message::user(user_input.to_string()));
     context.working.set_goal(user_input);
 

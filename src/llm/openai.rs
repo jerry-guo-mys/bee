@@ -182,6 +182,8 @@ impl LlmClient for OpenAiClient {
         let start = Instant::now();
         let metrics = Metrics::global();
 
+        tracing::info!(target: "bee::llm", model = %self.model, "LLM call starting");
+
         let request = CreateChatCompletionRequestArgs::default()
             .model(&self.model)
             .messages(self.to_openai_messages(messages))

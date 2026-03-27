@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全链路追踪 - Bee Agent</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .tree-line { border-left: 2px solid #374151; }
+        .animate-pulse-slow { animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-blue-400">🔍 全链路追踪系统</h1>
+            <p class="text-gray-400 mt-2">实时监控和分析 Agent 请求执行过程</p>
+        </header>
+
+        <!-- Controls -->
+        <div class="bg-gray-800 rounded-lg p-4 mb-6">
+            <div class="flex flex-wrap gap-4">
+                <button onclick="loadTraces()"
+                    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition">
+                    🔄 刷新列表
+                </button>
+                <button onclick="toggleAutoRefresh()"
+                    id="autoRefreshBtn"
+                    class="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg transition">
+                    ⏸️ 自动刷新：关
+                </button>
+                <select id="statusFilter" onchange="filterTraces()"
+                    class="px-4 py-2 bg-gray-700 rounded-lg border border-gray-600">
+                    <option value="all">全部状态</option>
+                    <option value="success">成功</option>
+                    <option value="failure">失败</option>
+                    <option value="running">进行中</option>
+                    <option value="cancelled">已取消</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-gray-400 text-sm">总请求数</div>
+                <div class="text-2xl font-bold" id="statTotal">0</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-gray-400 text-sm">成功</div>
+                <div class="text-2xl font-bold text-green-400" id="statSuccess">0</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-gray-400 text-sm">失败</div>
+                <div class="text-2xl font-bold text-red-400" id="statFailure">0</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-gray-400 text-sm">平均耗时</div>
+                <div class="text-2xl font-bold text-yellow-400" id="statAvgTime">0ms</div>
+            </div>
+        </div>
+
+        <!-- Trace List -->
+        <div class="bg-gray-800 rounded-lg overflow-hidden mb-6">
+            <div class="px-4 py-3 bg-gray-750 border-b border-gray-700">
+                <h2 class="text-lg font-semibold">最近追踪</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-750">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase">状态</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase">请求 ID</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase">会话 ID</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase">耗时</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase">Spans</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase">LLM</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase">输入摘要</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="traceTableBody" class="divide-y divide-gray-700">
+                        <tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Trace Detail Modal -->
+        <div id="detailModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div class="bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto mx-4">
+                <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center sticky top-0 bg-gray-800">
+                    <h3 class="text-xl font-bold">追踪详情</h3>
+                    <button onclick="closeModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+                </div>
+                <div class="p-6" id="detailContent">
+                    <!-- 详情内容动态填充 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let autoRefresh = false;
+        let refreshInterval = null;
+        let allTraces = [];
+
+        // 状态图标
+        const statusIcons = {
+            'success': { icon: '✅', class: 'text-green-400' },
+            'failure': { icon: '❌', class: 'text-red-400' },
+            'running': { icon: '🔄', class: 'text-yellow-400' },
+            'cancelled': { icon: '🚫', class: 'text-gray-400' }
+        };
+
+        // 加载追踪列表
+        async function loadTraces() {
+            try {
+                const response = await fetch('/api/traces/recent?limit=50');
+                if (!response.ok) throw new Error('加载失败');
+                const data = await response.json();
+                allTraces = data.traces || [];
+                renderTable(allTraces);
+                updateStats(allTraces);
+            } catch (error) {
+                console.error('加载追踪失败:', error);
+                document.getElementById('traceTableBody').innerHTML =
+                    '<tr><td colspan="8" class="px-4 py-8 text-center text-red-400">加载失败：' + error.message + '</td></tr>';
+            }
+        }
+
+        // 渲染表格
+        function renderTable(traces) {
+            const tbody = document.getElementById('traceTableBody');
+            if (!traces || traces.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">暂无数据</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = traces.map(trace => `
+                <tr class="hover:bg-gray-750 transition">
+                    <td class="px-4 py-3">
+                        <span class="${statusIcons[trace.status]?.class || 'text-gray-400'}">
+                            ${statusIcons[trace.status]?.icon || '❓'} ${trace.status}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 font-mono text-sm">${truncate(trace.request_id, 12)}</td>
+                    <td class="px-4 py-3 font-mono text-sm">${truncate(trace.session_id || '-', 12)}</td>
+                    <td class="px-4 py-3">${trace.duration_ms ? trace.duration_ms + 'ms' : '-'}</td>
+                    <td class="px-4 py-3">${trace.span_count || 0}</td>
+                    <td class="px-4 py-3">${trace.llm_calls_count || 0}</td>
+                    <td class="px-4 py-3 max-w-xs truncate" title="${escapeHtml(trace.input_summary || '')}">${escapeHtml(trace.input_summary || '-')}</td>
+                    <td class="px-4 py-3">
+                        <button onclick="viewDetail('${trace.request_id}')"
+                            class="text-blue-400 hover:text-blue-300 transition">查看详情</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // 更新统计
+        function updateStats(traces) {
+            const total = traces.length;
+            const success = traces.filter(t => t.status === 'success').length;
+            const failure = traces.filter(t => t.status === 'failure').length;
+            const avgTime = traces.filter(t => t.duration_ms).reduce((a, t) => a + t.duration_ms, 0) / (total || 1);
+
+            document.getElementById('statTotal').textContent = total;
+            document.getElementById('statSuccess').textContent = success;
+            document.getElementById('statFailure').textContent = failure;
+            document.getElementById('statAvgTime').textContent = Math.round(avgTime) + 'ms';
+        }
+
+        // 查看详情
+        async function viewDetail(requestId) {
+            try {
+                const response = await fetch('/api/traces/' + requestId);
+                if (!response.ok) throw new Error('加载失败');
+                const trace = await response.json();
+
+                const content = document.getElementById('detailContent');
+                content.innerHTML = renderTraceDetail(trace);
+                document.getElementById('detailModal').classList.remove('hidden');
+            } catch (error) {
+                alert('加载详情失败：' + error.message);
+            }
+        }
+
+        // 渲染追踪详情
+        function renderTraceDetail(trace) {
+            const statusInfo = statusIcons[trace.status] || { icon: '❓', class: 'text-gray-400' };
+
+            return `
+                <div class="space-y-4">
+                    <!-- 基本信息 -->
+                    <div class="bg-gray-750 rounded-lg p-4">
+                        <h4 class="text-lg font-semibold mb-3">基本信息</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <span class="text-gray-400">请求 ID:</span>
+                                <span class="ml-2 font-mono">${trace.request_id}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">状态:</span>
+                                <span class="ml-2 ${statusInfo.class}">${statusInfo.icon} ${trace.status}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">会话 ID:</span>
+                                <span class="ml-2 font-mono">${trace.session_id || '-'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">耗时:</span>
+                                <span class="ml-2">${trace.duration_ms ? trace.duration_ms + 'ms' : '-'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">LLM 调用:</span>
+                                <span class="ml-2">${trace.llm_calls_count || 0}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">工具执行:</span>
+                                <span class="ml-2">${trace.tool_executions_count || 0}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">Token 消耗:</span>
+                                <span class="ml-2">${trace.total_tokens || 0}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">ReAct 步数:</span>
+                                <span class="ml-2">${trace.react_steps_total || 0}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 输入输出 -->
+                    ${trace.input_summary ? `
+                    <div class="bg-gray-750 rounded-lg p-4">
+                        <h4 class="text-lg font-semibold mb-2">输入摘要</h4>
+                        <p class="text-gray-300">${escapeHtml(trace.input_summary)}</p>
+                    </div>
+                    ` : ''}
+                    ${trace.output_summary ? `
+                    <div class="bg-gray-750 rounded-lg p-4">
+                        <h4 class="text-lg font-semibold mb-2">输出摘要</h4>
+                        <p class="text-gray-300">${escapeHtml(trace.output_summary)}</p>
+                    </div>
+                    ` : ''}
+
+                    <!-- Spans 树 -->
+                    ${trace.spans && trace.spans.length > 0 ? `
+                    <div class="bg-gray-750 rounded-lg p-4">
+                        <h4 class="text-lg font-semibold mb-3">Spans (${trace.spans.length})</h4>
+                        <div class="space-y-2">
+                            ${renderSpansTree(trace.spans, 0)}
+                        </div>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        // 渲染 Spans 树
+        function renderSpansTree(spans, depth) {
+            return spans.map((span, i) => {
+                const statusIcon = span.status === 'success' ? '✓' : (span.status === 'failure' ? '✗' : '○');
+                const indent = '  '.repeat(depth);
+                return `
+                    <div class="tree-line pl-4 py-1">
+                        <div class="flex items-center gap-2">
+                            <span class="${span.status === 'success' ? 'text-green-400' : (span.status === 'failure' ? 'text-red-400' : 'text-yellow-400')}">
+                                ${statusIcon}
+                            </span>
+                            <span class="font-mono text-sm">${indent}${span.operation_name}</span>
+                            <span class="text-gray-500 text-xs">[${span.operation_kind}]</span>
+                            ${span.duration_ms ? `<span class="text-gray-400 text-xs">${span.duration_ms}ms</span>` : ''}
+                        </div>
+                        ${span.attributes && Object.keys(span.attributes).length > 0 ? `
+                            <div class="ml-6 mt-1 text-xs text-gray-500">
+                                ${Object.entries(span.attributes).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(', ')}
+                            </div>
+                        ` : ''}
+                        ${span.error_message ? `
+                            <div class="ml-6 mt-1 text-xs text-red-400">${escapeHtml(span.error_message)}</div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function closeModal() {
+            document.getElementById('detailModal').classList.add('hidden');
+        }
+
+        function toggleAutoRefresh() {
+            autoRefresh = !autoRefresh;
+            const btn = document.getElementById('autoRefreshBtn');
+            if (autoRefresh) {
+                btn.textContent = '▶️ 自动刷新：开 (5s)';
+                btn.classList.remove('bg-gray-600');
+                btn.classList.add('bg-green-600');
+                refreshInterval = setInterval(loadTraces, 5000);
+            } else {
+                btn.textContent = '⏸️ 自动刷新：关';
+                btn.classList.remove('bg-green-600');
+                btn.classList.add('bg-gray-600');
+                if (refreshInterval) clearInterval(refreshInterval);
+            }
+        }
+
+        function filterTraces() {
+            const status = document.getElementById('statusFilter').value;
+            if (status === 'all') {
+                renderTable(allTraces);
+            } else {
+                renderTable(allTraces.filter(t => t.status === status));
+            }
+        }
+
+        function truncate(str, len) {
+            if (!str) return '';
+            return str.length > len ? str.substring(0, len) + '...' : str;
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        // 页面加载时获取数据
+        loadTraces();
+    </script>
+</body>
+</html>
