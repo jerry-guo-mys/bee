@@ -6,12 +6,15 @@
 //! - **memory**: 记忆领域（Conversation, Working, LongTerm, Store）
 
 pub mod cognitive;
+pub mod common;
 pub mod event;
 pub mod memory;
 pub mod session;
+pub mod tenant;
 pub mod tool;
 
 // 重新导出常用类型
+pub use common::*;
 pub use cognitive::{
     context::ContextManager,
     critic::{Critic, CriticResult, CriticReview},
