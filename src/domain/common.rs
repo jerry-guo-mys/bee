@@ -122,6 +122,29 @@ pub enum TenantStatus {
     Archived,
 }
 
+impl std::fmt::Display for TenantStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TenantStatus::Active => write!(f, "active"),
+            TenantStatus::Suspended => write!(f, "suspended"),
+            TenantStatus::Archived => write!(f, "archived"),
+        }
+    }
+}
+
+impl std::str::FromStr for TenantStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "active" => Ok(TenantStatus::Active),
+            "suspended" => Ok(TenantStatus::Suspended),
+            "archived" => Ok(TenantStatus::Archived),
+            _ => Err(format!("Invalid tenant status: {}", s)),
+        }
+    }
+}
+
 /// Agent 实例状态
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum AgentInstanceStatus {

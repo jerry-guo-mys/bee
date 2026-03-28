@@ -7,6 +7,9 @@ use async_trait::async_trait;
 use super::entity::Tenant;
 use super::value_object::{TenantError, TenantId};
 
+#[cfg(feature = "postgres")]
+pub mod postgres;
+
 /// 租户 Repository trait
 #[async_trait]
 pub trait TenantRepository: Send + Sync {

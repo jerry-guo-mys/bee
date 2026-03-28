@@ -1,4 +1,4 @@
-#![cfg(feature = "async-sqlite")]
+#![cfg(any(feature = "async-sqlite", feature = "postgres"))]
 
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::sync::Arc;

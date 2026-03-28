@@ -23,6 +23,9 @@ pub enum TenantError {
 
     #[error("租户状态无效：{0}")]
     InvalidStatus(String),
+
+    #[error("数据库错误：{0}")]
+    DatabaseError(String),
 }
 
 /// 租户 ID - 封装 UUID 字符串

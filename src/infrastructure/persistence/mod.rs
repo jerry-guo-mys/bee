@@ -4,7 +4,7 @@
 
 pub mod locking;
 
-#[cfg(feature = "async-sqlite")]
+#[cfg(any(feature = "async-sqlite", feature = "postgres"))]
 pub mod postgres;
 
 pub use locking::{
@@ -12,5 +12,5 @@ pub use locking::{
     LockError, LockStats, ShardedMap,
 };
 
-#[cfg(feature = "async-sqlite")]
+#[cfg(any(feature = "async-sqlite", feature = "postgres"))]
 pub use postgres::{load_database_connection, PostgresConnection};
