@@ -2,6 +2,7 @@
 //!
 //! 提供 LLM 客户端、数据库、文件系统、HTTP 客户端等基础设施实现
 
+pub mod event_bus;
 pub mod llm;
 pub mod memory;
 pub mod persistence;

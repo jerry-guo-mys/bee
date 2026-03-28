@@ -4,4 +4,4 @@ pub mod bus;
 pub mod events;
 
 pub use bus::EventBus;
-pub use events::DomainEvent;
+pub use events::{DomainEvent, EventEnvelope, EventMetadata, LegacyDomainEvent};

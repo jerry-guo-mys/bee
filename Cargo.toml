@@ -57,10 +57,10 @@ tracing-appender = "0.2"
 
 async-trait = "0.1"
 futures-util = "0.3"
-uuid = { version = "1.6", features = ["v4"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
 
 reqwest = { version = "0.12", features = ["json"] }
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 html2text = "0.16"
 
 # SQLite 持久化（同步）

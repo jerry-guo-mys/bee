@@ -1,11 +1,11 @@
-//! 事件总线实现
+//! 事件总线实现（向后兼容）
 
-use crate::domain::event::DomainEvent;
+use super::events::LegacyDomainEvent;
 use tokio::sync::broadcast;
 
-/// 事件总线
+/// 事件总线（向后兼容）
 pub struct EventBus {
-    sender: broadcast::Sender<DomainEvent>,
+    sender: broadcast::Sender<LegacyDomainEvent>,
 }
 
 impl EventBus {
@@ -15,12 +15,12 @@ impl EventBus {
     }
 
     /// 发布事件
-    pub fn publish(&self, event: DomainEvent) {
+    pub fn publish(&self, event: LegacyDomainEvent) {
         let _ = self.sender.send(event);
     }
 
     /// 订阅事件
-    pub fn subscribe(&self) -> broadcast::Receiver<DomainEvent> {
+    pub fn subscribe(&self) -> broadcast::Receiver<LegacyDomainEvent> {
         self.sender.subscribe()
     }
 }
