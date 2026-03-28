@@ -9,6 +9,8 @@ use super::value_object::{TenantError, TenantId};
 
 #[cfg(feature = "postgres")]
 pub mod postgres;
+#[cfg(feature = "postgres")]
+pub use postgres::PostgresTenantRepository;
 
 /// 租户 Repository trait
 #[async_trait]
