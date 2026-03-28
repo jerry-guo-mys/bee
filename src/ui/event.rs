@@ -5,7 +5,7 @@ use std::thread;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, MouseEvent};
 use tokio::sync::mpsc;
 
-use crate::application::Command;
+use crate::application::orchestrator::Command;
 
 /// 应用事件
 #[derive(Debug, Clone)]
