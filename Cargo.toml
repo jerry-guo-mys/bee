@@ -67,7 +67,7 @@ html2text = "0.16"
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 
 # PostgreSQL 持久化（异步）+ SQLite
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "sqlite", "uuid", "chrono"], optional = true }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "sqlite", "uuid", "chrono", "migrate"], optional = true }
 
 # 代码搜索与分析（自主迭代）
 regex = "1.10"
