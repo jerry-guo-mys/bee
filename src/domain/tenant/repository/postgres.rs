@@ -123,7 +123,7 @@ impl super::TenantRepository for PostgresTenantRepository {
     }
 
     async fn delete(&self, id: &TenantId) -> Result<(), TenantError> {
-        sqlx::query("DELETE FROM tenants WHERE id = $1")
+        let result = sqlx::query("DELETE FROM tenants WHERE id = $1")
             .bind(id.as_str().parse::<uuid::Uuid>().map_err(|e| {
                 TenantError::DatabaseError(format!("Invalid UUID: {}", e))
             })?)
@@ -131,7 +131,23 @@ impl super::TenantRepository for PostgresTenantRepository {
             .await
             .map_err(|e| TenantError::DatabaseError(e.to_string()))?;
 
+        if result.rows_affected() == 0 {
+            return Err(TenantError::NotFound(id.to_string()));
+        }
+
         Ok(())
+    }
+
+    async fn exists_by_slug(&self, slug: &str) -> Result<bool, TenantError> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM tenants WHERE slug = $1)",
+        )
+        .bind(slug)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| TenantError::DatabaseError(e.to_string()))?;
+
+        Ok(exists)
     }
 }
 
@@ -163,8 +179,8 @@ mod tests {
         let repo = PostgresTenantRepository::new(&conn);
 
         // 创建测试租户
-        let name = TenantName::new("Test Tenant".to_string()).unwrap();
-        let slug = TenantSlug::new("test-tenant".to_string()).unwrap();
+        let _name = TenantName::new("Test Tenant".to_string()).unwrap();
+        let _slug = TenantSlug::new("test-tenant".to_string()).unwrap();
         let tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
 
         // 保存
