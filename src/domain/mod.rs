@@ -10,6 +10,7 @@ pub mod common;
 pub mod event;
 pub mod memory;
 pub mod member;
+pub mod service;
 pub mod session;
 pub mod tenant;
 pub mod tool;
@@ -31,6 +32,7 @@ pub use member::{
     MemberDomainError, MemberDomainService, MemberEvent, Membership, MembershipFilter,
     MembershipRepository, PermissionError, ToolId, ToolPolicy, ToolRiskLevel, UserEmail,
 };
+pub use service::TenantDomainService;
 pub use tool::{
     executor::ToolExecutor,
     metadata::ToolMetadata,
