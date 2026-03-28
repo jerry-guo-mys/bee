@@ -78,10 +78,12 @@ impl CommandBus for InMemoryCommandBus {
         &self,
         command: C,
     ) -> Result<C::Response, Box<dyn Error + Send + Sync>> {
-        let handler = self
-            .handlers
-            .get(&TypeId::of::<C>())
-            .ok_or_else(|| Box::new(CommandBusError(format!("Handler not registered for command: {}", std::any::type_name::<C>()))))?;
+        let handler = self.handlers.get(&TypeId::of::<C>()).ok_or_else(|| {
+            Box::new(CommandBusError(format!(
+                "Handler not registered for command: {}",
+                std::any::type_name::<C>()
+            )))
+        })?;
 
         // 类型安全的向下转型并调用 handler
         let handler = handler
@@ -90,7 +92,8 @@ impl CommandBus for InMemoryCommandBus {
 
         // 使用 anyhow::Error 的 Debug 表示来创建错误消息
         handler.handle(command).await.map_err(|e| {
-            Box::new(CommandBusError(format!("Command handler error: {}", e))) as Box<dyn Error + Send + Sync>
+            Box::new(CommandBusError(format!("Command handler error: {}", e)))
+                as Box<dyn Error + Send + Sync>
         })
     }
 }

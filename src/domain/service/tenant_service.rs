@@ -42,11 +42,7 @@ where
     ///
     /// # Returns
     /// * `Result<Tenant, TenantError>` - 创建成功返回租户实例，失败返回错误
-    pub async fn create_tenant(
-        &self,
-        name: String,
-        slug: String,
-    ) -> Result<Tenant, TenantError> {
+    pub async fn create_tenant(&self, name: String, slug: String) -> Result<Tenant, TenantError> {
         // 验证名称和 slug（会返回错误如果无效）
         let _name = TenantName::new(name.clone())?;
         let _slug = TenantSlug::new(slug.clone())?;
@@ -66,13 +62,12 @@ where
         self.tenant_repo.save(&tenant).await?;
 
         // 发布 TenantCreated 事件
-        let created_event = crate::domain::tenant::TenantEvent::Created(
-            crate::domain::tenant::TenantCreated::new(
+        let created_event =
+            crate::domain::tenant::TenantEvent::Created(crate::domain::tenant::TenantCreated::new(
                 tenant.id().clone(),
                 tenant.name().to_string(),
                 tenant.slug().to_string(),
-            ),
-        );
+            ));
         self.event_publisher.publish(created_event).await;
 
         Ok(tenant)
@@ -315,7 +310,11 @@ mod tests {
         service.suspend_tenant(tenant.id()).await.unwrap();
 
         // 验证状态
-        let updated = service.get_tenant_by_id(tenant.id()).await.unwrap().unwrap();
+        let updated = service
+            .get_tenant_by_id(tenant.id())
+            .await
+            .unwrap()
+            .unwrap();
         assert!(updated.is_suspended());
 
         // 验证事件已发布
@@ -355,7 +354,11 @@ mod tests {
         service.restore_tenant(tenant.id()).await.unwrap();
 
         // 验证状态
-        let updated = service.get_tenant_by_id(tenant.id()).await.unwrap().unwrap();
+        let updated = service
+            .get_tenant_by_id(tenant.id())
+            .await
+            .unwrap()
+            .unwrap();
         assert!(updated.is_active());
 
         // 验证事件已发布
@@ -393,7 +396,11 @@ mod tests {
         service.archive_tenant(tenant.id()).await.unwrap();
 
         // 验证状态
-        let updated = service.get_tenant_by_id(tenant.id()).await.unwrap().unwrap();
+        let updated = service
+            .get_tenant_by_id(tenant.id())
+            .await
+            .unwrap()
+            .unwrap();
         assert!(updated.is_archived());
 
         // 验证事件已发布

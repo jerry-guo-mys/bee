@@ -78,10 +78,12 @@ impl QueryBus for InMemoryQueryBus {
         &self,
         query: Q,
     ) -> Result<Q::Response, Box<dyn Error + Send + Sync>> {
-        let handler = self
-            .handlers
-            .get(&TypeId::of::<Q>())
-            .ok_or_else(|| Box::new(QueryBusError(format!("Handler not registered for query: {}", std::any::type_name::<Q>()))))?;
+        let handler = self.handlers.get(&TypeId::of::<Q>()).ok_or_else(|| {
+            Box::new(QueryBusError(format!(
+                "Handler not registered for query: {}",
+                std::any::type_name::<Q>()
+            )))
+        })?;
 
         // 类型安全的向下转型并调用 handler
         let handler = handler
@@ -90,7 +92,8 @@ impl QueryBus for InMemoryQueryBus {
 
         // 使用 anyhow::Error 的 Debug 表示来创建错误消息
         handler.handle(query).await.map_err(|e| {
-            Box::new(QueryBusError(format!("Query handler error: {}", e))) as Box<dyn Error + Send + Sync>
+            Box::new(QueryBusError(format!("Query handler error: {}", e)))
+                as Box<dyn Error + Send + Sync>
         })
     }
 }

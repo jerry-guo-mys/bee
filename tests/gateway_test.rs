@@ -1,0 +1,273 @@
+//! Gateway 集成测试
+//!
+//! 测试 Gateway 的认证、会话管理和消息处理
+
+use bee_agents::gateway::auth::{
+    AuthContext, JwtAuthenticator, JwtClaims, extract_client_metadata,
+};
+use bee_agents::gateway::session::{Session, SessionManager, SessionScope};
+use bee_agents::gateway::message::{ClientInfo, SpokeType, SessionStatus};
+
+#[tokio::test]
+async fn test_gateway_session_manager_basic() {
+    let manager = SessionManager::new(20, 3600);
+
+    let client = ClientInfo {
+        client_id: "test-client".to_string(),
+        platform: SpokeType::Web,
+        display_name: Some("Test User".to_string()),
+        metadata: None,
+    };
+
+    // 获取或创建会话
+    let session_id = manager.get_or_create("user-123", client.clone()).await;
+
+    // 验证会话已创建
+    assert!(session_id.starts_with("session_"));
+
+    // 验证可以获取到同一个会话
+    let session = manager.get(&session_id).await;
+    assert!(session.is_some());
+
+    let session = session.unwrap().read().await;
+    assert_eq!(session.user_id, "user-123");
+    assert_eq!(session.status, SessionStatus::Idle);
+}
+
+#[tokio::test]
+async fn test_gateway_session_manager_multiple_clients() {
+    let manager = SessionManager::new(20, 3600);
+
+    // 同一个用户从不同平台连接
+    let web_client = ClientInfo {
+        client_id: "web-client".to_string(),
+        platform: SpokeType::Web,
+        display_name: Some("Web User".to_string()),
+        metadata: None,
+    };
+
+    let mobile_client = ClientInfo {
+        client_id: "mobile-client".to_string(),
+        platform: SpokeType::Mobile,
+        display_name: Some("Mobile User".to_string()),
+        metadata: None,
+    };
+
+    // 第一次连接创建会话
+    let session_id1 = manager.get_or_create("user-123", web_client.clone()).await;
+
+    // 第二次连接应该复用同一个会话
+    let session_id2 = manager.get_or_create("user-123", mobile_client.clone()).await;
+
+    // 验证是同一个会话
+    assert_eq!(session_id1, session_id2);
+
+    // 验证会话有两个客户端
+    let session = manager.get(&session_id1).await.unwrap().read().await;
+    assert_eq!(session.clients.len(), 2);
+}
+
+#[tokio::test]
+async fn test_gateway_session_manager_cleanup() {
+    let manager = SessionManager::new(20, 0); // 0 秒过期时间
+
+    let client = ClientInfo {
+        client_id: "test-client".to_string(),
+        platform: SpokeType::Web,
+        display_name: Some("Test".to_string()),
+        metadata: None,
+    };
+
+    // 创建会话
+    let session_id = manager.get_or_create("user-123", client.clone()).await;
+
+    // 移除客户端连接
+    manager.remove_client(&session_id, SpokeType::Web).await;
+
+    // 等待一小段时间让会话过期
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    // 清理过期会话
+    let removed = manager.cleanup_expired().await;
+    assert_eq!(removed, 1);
+
+    // 验证会话已删除
+    assert!(manager.get(&session_id).await.is_none());
+}
+
+#[tokio::test]
+async fn test_gateway_session_scope() {
+    let manager = SessionManager::new(20, 3600);
+
+    let metadata = serde_json::json!({
+        "tenant_id": "tenant-123",
+        "organization_id": "org-456",
+        "team_id": "team-789",
+    });
+
+    let client = ClientInfo {
+        client_id: "test-client".to_string(),
+        platform: SpokeType::Web,
+        display_name: Some("Test".to_string()),
+        metadata: Some(metadata),
+    };
+
+    // 创建会话
+    let session_id = manager.get_or_create("user-123", client.clone()).await;
+
+    // 验证会话 scope 已设置
+    let session = manager.get(&session_id).await.unwrap().read().await;
+    assert_eq!(session.scope.tenant_id, Some("tenant-123".to_string()));
+    assert_eq!(session.scope.organization_id, Some("org-456".to_string()));
+    assert_eq!(session.scope.team_id, Some("team-789".to_string()));
+}
+
+#[tokio::test]
+async fn test_gateway_session_status_transitions() {
+    let manager = SessionManager::new(20, 3600);
+
+    let client = ClientInfo {
+        client_id: "test-client".to_string(),
+        platform: SpokeType::Web,
+        display_name: Some("Test".to_string()),
+        metadata: None,
+    };
+
+    let session_id = manager.get_or_create("user-123", client.clone()).await;
+
+    // 修改状态为 Processing
+    manager
+        .with_session(&session_id, |session| {
+            session.set_status(SessionStatus::Processing);
+        })
+        .await;
+
+    // 验证状态已变更
+    let session = manager.get(&session_id).await.unwrap().read().await;
+    assert_eq!(session.status, SessionStatus::Processing);
+
+    // 修改状态为 Waiting
+    drop(session);
+    manager
+        .with_session(&session_id, |session| {
+            session.set_status(SessionStatus::Waiting);
+        })
+        .await;
+
+    let session = manager.get(&session_id).await.unwrap().read().await;
+    assert_eq!(session.status, SessionStatus::Waiting);
+}
+
+#[tokio::test]
+async fn test_gateway_session_cancel_token() {
+    let manager = SessionManager::new(20, 3600);
+
+    let client = ClientInfo {
+        client_id: "test-client".to_string(),
+        platform: SpokeType::Web,
+        display_name: Some("Test".to_string()),
+        metadata: None,
+    };
+
+    let session_id = manager.get_or_create("user-123", client.clone()).await;
+
+    // 创建取消令牌
+    manager
+        .with_session(&session_id, |session| {
+            let _token = session.new_cancel_token();
+        })
+        .await;
+
+    // 验证状态变为 Idle（取消后）
+    let session = manager.get(&session_id).await.unwrap().read().await;
+    assert_eq!(session.status, SessionStatus::Idle);
+}
+
+#[test]
+fn test_gateway_auth_context_authenticated() {
+    let ctx = AuthContext {
+        user_id: "user-123".to_string(),
+        tenant_id: Some("tenant-456".to_string()),
+        organization_id: Some("org-789".to_string()),
+        team_id: None,
+        role: Some("member".to_string()),
+    };
+
+    assert!(ctx.is_authenticated());
+    assert!(ctx.has_tenant_context());
+    assert_eq!(ctx.user_id, "user-123");
+    assert_eq!(ctx.tenant_id, Some("tenant-456".to_string()));
+}
+
+#[test]
+fn test_gateway_auth_context_anonymous() {
+    let ctx = AuthContext::anonymous();
+
+    assert!(!ctx.is_authenticated());
+    assert!(!ctx.has_tenant_context());
+    assert_eq!(ctx.user_id, "anonymous");
+    assert!(ctx.tenant_id.is_none());
+}
+
+#[test]
+fn test_gateway_extract_client_metadata() {
+    let ctx = AuthContext {
+        user_id: "user-123".to_string(),
+        tenant_id: Some("tenant-456".to_string()),
+        organization_id: Some("org-789".to_string()),
+        team_id: Some("team-000".to_string()),
+        role: Some("admin".to_string()),
+    };
+
+    let metadata = extract_client_metadata(&ctx);
+    assert!(metadata.is_some());
+
+    let metadata = metadata.unwrap();
+    let map = metadata.as_object().unwrap();
+
+    assert_eq!(map.get("tenant_id").unwrap(), "tenant-456");
+    assert_eq!(map.get("organization_id").unwrap(), "org-789");
+    assert_eq!(map.get("team_id").unwrap(), "team-000");
+    assert_eq!(map.get("role").unwrap(), "admin");
+}
+
+#[test]
+fn test_gateway_auth_context_from_claims() {
+    let claims = JwtClaims {
+        sub: "user-123".to_string(),
+        tenant_id: Some("tenant-456".to_string()),
+        organization_id: Some("org-789".to_string()),
+        team_id: Some("team-000".to_string()),
+        role: Some("admin".to_string()),
+        exp: 9999999999,
+        iat: 0,
+    };
+
+    let ctx = AuthContext::from_claims(&claims).unwrap();
+    assert_eq!(ctx.user_id, "user-123");
+    assert_eq!(ctx.tenant_id, Some("tenant-456".to_string()));
+    assert!(ctx.is_authenticated());
+}
+
+#[tokio::test]
+async fn test_gateway_session_with_metadata() {
+    let manager = SessionManager::new(20, 3600);
+
+    let metadata = serde_json::json!({
+        "tenant_id": "tenant-123",
+        "user_id": "override-user",
+    });
+
+    let client = ClientInfo {
+        client_id: "test-client".to_string(),
+        platform: SpokeType::Web,
+        display_name: Some("Test".to_string()),
+        metadata: Some(metadata),
+    };
+
+    let session_id = manager.get_or_create("user-123", client.clone()).await;
+
+    // 验证 user_id 被 metadata 覆盖
+    let session = manager.get(&session_id).await.unwrap().read().await;
+    assert_eq!(session.scope.user_id, Some("override-user".to_string()));
+}

@@ -1,10 +1,10 @@
-use super::handler::{CqrsCommand, CommandHandler};
+use super::handler::{CommandHandler, CqrsCommand};
 use crate::domain::common::MembershipRole;
-use crate::domain::member::Membership;
 use crate::domain::member::value_object::UserEmail;
+use crate::domain::member::Membership;
 use crate::domain::tenant::{OrganizationId, TeamId, TenantId, UserId};
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 
 /// 邀请成员命令
 #[derive(Debug, Clone)]
@@ -53,8 +53,8 @@ impl CommandHandler<InviteMemberCommand> for InviteMemberHandler {
         );
 
         // 创建成员关系
-        let email = UserEmail::new(command.email)
-            .map_err(|e| anyhow::anyhow!("Invalid email: {}", e))?;
+        let email =
+            UserEmail::new(command.email).map_err(|e| anyhow::anyhow!("Invalid email: {}", e))?;
 
         let membership = Membership::invite(
             command.tenant_id,
