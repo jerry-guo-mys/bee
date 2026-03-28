@@ -8,7 +8,7 @@ use crate::domain::tenant::value_object::{
     MembershipId, OrganizationId, TeamId, UserId,
 };
 
-use super::entity::{MemberDomainError, Membership};
+use super::entity::Membership;
 
 /// 成员查询过滤器
 #[derive(Debug, Clone, Default)]
@@ -85,34 +85,37 @@ impl MembershipFilter {
 /// 定义了成员聚合的持久化接口，由基础设施层（如 SQLite）实现。
 #[async_trait]
 pub trait MembershipRepository: Send + Sync {
+    /// 错误类型
+    type Error: std::error::Error + Send + Sync;
+
     /// 保存成员（创建或更新）
     ///
     /// 如果成员已存在则更新，否则创建新记录。
-    async fn save(&self, membership: &Membership) -> Result<(), MemberDomainError>;
+    async fn save(&self, membership: &Membership) -> Result<(), Self::Error>;
 
     /// 根据 ID 查找成员
-    async fn find_by_id(&self, id: &MembershipId) -> Result<Option<Membership>, MemberDomainError>;
+    async fn find_by_id(&self, id: &MembershipId) -> Result<Option<Membership>, Self::Error>;
 
     /// 根据用户 ID 查找成员的所有成员资格
-    async fn find_by_user(&self, user_id: &UserId) -> Result<Vec<Membership>, MemberDomainError>;
+    async fn find_by_user(&self, user_id: &UserId) -> Result<Vec<Membership>, Self::Error>;
 
     /// 根据组织 ID 查找所有成员
-    async fn find_by_organization(&self, org_id: &OrganizationId) -> Result<Vec<Membership>, MemberDomainError>;
+    async fn find_by_organization(&self, org_id: &OrganizationId) -> Result<Vec<Membership>, Self::Error>;
 
     /// 根据团队 ID 查找所有成员
-    async fn find_by_team(&self, team_id: &TeamId) -> Result<Vec<Membership>, MemberDomainError>;
+    async fn find_by_team(&self, team_id: &TeamId) -> Result<Vec<Membership>, Self::Error>;
 
     /// 根据租户 ID 查找所有成员
-    async fn find_by_tenant(&self, tenant_id: &TenantId) -> Result<Vec<Membership>, MemberDomainError>;
+    async fn find_by_tenant(&self, tenant_id: &TenantId) -> Result<Vec<Membership>, Self::Error>;
 
     /// 根据过滤器查找成员
-    async fn find_by_filter(&self, filter: &MembershipFilter) -> Result<Vec<Membership>, MemberDomainError>;
+    async fn find_by_filter(&self, filter: &MembershipFilter) -> Result<Vec<Membership>, Self::Error>;
 
     /// 删除成员
-    async fn delete(&self, id: &MembershipId) -> Result<(), MemberDomainError>;
+    async fn delete(&self, id: &MembershipId) -> Result<(), Self::Error>;
 
     /// 检查成员是否存在
-    async fn exists(&self, id: &MembershipId) -> Result<bool, MemberDomainError> {
+    async fn exists(&self, id: &MembershipId) -> Result<bool, Self::Error> {
         match self.find_by_id(id).await {
             Ok(Some(_)) => Ok(true),
             Ok(None) => Ok(false),
@@ -121,7 +124,7 @@ pub trait MembershipRepository: Send + Sync {
     }
 
     /// 统计成员数量
-    async fn count(&self, filter: &MembershipFilter) -> Result<usize, MemberDomainError> {
+    async fn count(&self, filter: &MembershipFilter) -> Result<usize, Self::Error> {
         let members = self.find_by_filter(filter).await?;
         Ok(members.len())
     }
@@ -129,6 +132,12 @@ pub trait MembershipRepository: Send + Sync {
 
 // 重新导出必要类型
 pub use crate::domain::tenant::value_object::TenantId;
+
+// PostgreSQL 实现
+#[cfg(feature = "postgres")]
+pub mod postgres;
+#[cfg(feature = "postgres")]
+pub use postgres::PostgresMembershipRepository;
 
 #[cfg(test)]
 mod tests {

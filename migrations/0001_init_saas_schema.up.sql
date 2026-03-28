@@ -74,7 +74,7 @@ CREATE TABLE memberships (
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     team_id UUID REFERENCES teams(id) ON DELETE SET NULL,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     role VARCHAR(50) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -231,3 +231,20 @@ CREATE TABLE domain_events (
 CREATE INDEX idx_domain_events_aggregate ON domain_events(aggregate_type, aggregate_id);
 CREATE INDEX idx_domain_events_unprocessed ON domain_events(processed) WHERE NOT processed;
 CREATE INDEX idx_domain_events_type ON domain_events(event_type);
+
+-- ============================================================================
+-- 13. Membership Tool Policies Table (成员工具策略表)
+-- ============================================================================
+CREATE TABLE membership_tool_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    membership_id UUID NOT NULL REFERENCES memberships(id) ON DELETE CASCADE,
+    tool_id VARCHAR(100) NOT NULL,
+    risk_level VARCHAR(20) NOT NULL DEFAULT 'low',
+    is_allowed BOOLEAN NOT NULL DEFAULT true,
+    note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(membership_id, tool_id)
+);
+
+CREATE INDEX idx_membership_tool_policies_membership ON membership_tool_policies(membership_id);
+CREATE INDEX idx_membership_tool_policies_tool ON membership_tool_policies(tool_id);

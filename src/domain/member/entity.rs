@@ -36,6 +36,9 @@ pub enum MemberDomainError {
     #[error("工具执行被拒绝：{0}")]
     ToolExecutionDenied(String),
 
+    #[error("数据库错误：{0}")]
+    DatabaseError(String),
+
     #[error("值对象错误：{0}")]
     ValueObject(#[from] crate::domain::member::value_object::ValueObjectError),
 }

@@ -17,5 +17,7 @@ pub mod value_object;
 pub use entity::{MemberDomainError, MemberEvent, Membership};
 pub use event::{MemberEventType};
 pub use repository::{MembershipFilter, MembershipRepository};
+#[cfg(feature = "postgres")]
+pub use repository::PostgresMembershipRepository;
 pub use service::{MemberDomainService, PermissionError};
 pub use value_object::{ToolId, ToolPolicy, ToolRiskLevel, UserEmail};
