@@ -39,6 +39,19 @@ impl CommandHandler<InviteMemberCommand> for InviteMemberHandler {
         &self,
         command: InviteMemberCommand,
     ) -> Result<<InviteMemberCommand as CqrsCommand>::Response, Self::Error> {
+        // 先记录审计日志（在值被移动之前）
+        tracing::info!(
+            target: "audit",
+            event = "member_invited",
+            inviter_id = %command.inviter_id,
+            invitee_email = %command.email,
+            tenant_id = %command.tenant_id,
+            organization_id = %command.organization_id,
+            role = ?command.role,
+            "Member invited by {}",
+            command.inviter_id
+        );
+
         // 创建成员关系
         let email = UserEmail::new(command.email)
             .map_err(|e| anyhow::anyhow!("Invalid email: {}", e))?;

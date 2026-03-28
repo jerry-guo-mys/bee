@@ -16,7 +16,7 @@ pub fn now() -> DateTime<Utc> {
 }
 
 /// 成员角色 - 定义用户在租户/组织/团队中的权限级别
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MembershipRole {
     /// 平台管理员 - 拥有所有权限
     PlatformAdmin,
