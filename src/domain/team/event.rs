@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 
 use super::value_object::TeamId;
 use crate::domain::tenant::{OrganizationId, TenantId};
+use crate::domain::tenant::event::DomainEvent;
 
 /// Team 事件枚举
 #[derive(Debug, Clone)]
@@ -51,6 +52,56 @@ impl TeamEvent {
 
     /// 序列化为 JSON 字符串（用于持久化）
     pub fn to_json(&self) -> String {
+        match self {
+            TeamEvent::Created(e) => {
+                format!(
+                    r#"{{"team_id":"{}","tenant_id":"{}","organization_id":"{}","name":"{}"}}"#,
+                    e.team_id, e.tenant_id, e.organization_id, e.name
+                )
+            }
+            TeamEvent::Updated(e) => {
+                format!(
+                    r#"{{"team_id":"{}","name":"{}"}}"#,
+                    e.team_id, e.name
+                )
+            }
+            TeamEvent::Deleted(e) => {
+                format!(r#"{{"team_id":"{}"}}"#, e.team_id)
+            }
+        }
+    }
+}
+
+impl DomainEvent for TeamEvent {
+    fn aggregate_id(&self) -> &str {
+        match self {
+            TeamEvent::Created(e) => e.team_id.as_str(),
+            TeamEvent::Updated(e) => e.team_id.as_str(),
+            TeamEvent::Deleted(e) => e.team_id.as_str(),
+        }
+    }
+
+    fn aggregate_type(&self) -> &str {
+        "team"
+    }
+
+    fn event_type(&self) -> &str {
+        match self {
+            TeamEvent::Created(_) => "team.created",
+            TeamEvent::Updated(_) => "team.updated",
+            TeamEvent::Deleted(_) => "team.deleted",
+        }
+    }
+
+    fn occurred_at(&self) -> DateTime<Utc> {
+        match self {
+            TeamEvent::Created(e) => e.occurred_at,
+            TeamEvent::Updated(e) => e.occurred_at,
+            TeamEvent::Deleted(e) => e.occurred_at,
+        }
+    }
+
+    fn to_json(&self) -> String {
         match self {
             TeamEvent::Created(e) => {
                 format!(

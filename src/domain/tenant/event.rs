@@ -263,6 +263,35 @@ impl InMemoryEventPublisher {
                             },
                         )) as Box<dyn DomainEvent>
                     }
+                    "team.created" => {
+                        Box::new(crate::domain::team::TeamEvent::Created(
+                            crate::domain::team::TeamCreated {
+                                team_id: crate::domain::team::TeamId::from_str(e.aggregate_id()),
+                                tenant_id: crate::domain::tenant::TenantId::from_str(e.aggregate_id()),
+                                organization_id: crate::domain::tenant::OrganizationId::from_str(e.aggregate_id()),
+                                name: String::new(),
+                                code: None,
+                                occurred_at: e.occurred_at(),
+                            },
+                        )) as Box<dyn DomainEvent>
+                    }
+                    "team.updated" => {
+                        Box::new(crate::domain::team::TeamEvent::Updated(
+                            crate::domain::team::TeamUpdated {
+                                team_id: crate::domain::team::TeamId::from_str(e.aggregate_id()),
+                                name: String::new(),
+                                occurred_at: e.occurred_at(),
+                            },
+                        )) as Box<dyn DomainEvent>
+                    }
+                    "team.deleted" => {
+                        Box::new(crate::domain::team::TeamEvent::Deleted(
+                            crate::domain::team::TeamDeleted {
+                                team_id: crate::domain::team::TeamId::from_str(e.aggregate_id()),
+                                occurred_at: e.occurred_at(),
+                            },
+                        )) as Box<dyn DomainEvent>
+                    }
                     _ => panic!("Unknown event type: {}", e.event_type()),
                 }
             })
