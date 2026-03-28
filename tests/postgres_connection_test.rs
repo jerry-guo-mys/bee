@@ -16,16 +16,16 @@ async fn test_create_connection() {
 }
 
 #[tokio::test]
-async fn test_migration_run() {
+async fn test_migration_run() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
         Err(_) => {
             eprintln!("DATABASE_URL not set, skipping test");
-            return;
+            return Ok(());
         }
     };
 
-    let conn = PostgresConnection::new(&database_url).await.unwrap();
-    let result = conn.migrate().await;
-    assert!(result.is_ok(), "Should run migrations successfully");
+    let conn = PostgresConnection::new(&database_url).await?;
+    conn.migrate().await?;
+    Ok(())
 }

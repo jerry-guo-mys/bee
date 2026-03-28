@@ -29,7 +29,8 @@ impl PostgresConnection {
         &self.pool
     }
 
-    /// 运行数据库迁移
+    /// Run database migrations using compile-time validated SQLx migrate
+    /// Returns sqlx::Error which preserves migration failure information
     pub async fn migrate(&self) -> Result<(), sqlx::Error> {
         // 使用 sqlx::migrate! 宏在编译时加载迁移文件
         sqlx::migrate!("./migrations")
