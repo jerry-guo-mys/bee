@@ -6,5 +6,5 @@ pub mod repository;
 pub use logger::{AuditError, AuditLog, AuditLogger};
 pub use repository::AuditLogRepository;
 
-#[cfg(feature = "async-sqlite")]
+#[cfg(feature = "postgres")]
 pub use repository::postgres::PostgresAuditLogRepository;

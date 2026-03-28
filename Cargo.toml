@@ -122,6 +122,7 @@ web = ["dep:axum", "dep:tower", "dep:bytes"]
 browser = ["dep:headless_chrome"]
 gateway = ["dep:axum", "dep:tower", "dep:tokio-tungstenite", "dep:sqlx"]
 async-sqlite = ["dep:sqlx"]
+postgres = ["dep:sqlx"]
 
 [dev-dependencies]
 tempfile = "3.0"

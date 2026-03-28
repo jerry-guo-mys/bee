@@ -1,5 +1,7 @@
+use super::repository::AuditLogRepository;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// 审计日志记录
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,16 +61,23 @@ impl AuditLog {
 }
 
 /// 审计日志记录器
-pub struct AuditLogger;
+pub struct AuditLogger<R: AuditLogRepository> {
+    repository: Arc<R>,
+}
 
-impl AuditLogger {
-    pub fn new() -> Self {
-        Self
+impl<R: AuditLogRepository + 'static> AuditLogger<R> {
+    pub fn new(repository: R) -> Self {
+        Self {
+            repository: Arc::new(repository),
+        }
     }
 
     /// 记录审计日志
     pub async fn log(&self, log: &AuditLog) -> Result<(), AuditError> {
-        // TODO: 保存到数据库
+        // Save to repository
+        self.repository.save(log).await.map_err(|e| {
+            AuditError::Database(Box::new(e))
+        })?;
 
         // 同时输出到 tracing
         tracing::info!(
@@ -81,12 +90,6 @@ impl AuditLogger {
         );
 
         Ok(())
-    }
-}
-
-impl Default for AuditLogger {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

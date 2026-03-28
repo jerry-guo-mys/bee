@@ -37,7 +37,7 @@ pub trait AuditLogRepository: Send + Sync {
     ) -> Result<Vec<AuditLog>, Self::Error>;
 }
 
-#[cfg(feature = "async-sqlite")]
+#[cfg(feature = "postgres")]
 pub mod postgres {
     use super::*;
     use crate::infrastructure::persistence::postgres::PostgresConnection;
@@ -87,18 +87,54 @@ pub mod postgres {
         async fn find_by_tenant(
             &self,
             tenant_id: &str,
-            _from: Option<DateTime<Utc>>,
-            _to: Option<DateTime<Utc>>,
+            from: Option<DateTime<Utc>>,
+            to: Option<DateTime<Utc>>,
             limit: usize,
         ) -> Result<Vec<AuditLog>, Self::Error> {
-            // TODO: 添加时间范围过滤
-            sqlx::query_as::<_, AuditLog>(
-                r#"SELECT * FROM audit_logs WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2"#,
-            )
-            .bind(tenant_id)
-            .bind(limit as i64)
-            .fetch_all(&self.pool)
-            .await
+            let mut sql = String::from(
+                "SELECT * FROM audit_logs WHERE tenant_id = $1"
+            );
+            let mut param_idx = 2;
+
+            let from_idx = if from.is_some() {
+                sql.push_str(" AND created_at >= $");
+                sql.push_str(&param_idx.to_string());
+                param_idx += 1;
+                Some(param_idx - 1)
+            } else {
+                None
+            };
+
+            let to_idx = if to.is_some() {
+                sql.push_str(" AND created_at <= $");
+                sql.push_str(&param_idx.to_string());
+                param_idx += 1;
+                Some(param_idx - 1)
+            } else {
+                None
+            };
+
+            sql.push_str(" ORDER BY created_at DESC LIMIT $");
+            sql.push_str(&param_idx.to_string());
+
+            let mut query = sqlx::query_as::<_, AuditLog>(&sql);
+            query = query.bind(tenant_id);
+
+            if let Some(_) = from_idx {
+                if let Some(from_val) = from {
+                    query = query.bind(from_val);
+                }
+            }
+
+            if let Some(_) = to_idx {
+                if let Some(to_val) = to {
+                    query = query.bind(to_val);
+                }
+            }
+
+            query = query.bind(limit as i64);
+
+            query.fetch_all(&self.pool).await
         }
 
         async fn find_by_resource(

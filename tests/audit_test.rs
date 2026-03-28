@@ -1,8 +1,54 @@
-use bee::infrastructure::audit::{AuditLog, AuditLogger};
+use bee::infrastructure::audit::{AuditLog, AuditLogRepository};
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use std::sync::{Arc, Mutex};
+
+/// Mock repository for testing
+struct MockAuditLogRepository {
+    logs: Arc<Mutex<Vec<AuditLog>>>,
+}
+
+impl MockAuditLogRepository {
+    fn new() -> Self {
+        Self {
+            logs: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+#[async_trait]
+impl AuditLogRepository for MockAuditLogRepository {
+    type Error = std::io::Error;
+
+    async fn save(&self, log: &AuditLog) -> Result<(), Self::Error> {
+        self.logs.lock().unwrap().push(log.clone());
+        Ok(())
+    }
+
+    async fn find_by_tenant(
+        &self,
+        _tenant_id: &str,
+        _from: Option<DateTime<Utc>>,
+        _to: Option<DateTime<Utc>>,
+        _limit: usize,
+    ) -> Result<Vec<AuditLog>, Self::Error> {
+        Ok(self.logs.lock().unwrap().clone())
+    }
+
+    async fn find_by_resource(
+        &self,
+        _resource_type: &str,
+        _resource_id: &str,
+        _limit: usize,
+    ) -> Result<Vec<AuditLog>, Self::Error> {
+        Ok(self.logs.lock().unwrap().clone())
+    }
+}
 
 #[tokio::test]
 async fn test_audit_logger() {
-    let logger = AuditLogger::new();
+    let repository = MockAuditLogRepository::new();
+    let logger = bee::infrastructure::audit::AuditLogger::new(repository);
 
     let log = AuditLog::new("tenant-1", "MEMBER_INVITE", "membership", "member-123")
         .with_organization("org-456")
