@@ -4,12 +4,14 @@
 
 pub mod member_service;
 pub mod organization_service;
+pub mod rbac_service;
 pub mod team_service;
 pub mod tenant_service;
 pub mod tool_policy_service;
 
 pub use member_service::{MemberDomainService, PermissionCheckService, PermissionError};
 pub use organization_service::OrganizationDomainService;
+pub use rbac_service::{RbacError, RbacService};
 pub use team_service::TeamDomainService;
 pub use tenant_service::TenantDomainService;
 pub use tool_policy_service::{ToolPolicyBuilder, ToolPolicyError, ToolPolicyService};
