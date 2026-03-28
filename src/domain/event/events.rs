@@ -13,4 +13,6 @@ pub enum DomainEvent {
     MemoryUpdated(String),
     /// 错误发生
     Error(String),
+    /// 自定义事件
+    Custom(String),
 }

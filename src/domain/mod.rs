@@ -9,6 +9,7 @@ pub mod cognitive;
 pub mod common;
 pub mod event;
 pub mod memory;
+pub mod member;
 pub mod session;
 pub mod tenant;
 pub mod tool;
@@ -25,6 +26,10 @@ pub use memory::{
     conversation::ConversationMemory,
     Message,
     working::WorkingMemory,
+};
+pub use member::{
+    MemberDomainError, MemberDomainService, MemberEvent, Membership, MembershipFilter,
+    MembershipRepository, PermissionError, ToolId, ToolPolicy, ToolRiskLevel, UserEmail,
 };
 pub use tool::{
     executor::ToolExecutor,
