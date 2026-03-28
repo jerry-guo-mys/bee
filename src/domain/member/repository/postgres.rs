@@ -166,6 +166,48 @@ async fn load_tool_policies(
     Ok(policies)
 }
 
+/// 批量加载多个成员的工具策略列表
+async fn load_tool_policies_batch(
+    pool: &PgPool,
+    membership_ids: &[&str],
+) -> Result<std::collections::HashMap<String, Vec<ToolPolicy>>, MemberDomainError> {
+    if membership_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    let rows = sqlx::query_as::<_, ToolPolicyRow>(
+        "SELECT membership_id, tool_id, risk_level, is_allowed, note
+         FROM membership_tool_policies
+         WHERE membership_id = ANY($1)"
+    )
+    .bind(membership_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
+
+    // Group policies by membership_id
+    let mut policies_by_membership: std::collections::HashMap<String, Vec<ToolPolicy>> = std::collections::HashMap::new();
+    for row in rows {
+        let membership_id = row.membership_id.to_string();
+        let risk_level = ToolRiskLevel::from_str(&row.risk_level)
+            .unwrap_or(ToolRiskLevel::Low);
+        let mut policy = ToolPolicy::new(
+            ToolId::from_str(&row.tool_id),
+            risk_level,
+            row.is_allowed,
+        );
+        if let Some(note) = row.note {
+            policy = policy.with_note(note);
+        }
+        policies_by_membership
+            .entry(membership_id)
+            .or_default()
+            .push(policy);
+    }
+
+    Ok(policies_by_membership)
+}
+
 #[async_trait]
 impl MembershipRepository for PostgresMembershipRepository {
     type Error = MemberDomainError;
@@ -274,11 +316,28 @@ impl MembershipRepository for PostgresMembershipRepository {
         .await
         .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
-        let mut memberships = Vec::new();
-        for row in rows {
-            let mut membership = row.into_membership()?;
-            let policies = load_tool_policies(&self.pool, membership.id()).await?;
-            membership = Membership::load(
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Convert rows to memberships first
+        let mut memberships: Vec<Membership> = rows
+            .into_iter()
+            .map(|row| row.into_membership())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Collect membership IDs for batch loading
+        let membership_ids: Vec<&str> = memberships.iter().map(|m| m.id().as_str()).collect();
+
+        // Load all tool policies in ONE query
+        let mut policies_by_membership = load_tool_policies_batch(&self.pool, &membership_ids).await?;
+
+        // Assign policies to memberships
+        for membership in &mut memberships {
+            let policies = policies_by_membership
+                .remove(membership.id().as_str())
+                .unwrap_or_default();
+            *membership = Membership::load(
                 membership.id().clone(),
                 membership.tenant_id().clone(),
                 membership.organization_id().clone(),
@@ -291,7 +350,6 @@ impl MembershipRepository for PostgresMembershipRepository {
                 *membership.updated_at(),
                 policies,
             );
-            memberships.push(membership);
         }
 
         Ok(memberships)
@@ -308,11 +366,28 @@ impl MembershipRepository for PostgresMembershipRepository {
         .await
         .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
-        let mut memberships = Vec::new();
-        for row in rows {
-            let mut membership = row.into_membership()?;
-            let policies = load_tool_policies(&self.pool, membership.id()).await?;
-            membership = Membership::load(
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Convert rows to memberships first
+        let mut memberships: Vec<Membership> = rows
+            .into_iter()
+            .map(|row| row.into_membership())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Collect membership IDs for batch loading
+        let membership_ids: Vec<&str> = memberships.iter().map(|m| m.id().as_str()).collect();
+
+        // Load all tool policies in ONE query
+        let mut policies_by_membership = load_tool_policies_batch(&self.pool, &membership_ids).await?;
+
+        // Assign policies to memberships
+        for membership in &mut memberships {
+            let policies = policies_by_membership
+                .remove(membership.id().as_str())
+                .unwrap_or_default();
+            *membership = Membership::load(
                 membership.id().clone(),
                 membership.tenant_id().clone(),
                 membership.organization_id().clone(),
@@ -325,7 +400,6 @@ impl MembershipRepository for PostgresMembershipRepository {
                 *membership.updated_at(),
                 policies,
             );
-            memberships.push(membership);
         }
 
         Ok(memberships)
@@ -342,11 +416,28 @@ impl MembershipRepository for PostgresMembershipRepository {
         .await
         .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
-        let mut memberships = Vec::new();
-        for row in rows {
-            let mut membership = row.into_membership()?;
-            let policies = load_tool_policies(&self.pool, membership.id()).await?;
-            membership = Membership::load(
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Convert rows to memberships first
+        let mut memberships: Vec<Membership> = rows
+            .into_iter()
+            .map(|row| row.into_membership())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Collect membership IDs for batch loading
+        let membership_ids: Vec<&str> = memberships.iter().map(|m| m.id().as_str()).collect();
+
+        // Load all tool policies in ONE query
+        let mut policies_by_membership = load_tool_policies_batch(&self.pool, &membership_ids).await?;
+
+        // Assign policies to memberships
+        for membership in &mut memberships {
+            let policies = policies_by_membership
+                .remove(membership.id().as_str())
+                .unwrap_or_default();
+            *membership = Membership::load(
                 membership.id().clone(),
                 membership.tenant_id().clone(),
                 membership.organization_id().clone(),
@@ -359,7 +450,6 @@ impl MembershipRepository for PostgresMembershipRepository {
                 *membership.updated_at(),
                 policies,
             );
-            memberships.push(membership);
         }
 
         Ok(memberships)
@@ -376,11 +466,28 @@ impl MembershipRepository for PostgresMembershipRepository {
         .await
         .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
-        let mut memberships = Vec::new();
-        for row in rows {
-            let mut membership = row.into_membership()?;
-            let policies = load_tool_policies(&self.pool, membership.id()).await?;
-            membership = Membership::load(
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Convert rows to memberships first
+        let mut memberships: Vec<Membership> = rows
+            .into_iter()
+            .map(|row| row.into_membership())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Collect membership IDs for batch loading
+        let membership_ids: Vec<&str> = memberships.iter().map(|m| m.id().as_str()).collect();
+
+        // Load all tool policies in ONE query
+        let mut policies_by_membership = load_tool_policies_batch(&self.pool, &membership_ids).await?;
+
+        // Assign policies to memberships
+        for membership in &mut memberships {
+            let policies = policies_by_membership
+                .remove(membership.id().as_str())
+                .unwrap_or_default();
+            *membership = Membership::load(
                 membership.id().clone(),
                 membership.tenant_id().clone(),
                 membership.organization_id().clone(),
@@ -393,7 +500,6 @@ impl MembershipRepository for PostgresMembershipRepository {
                 *membership.updated_at(),
                 policies,
             );
-            memberships.push(membership);
         }
 
         Ok(memberships)
@@ -448,11 +554,28 @@ impl MembershipRepository for PostgresMembershipRepository {
             .await
             .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
-        let mut memberships = Vec::new();
-        for row in rows {
-            let mut membership = row.into_membership()?;
-            let policies = load_tool_policies(&self.pool, membership.id()).await?;
-            membership = Membership::load(
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Convert rows to memberships first
+        let mut memberships: Vec<Membership> = rows
+            .into_iter()
+            .map(|row| row.into_membership())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Collect membership IDs for batch loading
+        let membership_ids: Vec<&str> = memberships.iter().map(|m| m.id().as_str()).collect();
+
+        // Load all tool policies in ONE query
+        let mut policies_by_membership = load_tool_policies_batch(&self.pool, &membership_ids).await?;
+
+        // Assign policies to memberships
+        for membership in &mut memberships {
+            let policies = policies_by_membership
+                .remove(membership.id().as_str())
+                .unwrap_or_default();
+            *membership = Membership::load(
                 membership.id().clone(),
                 membership.tenant_id().clone(),
                 membership.organization_id().clone(),
@@ -465,7 +588,6 @@ impl MembershipRepository for PostgresMembershipRepository {
                 *membership.updated_at(),
                 policies,
             );
-            memberships.push(membership);
         }
 
         Ok(memberships)
