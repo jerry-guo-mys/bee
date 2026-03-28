@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 
 use super::value_object::OrganizationId;
 use crate::domain::tenant::TenantId;
+use crate::domain::tenant::event::DomainEvent;
 
 /// Organization 事件枚举
 #[derive(Debug, Clone)]
@@ -51,6 +52,56 @@ impl OrganizationEvent {
 
     /// 序列化为 JSON 字符串（用于持久化）
     pub fn to_json(&self) -> String {
+        match self {
+            OrganizationEvent::Created(e) => {
+                format!(
+                    r#"{{"organization_id":"{}","tenant_id":"{}","name":"{}"}}"#,
+                    e.organization_id, e.tenant_id, e.name
+                )
+            }
+            OrganizationEvent::Updated(e) => {
+                format!(
+                    r#"{{"organization_id":"{}","name":"{}"}}"#,
+                    e.organization_id, e.name
+                )
+            }
+            OrganizationEvent::Deleted(e) => {
+                format!(r#"{{"organization_id":"{}"}}"#, e.organization_id)
+            }
+        }
+    }
+}
+
+impl DomainEvent for OrganizationEvent {
+    fn aggregate_id(&self) -> &str {
+        match self {
+            OrganizationEvent::Created(e) => e.organization_id.as_str(),
+            OrganizationEvent::Updated(e) => e.organization_id.as_str(),
+            OrganizationEvent::Deleted(e) => e.organization_id.as_str(),
+        }
+    }
+
+    fn aggregate_type(&self) -> &str {
+        "organization"
+    }
+
+    fn event_type(&self) -> &str {
+        match self {
+            OrganizationEvent::Created(_) => "organization.created",
+            OrganizationEvent::Updated(_) => "organization.updated",
+            OrganizationEvent::Deleted(_) => "organization.deleted",
+        }
+    }
+
+    fn occurred_at(&self) -> DateTime<Utc> {
+        match self {
+            OrganizationEvent::Created(e) => e.occurred_at,
+            OrganizationEvent::Updated(e) => e.occurred_at,
+            OrganizationEvent::Deleted(e) => e.occurred_at,
+        }
+    }
+
+    fn to_json(&self) -> String {
         match self {
             OrganizationEvent::Created(e) => {
                 format!(

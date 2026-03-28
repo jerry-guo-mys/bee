@@ -74,7 +74,10 @@ impl DomainEvent for TenantEvent {
     fn to_json(&self) -> String {
         match self {
             TenantEvent::Created(e) => {
-                format!(r#"{{"tenant_id":"{}","name":"{}","slug":"{}","status":"active"}}"#, e.tenant_id, e.name, e.slug)
+                format!(
+                    r#"{{"tenant_id":"{}","name":"{}","slug":"{}","status":"active"}}"#,
+                    e.tenant_id, e.name, e.slug
+                )
             }
             TenantEvent::Suspended(e) => {
                 format!(r#"{{"tenant_id":"{}"}}"#, e.tenant_id)
@@ -201,46 +204,69 @@ impl InMemoryEventPublisher {
         let guard = self.events.lock().await;
         // Clone by serializing to JSON and back (for test purposes)
         // Or simply return a new Vec with cloned event metadata
-        guard.iter().map(|e| {
-            // For simplicity in tests, we clone by recreating based on event type
-            match e.event_type() {
-                "tenant.created" => {
-                    let _json = e.to_json();
-                    // Parse back minimal info for testing
-                    Box::new(TenantEvent::Created(TenantCreated {
-                        tenant_id: TenantId::from_str(e.aggregate_id()),
-                        name: String::new(),
-                        slug: String::new(),
-                        occurred_at: e.occurred_at(),
-                    })) as Box<dyn DomainEvent>
-                }
-                "tenant.suspended" => {
-                    Box::new(TenantEvent::Suspended(TenantSuspended {
-                        tenant_id: TenantId::from_str(e.aggregate_id()),
-                        occurred_at: e.occurred_at(),
-                    })) as Box<dyn DomainEvent>
-                }
-                "tenant.restored" => {
-                    Box::new(TenantEvent::Restored(TenantRestored {
+        guard
+            .iter()
+            .map(|e| {
+                // For simplicity in tests, we clone by recreating based on event type
+                match e.event_type() {
+                    "tenant.created" => {
+                        let _json = e.to_json();
+                        // Parse back minimal info for testing
+                        Box::new(TenantEvent::Created(TenantCreated {
+                            tenant_id: TenantId::from_str(e.aggregate_id()),
+                            name: String::new(),
+                            slug: String::new(),
+                            occurred_at: e.occurred_at(),
+                        })) as Box<dyn DomainEvent>
+                    }
+                    "tenant.suspended" => Box::new(TenantEvent::Suspended(TenantSuspended {
                         tenant_id: TenantId::from_str(e.aggregate_id()),
                         occurred_at: e.occurred_at(),
-                    })) as Box<dyn DomainEvent>
-                }
-                "tenant.archived" => {
-                    Box::new(TenantEvent::Archived(TenantArchived {
+                    })) as Box<dyn DomainEvent>,
+                    "tenant.restored" => Box::new(TenantEvent::Restored(TenantRestored {
                         tenant_id: TenantId::from_str(e.aggregate_id()),
                         occurred_at: e.occurred_at(),
-                    })) as Box<dyn DomainEvent>
-                }
-                "tenant.deleted" => {
-                    Box::new(TenantEvent::Deleted(TenantDeleted {
+                    })) as Box<dyn DomainEvent>,
+                    "tenant.archived" => Box::new(TenantEvent::Archived(TenantArchived {
                         tenant_id: TenantId::from_str(e.aggregate_id()),
                         occurred_at: e.occurred_at(),
-                    })) as Box<dyn DomainEvent>
+                    })) as Box<dyn DomainEvent>,
+                    "tenant.deleted" => Box::new(TenantEvent::Deleted(TenantDeleted {
+                        tenant_id: TenantId::from_str(e.aggregate_id()),
+                        occurred_at: e.occurred_at(),
+                    })) as Box<dyn DomainEvent>,
+                    "organization.created" => {
+                        Box::new(crate::domain::organization::OrganizationEvent::Created(
+                            crate::domain::organization::OrganizationCreated {
+                                organization_id: crate::domain::organization::OrganizationId::from_str(e.aggregate_id()),
+                                tenant_id: crate::domain::tenant::TenantId::from_str(e.aggregate_id()),
+                                name: String::new(),
+                                slug: String::new(),
+                                occurred_at: e.occurred_at(),
+                            },
+                        )) as Box<dyn DomainEvent>
+                    }
+                    "organization.updated" => {
+                        Box::new(crate::domain::organization::OrganizationEvent::Updated(
+                            crate::domain::organization::OrganizationUpdated {
+                                organization_id: crate::domain::organization::OrganizationId::from_str(e.aggregate_id()),
+                                name: String::new(),
+                                occurred_at: e.occurred_at(),
+                            },
+                        )) as Box<dyn DomainEvent>
+                    }
+                    "organization.deleted" => {
+                        Box::new(crate::domain::organization::OrganizationEvent::Deleted(
+                            crate::domain::organization::OrganizationDeleted {
+                                organization_id: crate::domain::organization::OrganizationId::from_str(e.aggregate_id()),
+                                occurred_at: e.occurred_at(),
+                            },
+                        )) as Box<dyn DomainEvent>
+                    }
+                    _ => panic!("Unknown event type: {}", e.event_type()),
                 }
-                _ => panic!("Unknown event type: {}", e.event_type()),
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     pub async fn clear(&self) {
