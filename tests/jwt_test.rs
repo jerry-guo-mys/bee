@@ -1,4 +1,4 @@
-use bee::infrastructure::auth::{BeeClaims, JwtService};
+use bee::infrastructure::auth::{BeeClaims, JwtError, JwtService};
 
 #[test]
 fn test_generate_and_validate_token() {
@@ -84,4 +84,72 @@ async fn test_refresh_token() {
 
     assert_eq!(validated1.user_id, validated2.user_id);
     assert!(validated2.exp > validated1.exp);
+}
+
+#[test]
+fn test_expired_token() {
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use chrono::{Utc, Duration};
+
+    let service = JwtService::new();
+
+    // 创建一个已过期的 token
+    let mut claims = BeeClaims::new("user-123", None, None, None, vec![]);
+    claims.exp = (Utc::now() - Duration::seconds(100)).timestamp() as usize;
+    claims.iat = (Utc::now() - Duration::seconds(200)).timestamp() as usize;
+
+    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret("default-secret-change-in-production".as_bytes()))
+        .unwrap();
+
+    // 验证应返回 TokenExpired 错误
+    match service.validate_token(&token) {
+        Err(JwtError::TokenExpired) => (),
+        Err(e) => panic!("Expected TokenExpired, got {:?}", e),
+        Ok(_) => panic!("Expected TokenExpired, got Ok"),
+    }
+}
+
+#[test]
+fn test_invalid_signature() {
+    use jsonwebtoken::{encode, Header, EncodingKey};
+
+    let service = JwtService::new();
+    let claims = BeeClaims::new("user-123", None, None, None, vec![]);
+
+    // 使用不同的密钥创建 token
+    let wrong_secret = "wrong-secret-key";
+    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(wrong_secret.as_bytes()))
+        .unwrap();
+
+    // 验证应返回 InvalidToken 错误
+    match service.validate_token(&token) {
+        Err(JwtError::InvalidToken(_)) => (),
+        Err(e) => panic!("Expected InvalidToken, got {:?}", e),
+        Ok(_) => panic!("Expected InvalidToken, got Ok"),
+    }
+}
+
+#[test]
+fn test_require_role() {
+    use bee::infrastructure::auth::require_role;
+    use axum::http::StatusCode;
+
+    let claims = BeeClaims::new(
+        "user-123",
+        None,
+        None,
+        None,
+        vec!["Member".to_string(), "Admin".to_string()],
+    );
+
+    // 测试有角色的情况
+    assert!(require_role(&claims, "Member").is_ok());
+    assert!(require_role(&claims, "Admin").is_ok());
+
+    // 测试没有角色的情况
+    match require_role(&claims, "Guest") {
+        Err(StatusCode::FORBIDDEN) => (),
+        Err(e) => panic!("Expected FORBIDDEN (403), got {}", e),
+        Ok(_) => panic!("Expected FORBIDDEN (403), got Ok"),
+    }
 }

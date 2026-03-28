@@ -36,13 +36,19 @@ impl JwtService {
         let mut validation = Validation::new(Algorithm::HS256);
         validation.validate_exp = true;
 
-        let token_data = decode::<BeeClaims>(
+        match decode::<BeeClaims>(
             token,
             &DecodingKey::from_secret(self.secret.as_bytes()),
             &validation,
-        )?;
-
-        Ok(token_data.claims)
+        ) {
+            Ok(token_data) => Ok(token_data.claims),
+            Err(e) => match e.kind() {
+                jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
+                    Err(JwtError::TokenExpired)
+                }
+                _ => Err(JwtError::InvalidToken(e)),
+            },
+        }
     }
 
     /// 刷新 token
