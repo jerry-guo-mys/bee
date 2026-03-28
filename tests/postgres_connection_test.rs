@@ -1,3 +1,5 @@
+#![cfg(feature = "async-sqlite")]
+
 use bee::infrastructure::persistence::postgres::PostgresConnection;
 
 #[tokio::test]

@@ -93,7 +93,9 @@ impl InMemoryEventBus {
             .flat_map(|e| e.value().clone())
             .collect()
     }
+}
 
+impl InMemoryEventBus {
     /// 获取事件数量（用于测试）
     pub fn event_count(&self) -> usize {
         self.events.iter().map(|e| e.value().len()).sum()

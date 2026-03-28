@@ -1,3 +1,5 @@
+#![cfg(feature = "async-sqlite")]
+
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::sync::Arc;
 use std::time::Duration;
