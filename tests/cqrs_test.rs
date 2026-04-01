@@ -1,13 +1,13 @@
 use bee::application::commands::{
     invite_member::{InviteMemberCommand, InviteMemberHandler},
-    CqrsCommand, CommandHandler,
+    CommandHandler,
 };
 use bee::application::queries::{
-    list_members::{ListMembersQuery, ListMembersHandler},
-    CqrsQuery, QueryHandler,
+    list_members::{ListMembersHandler, ListMembersQuery},
+    QueryHandler,
 };
 use bee::domain::common::MembershipRole;
-use bee::domain::tenant::{TenantId, OrganizationId, UserId};
+use bee::domain::tenant::{OrganizationId, TenantId, UserId};
 
 #[tokio::test]
 async fn test_invite_member_command() {
@@ -44,7 +44,10 @@ async fn test_invite_member_invalid_email() {
     let result = handler.handle(command).await;
     assert!(result.is_err(), "Should fail with invalid email");
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("Invalid email"), "Error should mention invalid email");
+    assert!(
+        err_msg.contains("Invalid email"),
+        "Error should mention invalid email"
+    );
 }
 
 #[tokio::test]
@@ -67,7 +70,15 @@ async fn test_invite_member_empty_email() {
 
 #[tokio::test]
 async fn test_list_members_query() {
-    let handler = ListMembersHandler::new();
+    use bee::domain::event::InMemoryEventPublisher;
+    use bee::domain::member::InMemoryMembershipRepository;
+    use bee::domain::service::MemberDomainService;
+    use std::sync::Arc;
+
+    let repo = Arc::new(InMemoryMembershipRepository::new());
+    let publisher = Arc::new(InMemoryEventPublisher::new());
+    let service = Arc::new(MemberDomainService::new(repo.clone(), publisher.clone()));
+    let handler = ListMembersHandler::new(service);
 
     let query = ListMembersQuery {
         tenant_id: TenantId::new("tenant-1".to_string()),

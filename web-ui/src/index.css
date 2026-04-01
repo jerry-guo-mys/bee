@@ -1,0 +1,182 @@
+@import "tailwindcss";
+
+/* Bee Admin Design System */
+@theme {
+  /* Colors - Professional Admin Dashboard */
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+
+  --color-success-50: #f0fdf4;
+  --color-success-100: #dcfce7;
+  --color-success-200: #bbf7d0;
+  --color-success-300: #86efac;
+  --color-success-400: #4ade80;
+  --color-success-500: #22c55e;
+  --color-success-600: #16a34a;
+  --color-success-700: #15803d;
+
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-200: #fde68a;
+  --color-warning-300: #fcd34d;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+
+  --color-error-50: #fef2f2;
+  --color-error-100: #fee2e2;
+  --color-error-200: #fecaca;
+  --color-error-300: #fca5a5;
+  --color-error-400: #f87171;
+  --color-error-500: #ef4444;
+  --color-error-600: #dc2626;
+
+  --color-surface-50: #fafafa;
+  --color-surface-100: #f4f4f5;
+  --color-surface-200: #e4e4e7;
+  --color-surface-300: #d4d4d8;
+  --color-surface-400: #a1a1aa;
+  --color-surface-500: #71717a;
+  --color-surface-600: #52525b;
+  --color-surface-700: #3f3f46;
+  --color-surface-800: #27272a;
+  --color-surface-900: #18181b;
+
+  /* Typography */
+  --font-display: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-dropdown: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-elevated: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.3);
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+}
+
+/* Base Styles */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-surface-50);
+  color: var(--color-surface-900);
+}
+
+/* Dark Mode */
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: var(--color-surface-900);
+    color: var(--color-surface-100);
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-300);
+  border-radius: var(--radius-full);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--color-surface-600);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-surface-400);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-surface-500);
+}
+
+/* Utility Classes */
+@utility prose-invert {
+  --tw-prose-body: var(--color-surface-300);
+  --tw-prose-headings: var(--color-surface-100);
+}
+
+/* Animation Keyframes */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+.animate-fade-in {
+  animation: fadeIn var(--duration-normal) ease-out;
+}
+
+.animate-slide-up {
+  animation: slideUp var(--duration-normal) ease-out;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight var(--duration-normal) ease-out;
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s ease-in-out infinite;
+}

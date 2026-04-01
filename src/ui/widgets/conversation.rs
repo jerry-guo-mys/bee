@@ -154,9 +154,8 @@ impl<'a> ConversationView<'a> {
                     // 助手消息用 Markdown 渲染，带左侧标识
                     let markdown_lines = self.markdown_renderer.render(&message.content);
                     for line in markdown_lines {
-                        let mut spans = vec![
-                            Span::styled("▌ ", Style::default().fg(theme::ACCENT_BLUE)),
-                        ];
+                        let mut spans =
+                            vec![Span::styled("▌ ", Style::default().fg(theme::ACCENT_BLUE))];
                         spans.extend(line.spans);
                         text_lines.push(Line::from(spans));
                     }
@@ -169,7 +168,10 @@ impl<'a> ConversationView<'a> {
                     needs_spacing = true;
 
                     // 用户消息带前缀标识
-                    let wrapped = Self::wrap_text(&message.content, self.content_width.saturating_sub(4).max(24));
+                    let wrapped = Self::wrap_text(
+                        &message.content,
+                        self.content_width.saturating_sub(4).max(24),
+                    );
                     for (line_idx, line) in wrapped.into_iter().enumerate() {
                         let prefix = if line_idx == 0 {
                             Span::styled("❯ ", Style::default().fg(theme::ACCENT_GREEN))

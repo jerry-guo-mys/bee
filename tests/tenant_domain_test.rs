@@ -4,28 +4,15 @@
 
 use bee::domain::common::{MembershipRole, Permission, TenantStatus};
 use bee::domain::tenant::{
-    AgentId,
-    InMemoryTenantRepository,
-    MembershipId,
-    OrganizationId,
-    TeamId,
-    Tenant,
-    TenantError,
-    TenantId,
-    TenantName,
-    TenantRepository,
-    TenantSlug,
-    UserId,
+    AgentId, InMemoryTenantRepository, MembershipId, OrganizationId, TeamId, Tenant, TenantError,
+    TenantId, TenantName, TenantRepository, TenantSlug, UserId,
 };
 
 // ==================== Tenant 创建测试 ====================
 
 #[test]
 fn test_tenant_create_success() {
-    let tenant = Tenant::create(
-        "My Organization".to_string(),
-        "my-org".to_string(),
-    ).unwrap();
+    let tenant = Tenant::create("My Organization".to_string(), "my-org".to_string()).unwrap();
 
     assert_eq!(tenant.name().as_str(), "My Organization");
     assert_eq!(tenant.slug().as_str(), "my-org");
@@ -35,10 +22,8 @@ fn test_tenant_create_success() {
 
 #[test]
 fn test_tenant_create_with_whitespace_name() {
-    let tenant = Tenant::create(
-        "  Trimmed Name  ".to_string(),
-        "trimmed-name".to_string(),
-    ).unwrap();
+    let tenant =
+        Tenant::create("  Trimmed Name  ".to_string(), "trimmed-name".to_string()).unwrap();
 
     assert_eq!(tenant.name().as_str(), "Trimmed Name");
 }
@@ -85,10 +70,7 @@ fn test_tenant_create_invalid_slug_ends_with_hyphen() {
 
 #[test]
 fn test_tenant_suspend() {
-    let mut tenant = Tenant::create(
-        "Test Tenant".to_string(),
-        "test-tenant".to_string(),
-    ).unwrap();
+    let mut tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
 
     assert!(tenant.is_active());
 
@@ -99,10 +81,7 @@ fn test_tenant_suspend() {
 
 #[test]
 fn test_tenant_restore() {
-    let mut tenant = Tenant::create(
-        "Test Tenant".to_string(),
-        "test-tenant".to_string(),
-    ).unwrap();
+    let mut tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
 
     tenant.suspend();
     assert!(tenant.is_suspended());
@@ -114,10 +93,7 @@ fn test_tenant_restore() {
 
 #[test]
 fn test_tenant_archive() {
-    let mut tenant = Tenant::create(
-        "Test Tenant".to_string(),
-        "test-tenant".to_string(),
-    ).unwrap();
+    let mut tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
 
     assert!(tenant.is_active());
 
@@ -128,10 +104,7 @@ fn test_tenant_archive() {
 
 #[test]
 fn test_tenant_archive_from_suspended() {
-    let mut tenant = Tenant::create(
-        "Test Tenant".to_string(),
-        "test-tenant".to_string(),
-    ).unwrap();
+    let mut tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
 
     tenant.suspend();
     assert!(tenant.is_suspended());
@@ -142,10 +115,7 @@ fn test_tenant_archive_from_suspended() {
 
 #[test]
 fn test_tenant_cannot_restore_from_archived() {
-    let mut tenant = Tenant::create(
-        "Test Tenant".to_string(),
-        "test-tenant".to_string(),
-    ).unwrap();
+    let mut tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
 
     tenant.archive();
     tenant.restore();
@@ -155,10 +125,7 @@ fn test_tenant_cannot_restore_from_archived() {
 
 #[test]
 fn test_tenant_state_transitions_complete() {
-    let mut tenant = Tenant::create(
-        "Test Tenant".to_string(),
-        "test-tenant".to_string(),
-    ).unwrap();
+    let mut tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
 
     // Active -> Suspended -> Active
     tenant.suspend();
@@ -183,10 +150,7 @@ fn test_tenant_state_transitions_complete() {
 
 #[test]
 fn test_tenant_add_organization() {
-    let mut tenant = Tenant::create(
-        "Test Tenant".to_string(),
-        "test-tenant".to_string(),
-    ).unwrap();
+    let mut tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
 
     assert_eq!(tenant.organizations().len(), 0);
 
@@ -199,10 +163,7 @@ fn test_tenant_add_organization() {
 
 #[test]
 fn test_tenant_add_duplicate_organization() {
-    let mut tenant = Tenant::create(
-        "Test Tenant".to_string(),
-        "test-tenant".to_string(),
-    ).unwrap();
+    let mut tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
 
     let org_id = OrganizationId::generate();
     tenant.add_organization(org_id.clone());
@@ -213,10 +174,7 @@ fn test_tenant_add_duplicate_organization() {
 
 #[test]
 fn test_tenant_remove_organization() {
-    let mut tenant = Tenant::create(
-        "Test Tenant".to_string(),
-        "test-tenant".to_string(),
-    ).unwrap();
+    let mut tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
 
     let org_id = OrganizationId::generate();
     tenant.add_organization(org_id.clone());
@@ -228,10 +186,7 @@ fn test_tenant_remove_organization() {
 
 #[test]
 fn test_tenant_remove_non_existent_organization() {
-    let mut tenant = Tenant::create(
-        "Test Tenant".to_string(),
-        "test-tenant".to_string(),
-    ).unwrap();
+    let mut tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
 
     let org_id = OrganizationId::generate();
     tenant.remove_organization(&org_id);
@@ -402,10 +357,7 @@ fn test_membership_role_viewer() {
 async fn test_tenant_repository_save_and_find() {
     let repo = InMemoryTenantRepository::new();
 
-    let tenant = Tenant::create(
-        "Repository Test".to_string(),
-        "repo-test".to_string(),
-    ).unwrap();
+    let tenant = Tenant::create("Repository Test".to_string(), "repo-test".to_string()).unwrap();
 
     let tenant_id = tenant.id().clone();
     let tenant_slug = tenant.slug().as_str().to_string();
@@ -428,10 +380,7 @@ async fn test_tenant_repository_save_and_find() {
 async fn test_tenant_repository_delete() {
     let repo = InMemoryTenantRepository::new();
 
-    let tenant = Tenant::create(
-        "Delete Test".to_string(),
-        "delete-test".to_string(),
-    ).unwrap();
+    let tenant = Tenant::create("Delete Test".to_string(), "delete-test".to_string()).unwrap();
 
     let tenant_id = tenant.id().clone();
 
@@ -446,10 +395,7 @@ async fn test_tenant_repository_delete() {
 async fn test_tenant_repository_exists_by_slug() {
     let repo = InMemoryTenantRepository::new();
 
-    let tenant = Tenant::create(
-        "Exists Test".to_string(),
-        "exists-test".to_string(),
-    ).unwrap();
+    let tenant = Tenant::create("Exists Test".to_string(), "exists-test".to_string()).unwrap();
 
     // 保存前不存在
     assert!(!repo.exists_by_slug("exists-test").await.unwrap());
@@ -465,10 +411,7 @@ async fn test_tenant_repository_exists_by_slug() {
 async fn test_tenant_repository_update() {
     let repo = InMemoryTenantRepository::new();
 
-    let mut tenant = Tenant::create(
-        "Update Test".to_string(),
-        "update-test".to_string(),
-    ).unwrap();
+    let mut tenant = Tenant::create("Update Test".to_string(), "update-test".to_string()).unwrap();
 
     repo.save(&tenant).await.unwrap();
 

@@ -31,6 +31,9 @@
 //! - 后台持续运行：支持异步任务和长时间处理
 //! - 统一的会话管理和消息路由
 
+mod auth;
+mod cqrs_integration;
+mod handler_registry;
 mod hub;
 mod intent;
 mod message;
@@ -42,9 +45,12 @@ mod session_store;
 mod spoke;
 mod task_queue;
 
+pub use auth::{AuthContext, JwtAuthenticator, JwtClaims, JwtAuthError, extract_client_metadata};
+pub use cqrs_integration::GatewayCqrsService;
+pub use handler_registry::register_all_handlers;
 pub use hub::{Hub, HubConfig};
 pub use intent::{Intent, IntentRecognizer};
-pub use message::{ClientInfo, GatewayMessage, MessageType, SpokeType};
+pub use message::{ClientInfo, GatewayMessage, HistoryMessage, MessageType, MemberDto, SessionStatus, SpokeType};
 #[cfg(feature = "async-sqlite")]
 pub use persistent_session::PersistentSessionManager;
 pub use runtime::{AgentRuntime, RuntimeConfig};

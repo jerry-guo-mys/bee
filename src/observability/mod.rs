@@ -5,14 +5,16 @@
 //! - 工具执行时间
 //! - 请求完整生命周期追踪
 
-pub mod trace_types;
 pub mod trace_collector;
 pub mod trace_layer;
 pub mod trace_renderer;
+pub mod trace_types;
 
-pub use trace_collector::{TraceCollector, TraceCollectorConfig, TraceEvent, RequestTraceSummary};
-pub use trace_types::{RequestTrace, SpanTrace, TraceStatus, SpanStatus, OperationKind, TraceMetadata, AttributeValue};
+pub use trace_collector::{RequestTraceSummary, TraceCollector, TraceCollectorConfig, TraceEvent};
 pub use trace_renderer::{AsciiRenderer, RenderConfig};
+pub use trace_types::{
+    AttributeValue, OperationKind, RequestTrace, SpanStatus, SpanTrace, TraceMetadata, TraceStatus,
+};
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

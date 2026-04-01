@@ -155,7 +155,9 @@ impl TaskQueue {
     /// 提交任务
     pub async fn submit<T: Task + 'static>(&self, task: T) -> Result<(), TaskError> {
         let task_wrapper = Arc::new(TaskWrapper::new(Box::new(task)));
-        self.tx.send(task_wrapper.clone()).await
+        self.tx
+            .send(task_wrapper.clone())
+            .await
             .map_err(|_| TaskError::ExecutionFailed("Channel closed".into()))?;
         self.pending_count.fetch_add(1, Ordering::SeqCst);
         Ok(())
@@ -222,7 +224,8 @@ impl TaskQueue {
                     tracing::warn!(
                         task = task.task.name(),
                         attempt = task.increment_attempt(),
-                        "Task failed: {}", e
+                        "Task failed: {}",
+                        e
                     );
 
                     // 重试逻辑（最多 3 次）
@@ -263,7 +266,9 @@ pub struct TaskQueueBuilder {
 impl TaskQueueBuilder {
     pub fn new() -> Self {
         Self {
-            worker_count: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4),
+            worker_count: std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4),
         }
     }
 
@@ -336,10 +341,22 @@ mod tests {
         let queue = TaskQueue::new(4);
 
         // 提交不同优先级的任务
-        queue.submit(TestTask::new("low").with_priority(Priority::Low)).await.unwrap();
-        queue.submit(TestTask::new("high").with_priority(Priority::High)).await.unwrap();
-        queue.submit(TestTask::new("urgent").with_priority(Priority::Urgent)).await.unwrap();
-        queue.submit(TestTask::new("normal").with_priority(Priority::Normal)).await.unwrap();
+        queue
+            .submit(TestTask::new("low").with_priority(Priority::Low))
+            .await
+            .unwrap();
+        queue
+            .submit(TestTask::new("high").with_priority(Priority::High))
+            .await
+            .unwrap();
+        queue
+            .submit(TestTask::new("urgent").with_priority(Priority::Urgent))
+            .await
+            .unwrap();
+        queue
+            .submit(TestTask::new("normal").with_priority(Priority::Normal))
+            .await
+            .unwrap();
 
         assert_eq!(queue.pending_count(), 4);
     }
@@ -350,7 +367,10 @@ mod tests {
 
         // 提交一些任务
         for i in 0..10 {
-            queue.submit(TestTask::new(&format!("task_{}", i))).await.unwrap();
+            queue
+                .submit(TestTask::new(&format!("task_{}", i)))
+                .await
+                .unwrap();
         }
 
         // 启动工作线程（简化测试，不实际运行）

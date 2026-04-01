@@ -91,9 +91,7 @@ pub mod postgres {
             to: Option<DateTime<Utc>>,
             limit: usize,
         ) -> Result<Vec<AuditLog>, Self::Error> {
-            let mut sql = String::from(
-                "SELECT * FROM audit_logs WHERE tenant_id = $1"
-            );
+            let mut sql = String::from("SELECT * FROM audit_logs WHERE tenant_id = $1");
             let mut param_idx = 2;
 
             let from_idx = if from.is_some() {

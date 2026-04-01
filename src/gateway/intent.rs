@@ -421,9 +421,11 @@ Output format: just the intent type, nothing else."#;
 fn extract_url(text: &str) -> Option<String> {
     for word in text.split_whitespace() {
         // 移除 URL 末尾的标点符号
-        let cleaned = word.trim_end_matches(|c: char| matches!(c, ',' | '.' | '!' | '?' | ')' | ']' | '}' | ';'));
+        let cleaned = word
+            .trim_end_matches(|c: char| matches!(c, ',' | '.' | '!' | '?' | ')' | ']' | '}' | ';'));
         // 移除 URL 开头的标点符号
-        let cleaned = cleaned.trim_start_matches(|c: char| matches!(c, '(' | '[' | '{' | '<' | '"' | '\''));
+        let cleaned =
+            cleaned.trim_start_matches(|c: char| matches!(c, '(' | '[' | '{' | '<' | '"' | '\''));
 
         if cleaned.starts_with("http://") || cleaned.starts_with("https://") {
             return Some(cleaned.to_string());

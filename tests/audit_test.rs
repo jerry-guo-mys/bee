@@ -1,5 +1,5 @@
-use bee::infrastructure::audit::{AuditLog, AuditLogRepository};
 use async_trait::async_trait;
+use bee::infrastructure::audit::{AuditLog, AuditLogRepository};
 use chrono::{DateTime, Utc};
 use std::sync::{Arc, Mutex};
 

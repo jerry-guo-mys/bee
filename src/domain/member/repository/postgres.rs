@@ -7,9 +7,7 @@ use sqlx::{FromRow, PgPool};
 use crate::domain::common::{MembershipRole, MembershipStatus};
 use crate::domain::member::entity::{MemberDomainError, Membership};
 use crate::domain::member::value_object::{ToolId, ToolPolicy, ToolRiskLevel, UserEmail};
-use crate::domain::tenant::value_object::{
-    MembershipId, OrganizationId, TeamId, TenantId, UserId,
-};
+use crate::domain::tenant::value_object::{MembershipId, OrganizationId, TeamId, TenantId, UserId};
 use crate::infrastructure::persistence::postgres::PostgresConnection;
 
 use super::{MembershipFilter, MembershipRepository};
@@ -64,8 +62,8 @@ impl MembershipRow {
         let user_id = self.user_id.map(|id| UserId::new(id.to_string()));
         let email = UserEmail::new(self.email)
             .map_err(|e| MemberDomainError::InvalidStatus(e.to_string()))?;
-        let role = parse_membership_role(&self.role)
-            .map_err(|e| MemberDomainError::InvalidRole(e))?;
+        let role =
+            parse_membership_role(&self.role).map_err(|e| MemberDomainError::InvalidRole(e))?;
         let status = parse_membership_status(&self.status)
             .map_err(|e| MemberDomainError::InvalidStatus(e))?;
 
@@ -137,11 +135,14 @@ async fn load_tool_policies(
     let rows = sqlx::query_as::<_, ToolPolicyRow>(
         "SELECT membership_id, tool_id, risk_level, is_allowed, note
          FROM membership_tool_policies
-         WHERE membership_id = $1"
+         WHERE membership_id = $1",
     )
-    .bind(membership_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-        MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-    })?)
+    .bind(
+        membership_id
+            .as_str()
+            .parse::<uuid::Uuid>()
+            .map_err(|e| MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e)))?,
+    )
     .fetch_all(pool)
     .await
     .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
@@ -149,13 +150,9 @@ async fn load_tool_policies(
     let policies = rows
         .into_iter()
         .map(|row| {
-            let risk_level = ToolRiskLevel::from_str(&row.risk_level)
-                .unwrap_or(ToolRiskLevel::Low);
-            let mut policy = ToolPolicy::new(
-                ToolId::from_str(&row.tool_id),
-                risk_level,
-                row.is_allowed,
-            );
+            let risk_level = ToolRiskLevel::from_str(&row.risk_level).unwrap_or(ToolRiskLevel::Low);
+            let mut policy =
+                ToolPolicy::new(ToolId::from_str(&row.tool_id), risk_level, row.is_allowed);
             if let Some(note) = row.note {
                 policy = policy.with_note(note);
             }
@@ -178,7 +175,7 @@ async fn load_tool_policies_batch(
     let rows = sqlx::query_as::<_, ToolPolicyRow>(
         "SELECT membership_id, tool_id, risk_level, is_allowed, note
          FROM membership_tool_policies
-         WHERE membership_id = ANY($1)"
+         WHERE membership_id = ANY($1)",
     )
     .bind(membership_ids)
     .fetch_all(pool)
@@ -186,16 +183,13 @@ async fn load_tool_policies_batch(
     .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
     // Group policies by membership_id
-    let mut policies_by_membership: std::collections::HashMap<String, Vec<ToolPolicy>> = std::collections::HashMap::new();
+    let mut policies_by_membership: std::collections::HashMap<String, Vec<ToolPolicy>> =
+        std::collections::HashMap::new();
     for row in rows {
         let membership_id = row.membership_id.to_string();
-        let risk_level = ToolRiskLevel::from_str(&row.risk_level)
-            .unwrap_or(ToolRiskLevel::Low);
-        let mut policy = ToolPolicy::new(
-            ToolId::from_str(&row.tool_id),
-            risk_level,
-            row.is_allowed,
-        );
+        let risk_level = ToolRiskLevel::from_str(&row.risk_level).unwrap_or(ToolRiskLevel::Low);
+        let mut policy =
+            ToolPolicy::new(ToolId::from_str(&row.tool_id), risk_level, row.is_allowed);
         if let Some(note) = row.note {
             policy = policy.with_note(note);
         }
@@ -214,9 +208,11 @@ impl MembershipRepository for PostgresMembershipRepository {
 
     async fn save(&self, membership: &Membership) -> Result<(), Self::Error> {
         // UPSERT membership
-        let membership_uuid = membership.id().as_str().parse::<uuid::Uuid>().map_err(|e| {
-            MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-        })?;
+        let membership_uuid = membership
+            .id()
+            .as_str()
+            .parse::<uuid::Uuid>()
+            .map_err(|e| MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e)))?;
 
         sqlx::query(
             r#"
@@ -269,15 +265,14 @@ impl MembershipRepository for PostgresMembershipRepository {
     }
 
     async fn find_by_id(&self, id: &MembershipId) -> Result<Option<Membership>, Self::Error> {
-        let row = sqlx::query_as::<_, MembershipRow>(
-            "SELECT * FROM memberships WHERE id = $1"
-        )
-        .bind(id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-            MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-        })?)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
+        let row =
+            sqlx::query_as::<_, MembershipRow>("SELECT * FROM memberships WHERE id = $1")
+                .bind(id.as_str().parse::<uuid::Uuid>().map_err(|e| {
+                    MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
+                })?)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
         match row {
             Some(row) => {
@@ -306,15 +301,14 @@ impl MembershipRepository for PostgresMembershipRepository {
     }
 
     async fn find_by_user(&self, user_id: &UserId) -> Result<Vec<Membership>, Self::Error> {
-        let rows = sqlx::query_as::<_, MembershipRow>(
-            "SELECT * FROM memberships WHERE user_id = $1"
-        )
-        .bind(user_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-            MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-        })?)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
+        let rows =
+            sqlx::query_as::<_, MembershipRow>("SELECT * FROM memberships WHERE user_id = $1")
+                .bind(user_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
+                    MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
+                })?)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
         if rows.is_empty() {
             return Ok(Vec::new());
@@ -330,7 +324,8 @@ impl MembershipRepository for PostgresMembershipRepository {
         let membership_ids: Vec<&str> = memberships.iter().map(|m| m.id().as_str()).collect();
 
         // Load all tool policies in ONE query
-        let mut policies_by_membership = load_tool_policies_batch(&self.pool, &membership_ids).await?;
+        let mut policies_by_membership =
+            load_tool_policies_batch(&self.pool, &membership_ids).await?;
 
         // Assign policies to memberships
         for membership in &mut memberships {
@@ -355,13 +350,19 @@ impl MembershipRepository for PostgresMembershipRepository {
         Ok(memberships)
     }
 
-    async fn find_by_organization(&self, org_id: &OrganizationId) -> Result<Vec<Membership>, Self::Error> {
+    async fn find_by_organization(
+        &self,
+        org_id: &OrganizationId,
+    ) -> Result<Vec<Membership>, Self::Error> {
         let rows = sqlx::query_as::<_, MembershipRow>(
-            "SELECT * FROM memberships WHERE organization_id = $1"
+            "SELECT * FROM memberships WHERE organization_id = $1",
         )
-        .bind(org_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-            MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-        })?)
+        .bind(
+            org_id
+                .as_str()
+                .parse::<uuid::Uuid>()
+                .map_err(|e| MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e)))?,
+        )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
@@ -380,7 +381,8 @@ impl MembershipRepository for PostgresMembershipRepository {
         let membership_ids: Vec<&str> = memberships.iter().map(|m| m.id().as_str()).collect();
 
         // Load all tool policies in ONE query
-        let mut policies_by_membership = load_tool_policies_batch(&self.pool, &membership_ids).await?;
+        let mut policies_by_membership =
+            load_tool_policies_batch(&self.pool, &membership_ids).await?;
 
         // Assign policies to memberships
         for membership in &mut memberships {
@@ -406,15 +408,14 @@ impl MembershipRepository for PostgresMembershipRepository {
     }
 
     async fn find_by_team(&self, team_id: &TeamId) -> Result<Vec<Membership>, Self::Error> {
-        let rows = sqlx::query_as::<_, MembershipRow>(
-            "SELECT * FROM memberships WHERE team_id = $1"
-        )
-        .bind(team_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-            MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-        })?)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
+        let rows =
+            sqlx::query_as::<_, MembershipRow>("SELECT * FROM memberships WHERE team_id = $1")
+                .bind(team_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
+                    MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
+                })?)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
         if rows.is_empty() {
             return Ok(Vec::new());
@@ -430,7 +431,8 @@ impl MembershipRepository for PostgresMembershipRepository {
         let membership_ids: Vec<&str> = memberships.iter().map(|m| m.id().as_str()).collect();
 
         // Load all tool policies in ONE query
-        let mut policies_by_membership = load_tool_policies_batch(&self.pool, &membership_ids).await?;
+        let mut policies_by_membership =
+            load_tool_policies_batch(&self.pool, &membership_ids).await?;
 
         // Assign policies to memberships
         for membership in &mut memberships {
@@ -456,15 +458,14 @@ impl MembershipRepository for PostgresMembershipRepository {
     }
 
     async fn find_by_tenant(&self, tenant_id: &TenantId) -> Result<Vec<Membership>, Self::Error> {
-        let rows = sqlx::query_as::<_, MembershipRow>(
-            "SELECT * FROM memberships WHERE tenant_id = $1"
-        )
-        .bind(tenant_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-            MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-        })?)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
+        let rows =
+            sqlx::query_as::<_, MembershipRow>("SELECT * FROM memberships WHERE tenant_id = $1")
+                .bind(tenant_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
+                    MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
+                })?)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
         if rows.is_empty() {
             return Ok(Vec::new());
@@ -480,7 +481,8 @@ impl MembershipRepository for PostgresMembershipRepository {
         let membership_ids: Vec<&str> = memberships.iter().map(|m| m.id().as_str()).collect();
 
         // Load all tool policies in ONE query
-        let mut policies_by_membership = load_tool_policies_batch(&self.pool, &membership_ids).await?;
+        let mut policies_by_membership =
+            load_tool_policies_batch(&self.pool, &membership_ids).await?;
 
         // Assign policies to memberships
         for membership in &mut memberships {
@@ -505,37 +507,51 @@ impl MembershipRepository for PostgresMembershipRepository {
         Ok(memberships)
     }
 
-    async fn find_by_filter(&self, filter: &MembershipFilter) -> Result<Vec<Membership>, Self::Error> {
+    async fn find_by_filter(
+        &self,
+        filter: &MembershipFilter,
+    ) -> Result<Vec<Membership>, Self::Error> {
         use sqlx::QueryBuilder;
 
         let mut query = QueryBuilder::new("SELECT * FROM memberships WHERE 1=1");
 
         if let Some(ref tenant_id) = filter.tenant_id {
             query.push(" AND tenant_id = ");
-            query.push_bind(tenant_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-                MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-            })?);
+            query.push_bind(
+                tenant_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
+                    MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
+                })?,
+            );
         }
 
         if let Some(ref organization_id) = filter.organization_id {
             query.push(" AND organization_id = ");
-            query.push_bind(organization_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-                MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-            })?);
+            query.push_bind(
+                organization_id
+                    .as_str()
+                    .parse::<uuid::Uuid>()
+                    .map_err(|e| {
+                        MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
+                    })?,
+            );
         }
 
         if let Some(ref team_id) = filter.team_id {
             query.push(" AND team_id = ");
-            query.push_bind(team_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-                MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-            })?);
+            query.push_bind(
+                team_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
+                    MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
+                })?,
+            );
         }
 
         if let Some(ref user_id) = filter.user_id {
             query.push(" AND user_id = ");
-            query.push_bind(user_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-                MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-            })?);
+            query.push_bind(
+                user_id.as_str().parse::<uuid::Uuid>().map_err(|e| {
+                    MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
+                })?,
+            );
         }
 
         if let Some(ref role) = filter.role {
@@ -568,7 +584,8 @@ impl MembershipRepository for PostgresMembershipRepository {
         let membership_ids: Vec<&str> = memberships.iter().map(|m| m.id().as_str()).collect();
 
         // Load all tool policies in ONE query
-        let mut policies_by_membership = load_tool_policies_batch(&self.pool, &membership_ids).await?;
+        let mut policies_by_membership =
+            load_tool_policies_batch(&self.pool, &membership_ids).await?;
 
         // Assign policies to memberships
         for membership in &mut memberships {
@@ -596,21 +613,24 @@ impl MembershipRepository for PostgresMembershipRepository {
     async fn delete(&self, id: &MembershipId) -> Result<(), Self::Error> {
         // 先删除关联的工具策略
         sqlx::query("DELETE FROM membership_tool_policies WHERE membership_id = $1")
-            .bind(id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-                MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-            })?)
+            .bind(
+                id.as_str().parse::<uuid::Uuid>().map_err(|e| {
+                    MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
+                })?,
+            )
             .execute(&self.pool)
             .await
             .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
         // 删除成员
-        let result = sqlx::query("DELETE FROM memberships WHERE id = $1")
-            .bind(id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-                MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-            })?)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
+        let result =
+            sqlx::query("DELETE FROM memberships WHERE id = $1")
+                .bind(id.as_str().parse::<uuid::Uuid>().map_err(|e| {
+                    MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
+                })?)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| MemberDomainError::DatabaseError(e.to_string()))?;
 
         if result.rows_affected() == 0 {
             return Err(MemberDomainError::NotFound(id.to_string()));
@@ -625,9 +645,11 @@ async fn save_tool_policies(
     pool: &PgPool,
     membership: &Membership,
 ) -> Result<(), MemberDomainError> {
-    let membership_uuid = membership.id().as_str().parse::<uuid::Uuid>().map_err(|e| {
-        MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e))
-    })?;
+    let membership_uuid = membership
+        .id()
+        .as_str()
+        .parse::<uuid::Uuid>()
+        .map_err(|e| MemberDomainError::DatabaseError(format!("Invalid UUID: {}", e)))?;
 
     // 先删除现有的策略
     sqlx::query("DELETE FROM membership_tool_policies WHERE membership_id = $1")
@@ -702,18 +724,15 @@ mod tests {
             None,
             email.clone(),
             MembershipRole::Member,
-        ).unwrap();
+        )
+        .unwrap();
 
         // 接受邀请
         let user_id = UserId::generate();
         membership.accept_invite(user_id.clone()).unwrap();
 
         // 添加工具策略
-        let policy = ToolPolicy::new(
-            ToolId::from_str("shell"),
-            ToolRiskLevel::Medium,
-            true,
-        );
+        let policy = ToolPolicy::new(ToolId::from_str("shell"), ToolRiskLevel::Medium, true);
         membership.add_tool_policy(policy).unwrap();
 
         // 保存
@@ -754,7 +773,8 @@ mod tests {
             Some(user_id.clone()),
             email.clone(),
             MembershipRole::Member,
-        ).unwrap();
+        )
+        .unwrap();
         membership1.accept_invite(user_id.clone()).unwrap();
 
         let mut membership2 = Membership::invite(
@@ -764,7 +784,8 @@ mod tests {
             Some(user_id.clone()),
             email.clone(),
             MembershipRole::OrgAdmin,
-        ).unwrap();
+        )
+        .unwrap();
         membership2.accept_invite(user_id.clone()).unwrap();
 
         // 保存
@@ -800,7 +821,8 @@ mod tests {
             None,
             email.clone(),
             MembershipRole::Member,
-        ).unwrap();
+        )
+        .unwrap();
         membership.accept_invite(UserId::generate()).unwrap();
 
         // 保存
@@ -835,7 +857,8 @@ mod tests {
             None,
             email.clone(),
             MembershipRole::Member,
-        ).unwrap();
+        )
+        .unwrap();
 
         // 保存
         repo.save(&membership).await.unwrap();
@@ -868,7 +891,8 @@ mod tests {
             None,
             email.clone(),
             MembershipRole::Member,
-        ).unwrap();
+        )
+        .unwrap();
         membership.accept_invite(UserId::generate()).unwrap();
 
         // 保存

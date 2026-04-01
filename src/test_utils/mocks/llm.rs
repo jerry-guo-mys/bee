@@ -87,7 +87,7 @@ mod tests {
     async fn test_mock_llm_returns_response() {
         let mock = MockLlmClient::default();
         let messages = vec![Message::user("test")];
-        
+
         let response = mock.complete(&messages).await.unwrap();
         assert_eq!(response, "Mock response");
     }
@@ -96,12 +96,12 @@ mod tests {
     async fn test_mock_llm_call_count() {
         let mock = MockLlmClient::default();
         let messages = vec![Message::user("test")];
-        
+
         assert_eq!(mock.call_count(), 0);
-        
+
         let _ = mock.complete(&messages).await;
         assert_eq!(mock.call_count(), 1);
-        
+
         let _ = mock.complete(&messages).await;
         assert_eq!(mock.call_count(), 2);
     }
@@ -110,9 +110,9 @@ mod tests {
     async fn test_mock_llm_multiple_responses() {
         let mut mock = MockLlmClient::default();
         mock.set_responses(vec!["first".to_string(), "second".to_string()]);
-        
+
         let messages = vec![Message::user("test")];
-        
+
         assert_eq!(mock.complete(&messages).await.unwrap(), "first");
         assert_eq!(mock.complete(&messages).await.unwrap(), "second");
         assert_eq!(mock.complete(&messages).await.unwrap(), "first"); // 循环

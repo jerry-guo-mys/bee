@@ -72,8 +72,8 @@ impl KafkaEventBus {
 
     /// 从环境变量创建
     pub fn from_env() -> Result<Self, KafkaEventBusError> {
-        let brokers = std::env::var("KAFKA_BROKERS")
-            .unwrap_or_else(|_| "localhost:9092".to_string());
+        let brokers =
+            std::env::var("KAFKA_BROKERS").unwrap_or_else(|_| "localhost:9092".to_string());
         let domain_topic = std::env::var("KAFKA_DOMAIN_EVENTS_TOPIC")
             .unwrap_or_else(|_| "bee.domain.events".to_string());
         let app_topic = std::env::var("KAFKA_APP_EVENTS_TOPIC")
@@ -116,10 +116,7 @@ impl EventBus for KafkaEventBus {
         Ok(())
     }
 
-    async fn publish_batch(
-        &self,
-        envelopes: Vec<EventEnvelope>,
-    ) -> Result<(), Self::Error> {
+    async fn publish_batch(&self, envelopes: Vec<EventEnvelope>) -> Result<(), Self::Error> {
         use futures_util::future::join_all;
 
         let futures = envelopes.into_iter().map(|envelope| self.publish(envelope));

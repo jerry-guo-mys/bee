@@ -12,10 +12,7 @@ pub trait EventBus: Send + Sync {
     async fn publish(&self, envelope: EventEnvelope) -> Result<(), Self::Error>;
 
     /// 批量发布事件
-    async fn publish_batch(
-        &self,
-        envelopes: Vec<EventEnvelope>,
-    ) -> Result<(), Self::Error> {
+    async fn publish_batch(&self, envelopes: Vec<EventEnvelope>) -> Result<(), Self::Error> {
         for envelope in envelopes {
             self.publish(envelope).await?;
         }

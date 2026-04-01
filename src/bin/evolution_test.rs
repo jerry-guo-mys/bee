@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bee::{
-    config::load_config,
     application::orchestrator::create_llm_from_config,
+    config::load_config,
     evolution::{EvolutionConfig, EvolutionLoop},
     tools::{
         CatTool, CodeEditTool, CodeGrepTool, CodeReadTool, CodeWriteTool, EchoTool, GitCommitTool,

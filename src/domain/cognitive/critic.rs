@@ -87,7 +87,11 @@ impl Critic {
             .replace("{observation}", observation);
 
         let messages = vec![Message::user(prompt)];
-        let response = self.llm.complete(&messages).await.map_err(|e| e.to_string())?;
+        let response = self
+            .llm
+            .complete(&messages)
+            .await
+            .map_err(|e| e.to_string())?;
         let trimmed = response.trim();
 
         // 解析响应

@@ -4,9 +4,9 @@
 
 #[cfg(test)]
 mod tests {
+    use bee::domain::session::store::SessionStore;
     use bee::domain::session::{Session, SessionConfig, SessionId, SessionStatus};
     use bee::infrastructure::session::SqliteSessionStore;
-    use bee::domain::session::store::SessionStore;
 
     #[tokio::test]
     async fn test_multi_session_concurrent_access() {
@@ -22,15 +22,18 @@ mod tests {
         }
 
         // 并发访问多个会话
-        let handles: Vec<_> = ids.iter().map(|id| {
-            let store: SqliteSessionStore = store.clone();
-            let id = id.clone();
-            tokio::spawn(async move {
-                let session = store.get(&id).await.unwrap();
-                assert!(session.is_some());
-                id
+        let handles: Vec<_> = ids
+            .iter()
+            .map(|id| {
+                let store: SqliteSessionStore = store.clone();
+                let id = id.clone();
+                tokio::spawn(async move {
+                    let session = store.get(&id).await.unwrap();
+                    assert!(session.is_some());
+                    id
+                })
             })
-        }).collect();
+            .collect();
 
         // 等待所有任务完成
         let results: Vec<Result<SessionId, _>> = futures::future::join_all(handles).await;
@@ -82,7 +85,8 @@ mod tests {
         assert_eq!(session2.config.system_prompt, "Session 2");
 
         // 更新会话 1 不影响会话 2
-        let mut session1 = Session::new(SessionConfig::new().with_system_prompt("Updated Session 1"));
+        let mut session1 =
+            Session::new(SessionConfig::new().with_system_prompt("Updated Session 1"));
         session1.config.id = id1.clone();
         store.update(session1).await.unwrap();
 

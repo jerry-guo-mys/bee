@@ -11,25 +11,11 @@ pub mod value_object;
 // 重新导出常用类型
 pub use entity::Tenant;
 pub use event::{
-    DomainEvent,
-    DomainEventPublisher,
-    InMemoryEventPublisher,
-    TenantArchived,
-    TenantCreated,
-    TenantDeleted,
-    TenantEvent,
-    TenantRestored,
-    TenantSuspended,
+    DomainEvent, DomainEventPublisher, InMemoryEventPublisher, TenantArchived, TenantCreated,
+    TenantDeleted, TenantEvent, TenantRestored, TenantSuspended,
 };
 pub use repository::{InMemoryTenantRepository, TenantRepository};
 pub use value_object::{
-    AgentId,
-    MembershipId,
-    OrganizationId,
-    TeamId,
-    TenantError,
-    TenantId,
-    TenantName,
-    TenantSlug,
+    AgentId, MembershipId, OrganizationId, TeamId, TenantError, TenantId, TenantName, TenantSlug,
     UserId,
 };

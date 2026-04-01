@@ -62,7 +62,13 @@ impl SqliteSessionStore {
         })
     }
 
-    fn row_to_session(id: &str, max_turns: i64, system_prompt: String, message_count: i64, status: String) -> Session {
+    fn row_to_session(
+        id: &str,
+        max_turns: i64,
+        system_prompt: String,
+        message_count: i64,
+        status: String,
+    ) -> Session {
         let mut config = SessionConfig::new();
         config.id = SessionId(id.to_string());
         config.max_turns = max_turns as usize;
@@ -132,9 +138,17 @@ impl SessionStore for SqliteSessionStore {
         .await
         .map_err(|e| format!("Blocking task failed: {}", e))??;
 
-        Ok(result.map(|(id, max_turns, system_prompt, message_count, status)| {
-            SqliteSessionStore::row_to_session(&id, max_turns, system_prompt, message_count, status)
-        }))
+        Ok(
+            result.map(|(id, max_turns, system_prompt, message_count, status)| {
+                SqliteSessionStore::row_to_session(
+                    &id,
+                    max_turns,
+                    system_prompt,
+                    message_count,
+                    status,
+                )
+            }),
+        )
     }
 
     async fn get_state(&self, id: &SessionId) -> Result<Option<SessionState>, String> {
@@ -150,9 +164,7 @@ impl SessionStore for SqliteSessionStore {
                 .map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
             let result: Option<(String, i64)> = stmt
-                .query_row(params![&id_str], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })
+                .query_row(params![&id_str], |row| Ok((row.get(0)?, row.get(1)?)))
                 .optional()
                 .map_err(|e| format!("Failed to query state: {}", e))?;
 
@@ -161,19 +173,17 @@ impl SessionStore for SqliteSessionStore {
         .await
         .map_err(|e| format!("Blocking task failed: {}", e))??;
 
-        Ok(result.map(|(status, message_count)| {
-            SessionState {
-                id: SessionId(id_for_result),
-                status: match status.as_str() {
-                    "idle" => SessionStatus::Idle,
-                    "thinking" => SessionStatus::Thinking,
-                    "executing" => SessionStatus::Executing,
-                    "responding" => SessionStatus::Responding,
-                    "error" => SessionStatus::Error("Session error (see logs for details)".to_string()),
-                    _ => SessionStatus::Idle,
-                },
-                message_count: message_count as usize,
-            }
+        Ok(result.map(|(status, message_count)| SessionState {
+            id: SessionId(id_for_result),
+            status: match status.as_str() {
+                "idle" => SessionStatus::Idle,
+                "thinking" => SessionStatus::Thinking,
+                "executing" => SessionStatus::Executing,
+                "responding" => SessionStatus::Responding,
+                "error" => SessionStatus::Error("Session error (see logs for details)".to_string()),
+                _ => SessionStatus::Idle,
+            },
+            message_count: message_count as usize,
         }))
     }
 
@@ -212,16 +222,12 @@ impl SessionStore for SqliteSessionStore {
 
         spawn_blocking(move || {
             let conn = conn.blocking_lock();
-            conn.execute(
-                "DELETE FROM sessions WHERE id = ?1",
-                params![&id],
-            )
-            .map_err(|e| format!("Failed to delete session: {}", e))?;
+            conn.execute("DELETE FROM sessions WHERE id = ?1", params![&id])
+                .map_err(|e| format!("Failed to delete session: {}", e))?;
             Ok::<(), String>(())
         })
         .await
-        .map_err(|e| format!("Blocking task failed: {}", e))?
-        ?;
+        .map_err(|e| format!("Blocking task failed: {}", e))??;
         Ok(())
     }
 

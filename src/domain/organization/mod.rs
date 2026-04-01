@@ -14,6 +14,7 @@ pub use event::{
     OrganizationCreated, OrganizationDeleted, OrganizationEvent, OrganizationUpdated,
 };
 pub use repository::{InMemoryOrganizationRepository, OrganizationRepository};
+pub use crate::domain::service::OrganizationDomainService;
 pub use value_object::{
     OrganizationError, OrganizationId, OrganizationName, OrganizationSlug,
 };

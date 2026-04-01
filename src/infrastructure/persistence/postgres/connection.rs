@@ -44,8 +44,8 @@ impl PostgresConnection {
 
 /// 从环境变量加载数据库连接
 pub async fn load_database_connection() -> Result<PostgresConnection, Box<dyn std::error::Error>> {
-    let database_url = std::env::var("DATABASE_URL")
-        .map_err(|_| "DATABASE_URL environment variable not set")?;
+    let database_url =
+        std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL environment variable not set")?;
 
     let conn = PostgresConnection::new(&database_url).await?;
     Ok(conn)

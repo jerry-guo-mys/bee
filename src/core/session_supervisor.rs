@@ -32,7 +32,10 @@ impl SessionSupervisor {
     /// 如果锁被 poison（极低概率），会 panic。由于 CancellationToken 本身无 panic 路径，
     /// 锁中毒通常意味着其他严重错误。
     pub fn cancel_token(&self) -> CancellationToken {
-        self.cancel_token.read().map(|g| g.clone()).unwrap_or_else(|e| e.into_inner().clone())
+        self.cancel_token
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_else(|e| e.into_inner().clone())
     }
 
     /// 触发取消（用户 Ctrl+C）

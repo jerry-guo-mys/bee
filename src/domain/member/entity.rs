@@ -3,91 +3,15 @@
 //! Membership 是成员聚合的聚合根，管理成员的所有业务逻辑。
 
 use chrono::{DateTime, Utc};
-use thiserror::Error;
 
 use crate::domain::common::{MembershipRole, MembershipStatus, Permission};
-use crate::domain::tenant::value_object::{
-    MembershipId, OrganizationId, TeamId, TenantId, UserId,
-};
+use crate::domain::tenant::value_object::{MembershipId, OrganizationId, TeamId, TenantId, UserId};
 
+use super::event::MemberEvent;
 use super::value_object::{ToolId, ToolPolicy, ToolRiskLevel, UserEmail};
 
-/// 成员聚合根错误类型
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
-pub enum MemberDomainError {
-    #[error("成员不存在：{0}")]
-    NotFound(String),
-
-    #[error("成员已存在：{0}")]
-    AlreadyExists(String),
-
-    #[error("无效的成员操作：{0}")]
-    InvalidOperation(String),
-
-    #[error("成员状态无效：{0}")]
-    InvalidStatus(String),
-
-    #[error("成员角色无效：{0}")]
-    InvalidRole(String),
-
-    #[error("权限不足：{0}")]
-    PermissionDenied(String),
-
-    #[error("工具执行被拒绝：{0}")]
-    ToolExecutionDenied(String),
-
-    #[error("数据库错误：{0}")]
-    DatabaseError(String),
-
-    #[error("值对象错误：{0}")]
-    ValueObject(#[from] crate::domain::member::value_object::ValueObjectError),
-}
-
-/// 领域事件 - 成员相关事件
-#[derive(Debug, Clone)]
-pub enum MemberEvent {
-    /// 成员被邀请
-    Invited {
-        membership_id: MembershipId,
-        tenant_id: TenantId,
-        organization_id: OrganizationId,
-        team_id: Option<TeamId>,
-        user_id: UserId,
-        email: UserEmail,
-        role: MembershipRole,
-    },
-    /// 成员接受邀请
-    InvitationAccepted {
-        membership_id: MembershipId,
-        user_id: UserId,
-    },
-    /// 成员被暂停
-    Suspended {
-        membership_id: MembershipId,
-        reason: String,
-    },
-    /// 成员被移除
-    Removed {
-        membership_id: MembershipId,
-    },
-    /// 成员角色变更
-    RoleChanged {
-        membership_id: MembershipId,
-        old_role: MembershipRole,
-        new_role: MembershipRole,
-    },
-    /// 工具策略被添加
-    ToolPolicyAdded {
-        membership_id: MembershipId,
-        tool_id: ToolId,
-        risk_level: ToolRiskLevel,
-    },
-    /// 工具策略被移除
-    ToolPolicyRemoved {
-        membership_id: MembershipId,
-        tool_id: ToolId,
-    },
-}
+// 从 event 模块重新导出 MemberDomainError
+pub use super::event::MemberDomainError;
 
 /// 成员聚合根
 #[derive(Debug, Clone)]
@@ -159,6 +83,7 @@ impl Membership {
             user_id: user_id.unwrap_or_else(|| UserId::generate()),
             email,
             role,
+            occurred_at: now,
         };
 
         Ok(membership.with_event(event))
@@ -299,6 +224,7 @@ impl Membership {
         let event = MemberEvent::InvitationAccepted {
             membership_id: self.id.clone(),
             user_id,
+            occurred_at: Utc::now(),
         };
         self.pending_events.push(event);
 
@@ -321,6 +247,7 @@ impl Membership {
         let event = MemberEvent::Suspended {
             membership_id: self.id.clone(),
             reason,
+            occurred_at: Utc::now(),
         };
         self.pending_events.push(event);
 
@@ -342,6 +269,7 @@ impl Membership {
 
         let event = MemberEvent::Removed {
             membership_id: self.id.clone(),
+            occurred_at: Utc::now(),
         };
         self.pending_events.push(event);
 
@@ -364,6 +292,7 @@ impl Membership {
             membership_id: self.id.clone(),
             old_role,
             new_role,
+            occurred_at: Utc::now(),
         };
         self.pending_events.push(event);
 
@@ -392,6 +321,7 @@ impl Membership {
             membership_id: self.id.clone(),
             tool_id,
             risk_level,
+            occurred_at: Utc::now(),
         };
         self.pending_events.push(event);
 
@@ -421,6 +351,7 @@ impl Membership {
         let event = MemberEvent::ToolPolicyRemoved {
             membership_id: self.id.clone(),
             tool_id: tool_id.clone(),
+            occurred_at: Utc::now(),
         };
         self.pending_events.push(event);
 
@@ -519,7 +450,10 @@ mod tests {
         assert_eq!(membership.status(), &MembershipStatus::Pending);
         assert_eq!(membership.role(), &MembershipRole::Member);
         assert_eq!(membership.email(), &email);
-        assert!(membership.pending_events().iter().any(|e| matches!(e, MemberEvent::Invited { .. })));
+        assert!(membership
+            .pending_events()
+            .iter()
+            .any(|e| matches!(e, MemberEvent::Invited { .. })));
     }
 
     #[test]
@@ -529,15 +463,9 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
 
         assert_eq!(membership.status(), &MembershipStatus::Pending);
 
@@ -545,7 +473,10 @@ mod tests {
 
         assert_eq!(membership.status(), &MembershipStatus::Active);
         assert_eq!(membership.user_id(), Some(&user_id));
-        assert!(membership.pending_events().iter().any(|e| matches!(e, MemberEvent::InvitationAccepted { .. })));
+        assert!(membership
+            .pending_events()
+            .iter()
+            .any(|e| matches!(e, MemberEvent::InvitationAccepted { .. })));
     }
 
     #[test]
@@ -555,15 +486,9 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
 
         // 先接受
         membership.accept_invite(user_id.clone()).unwrap();
@@ -580,15 +505,9 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
         membership.accept_invite(user_id).unwrap();
 
         assert_eq!(membership.status(), &MembershipStatus::Active);
@@ -596,7 +515,10 @@ mod tests {
         membership.suspend("违反规定".to_string()).unwrap();
 
         assert_eq!(membership.status(), &MembershipStatus::Suspended);
-        assert!(membership.pending_events().iter().any(|e| matches!(e, MemberEvent::Suspended { .. })));
+        assert!(membership
+            .pending_events()
+            .iter()
+            .any(|e| matches!(e, MemberEvent::Suspended { .. })));
     }
 
     #[test]
@@ -606,21 +528,18 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
         membership.accept_invite(user_id).unwrap();
 
         membership.remove().unwrap();
 
         assert_eq!(membership.status(), &MembershipStatus::Removed);
-        assert!(membership.pending_events().iter().any(|e| matches!(e, MemberEvent::Removed { .. })));
+        assert!(membership
+            .pending_events()
+            .iter()
+            .any(|e| matches!(e, MemberEvent::Removed { .. })));
     }
 
     #[test]
@@ -630,15 +549,9 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
         membership.accept_invite(user_id).unwrap();
 
         assert_eq!(membership.role(), &MembershipRole::Member);
@@ -646,7 +559,10 @@ mod tests {
         membership.change_role(MembershipRole::TeamAdmin).unwrap();
 
         assert_eq!(membership.role(), &MembershipRole::TeamAdmin);
-        assert!(membership.pending_events().iter().any(|e| matches!(e, MemberEvent::RoleChanged { .. })));
+        assert!(membership
+            .pending_events()
+            .iter()
+            .any(|e| matches!(e, MemberEvent::RoleChanged { .. })));
     }
 
     #[test]
@@ -656,15 +572,9 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
         membership.accept_invite(user_id).unwrap();
         membership.remove().unwrap();
 
@@ -679,22 +589,12 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
         membership.accept_invite(user_id).unwrap();
 
-        let policy = ToolPolicy::new(
-            ToolId::from_str("shell"),
-            ToolRiskLevel::Medium,
-            true,
-        );
+        let policy = ToolPolicy::new(ToolId::from_str("shell"), ToolRiskLevel::Medium, true);
 
         membership.add_tool_policy(policy).unwrap();
 
@@ -709,33 +609,22 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
         membership.accept_invite(user_id).unwrap();
 
-        let policy1 = ToolPolicy::new(
-            ToolId::from_str("shell"),
-            ToolRiskLevel::Low,
-            true,
-        );
-        let policy2 = ToolPolicy::new(
-            ToolId::from_str("shell"),
-            ToolRiskLevel::High,
-            false,
-        );
+        let policy1 = ToolPolicy::new(ToolId::from_str("shell"), ToolRiskLevel::Low, true);
+        let policy2 = ToolPolicy::new(ToolId::from_str("shell"), ToolRiskLevel::High, false);
 
         membership.add_tool_policy(policy1).unwrap();
         membership.add_tool_policy(policy2).unwrap();
 
         assert_eq!(membership.tool_policies().len(), 1);
-        assert_eq!(membership.tool_policies()[0].risk_level(), ToolRiskLevel::High);
+        assert_eq!(
+            membership.tool_policies()[0].risk_level(),
+            ToolRiskLevel::High
+        );
         assert!(!membership.tool_policies()[0].is_allowed());
     }
 
@@ -746,25 +635,17 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
         membership.accept_invite(user_id).unwrap();
 
-        let policy = ToolPolicy::new(
-            ToolId::from_str("shell"),
-            ToolRiskLevel::Medium,
-            true,
-        );
+        let policy = ToolPolicy::new(ToolId::from_str("shell"), ToolRiskLevel::Medium, true);
         membership.add_tool_policy(policy).unwrap();
 
-        membership.remove_tool_policy(&ToolId::from_str("shell")).unwrap();
+        membership
+            .remove_tool_policy(&ToolId::from_str("shell"))
+            .unwrap();
 
         assert_eq!(membership.tool_policies().len(), 0);
     }
@@ -776,23 +657,13 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
         membership.accept_invite(user_id).unwrap();
 
         // 添加策略允许 shell 工具（Medium 风险）
-        let policy = ToolPolicy::new(
-            ToolId::from_str("shell"),
-            ToolRiskLevel::Medium,
-            true,
-        );
+        let policy = ToolPolicy::new(ToolId::from_str("shell"), ToolRiskLevel::Medium, true);
         membership.add_tool_policy(policy).unwrap();
 
         // 可以执行低风险工具
@@ -810,15 +681,9 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
         // 不接受邀请，保持 Pending 状态
 
         assert!(!membership.can_execute_tool(&ToolId::from_str("shell"), ToolRiskLevel::Low));
@@ -879,15 +744,9 @@ mod tests {
         let email = create_test_email();
         let user_id = create_test_user_id();
 
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            MembershipRole::Member,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, MembershipRole::Member)
+                .unwrap();
         membership.accept_invite(user_id).unwrap();
 
         // Member 有 AgentRead 权限

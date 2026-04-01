@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BeeClaims {
     /// 标准字段
-    pub sub: String,      // 用户 ID
-    pub exp: usize,       // 过期时间 (Unix timestamp)
-    pub iat: usize,       // 签发时间
-    pub iss: String,      // 签发者
+    pub sub: String, // 用户 ID
+    pub exp: usize,  // 过期时间 (Unix timestamp)
+    pub iat: usize,  // 签发时间
+    pub iss: String, // 签发者
 
     /// 自定义字段
     pub user_id: String,
@@ -51,7 +51,6 @@ impl BeeClaims {
 
     /// 检查是否包含指定权限
     pub fn has_permission(&self, permission: &str) -> bool {
-        self.permissions.iter().any(|p| p == permission)
-            || self.has_role("PlatformAdmin")
+        self.permissions.iter().any(|p| p == permission) || self.has_role("PlatformAdmin")
     }
 }

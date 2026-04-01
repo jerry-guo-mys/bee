@@ -6,7 +6,9 @@
 //! - 状态标识（成功/失败/运行中）
 
 use crate::observability::trace_collector::RequestTraceSummary;
-use crate::observability::trace_types::{OperationKind, RequestTrace, SpanStatus, SpanTrace, TraceStatus};
+use crate::observability::trace_types::{
+    OperationKind, RequestTrace, SpanStatus, SpanTrace, TraceStatus,
+};
 use std::fmt::Write;
 
 /// ASCII 渲染器配置
@@ -57,9 +59,22 @@ impl AsciiRenderer {
         let mut output = String::new();
 
         // 请求头部信息
-        writeln!(output, "╔══════════════════════════════════════════════════════════╗").unwrap();
-        writeln!(output, "║  Request: {:<53} ║", truncate(&trace.request_id, 53)).unwrap();
-        writeln!(output, "╠══════════════════════════════════════════════════════════╣").unwrap();
+        writeln!(
+            output,
+            "╔══════════════════════════════════════════════════════════╗"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║  Request: {:<53} ║",
+            truncate(&trace.request_id, 53)
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "╠══════════════════════════════════════════════════════════╣"
+        )
+        .unwrap();
 
         // 基本信息
         let status_str = format_trace_status(&trace.status);
@@ -70,7 +85,12 @@ impl AsciiRenderer {
         }
 
         if let Some(duration) = trace.duration_ms {
-            writeln!(output, "║  Duration: {:>4} ms                                         ║", duration).unwrap();
+            writeln!(
+                output,
+                "║  Duration: {:>4} ms                                         ║",
+                duration
+            )
+            .unwrap();
         }
 
         if let Some(ref summary) = trace.input_summary {
@@ -78,14 +98,25 @@ impl AsciiRenderer {
         }
 
         // 统计信息
-        writeln!(output, "╠══════════════════════════════════════════════════════════╣").unwrap();
-        writeln!(output, "║  Spans: {:<3}  LLM Calls: {:<3}  Tools: {:<3}  Tokens: {:<5}    ║",
+        writeln!(
+            output,
+            "╠══════════════════════════════════════════════════════════╣"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║  Spans: {:<3}  LLM Calls: {:<3}  Tools: {:<3}  Tokens: {:<5}    ║",
             trace.spans.len(),
             trace.llm_calls_count.unwrap_or(0),
             trace.tool_executions_count.unwrap_or(0),
             trace.total_tokens.unwrap_or(0)
-        ).unwrap();
-        writeln!(output, "╚══════════════════════════════════════════════════════════╝").unwrap();
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "╚══════════════════════════════════════════════════════════╝"
+        )
+        .unwrap();
 
         // 渲染 Spans 树
         if !trace.spans.is_empty() {
@@ -125,7 +156,8 @@ impl AsciiRenderer {
                 span.operation_name,
                 format_operation_kind(&span.operation_kind),
                 duration_str
-            ).unwrap();
+            )
+            .unwrap();
 
             // 显示属性（如果启用）
             if self.config.show_attributes && !span.attributes.is_empty() {
@@ -141,15 +173,39 @@ impl AsciiRenderer {
     pub fn render_summary_list(&self, summaries: &[RequestTraceSummary]) -> String {
         let mut output = String::new();
 
-        writeln!(output, "╔════════════════════════════════════════════════════════════════════════════╗").unwrap();
-        writeln!(output, "║  Recent Traces                                                             ║").unwrap();
-        writeln!(output, "╠════════════════════════════════════════════════════════════════════════════╣").unwrap();
-        writeln!(output, "║  {:<12} {:<10} {:>8} {:>6} {:>5} {:<35}  ║", "Request ID", "Status", "Time(ms)", "Spans", "LLM", "Input").unwrap();
-        writeln!(output, "╠════════════════════════════════════════════════════════════════════════════╣").unwrap();
+        writeln!(
+            output,
+            "╔════════════════════════════════════════════════════════════════════════════╗"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║  Recent Traces                                                             ║"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "╠════════════════════════════════════════════════════════════════════════════╣"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║  {:<12} {:<10} {:>8} {:>6} {:>5} {:<35}  ║",
+            "Request ID", "Status", "Time(ms)", "Spans", "LLM", "Input"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "╠════════════════════════════════════════════════════════════════════════════╣"
+        )
+        .unwrap();
 
         for summary in summaries {
             let status_str = format_trace_status(&summary.status);
-            let duration_str = summary.duration_ms.map(|d| format!("{}", d)).unwrap_or_else(|| "-".to_string());
+            let duration_str = summary
+                .duration_ms
+                .map(|d| format!("{}", d))
+                .unwrap_or_else(|| "-".to_string());
             let input_summary = summary.input_summary.as_deref().unwrap_or("-");
 
             writeln!(
@@ -161,10 +217,15 @@ impl AsciiRenderer {
                 summary.span_count,
                 summary.llm_calls_count.unwrap_or(0),
                 truncate(input_summary, 35)
-            ).unwrap();
+            )
+            .unwrap();
         }
 
-        writeln!(output, "╚════════════════════════════════════════════════════════════════════════════╝").unwrap();
+        writeln!(
+            output,
+            "╚════════════════════════════════════════════════════════════════════════════╝"
+        )
+        .unwrap();
         output
     }
 
@@ -177,8 +238,15 @@ impl AsciiRenderer {
         }
 
         // 找到最小和最大时间戳
-        let min_time = trace.spans.iter().map(|s| s.start_timestamp_ms).min().unwrap_or(0);
-        let max_time = trace.spans.iter()
+        let min_time = trace
+            .spans
+            .iter()
+            .map(|s| s.start_timestamp_ms)
+            .min()
+            .unwrap_or(0);
+        let max_time = trace
+            .spans
+            .iter()
             .filter_map(|s| s.duration_ms.map(|d| s.start_timestamp_ms + d))
             .max()
             .unwrap_or(min_time);
@@ -187,7 +255,13 @@ impl AsciiRenderer {
         let timeline_width = 60;
 
         writeln!(output, "Timeline:").unwrap();
-        writeln!(output, "0ms {} {}ms", "-".repeat(timeline_width / 2 - 10), total_duration).unwrap();
+        writeln!(
+            output,
+            "0ms {} {}ms",
+            "-".repeat(timeline_width / 2 - 10),
+            total_duration
+        )
+        .unwrap();
 
         for span in &trace.spans {
             let relative_start = span.start_timestamp_ms - min_time;
@@ -200,7 +274,8 @@ impl AsciiRenderer {
             };
 
             let span_width = if total_duration > 0 {
-                ((span_duration as f64 / total_duration as f64 * timeline_width as f64) as usize).max(1)
+                ((span_duration as f64 / total_duration as f64 * timeline_width as f64) as usize)
+                    .max(1)
             } else {
                 1
             };
@@ -220,7 +295,8 @@ impl AsciiRenderer {
                 truncate(&span.operation_name, 20),
                 indent,
                 bar_str
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         output

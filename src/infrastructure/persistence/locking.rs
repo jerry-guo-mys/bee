@@ -3,11 +3,11 @@
 //! 提供基于键值粒度的锁机制，支持并发安全的数据库操作
 
 use std::collections::HashMap;
-use std::hash::Hash;
-use std::sync::Arc;
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicUsize, AtomicU64, Ordering};
-use tokio::sync::{RwLock, OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
+use std::hash::Hash;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
+use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 /// 细粒度锁管理器
 ///
@@ -94,7 +94,9 @@ where
         locks_write.insert(key, Arc::clone(&new_lock));
 
         // 更新统计（原子操作）
-        self.stats.lock_count.store(locks_write.len(), Ordering::SeqCst);
+        self.stats
+            .lock_count
+            .store(locks_write.len(), Ordering::SeqCst);
 
         new_lock
     }
@@ -180,7 +182,9 @@ where
                     match tokio::time::timeout(
                         tokio::time::Duration::from_secs(5),
                         arc_lock.write_owned(),
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(guard) => Some(guard.clone()),
                         Err(_) => return Err(LockError::Timeout),
                     }
@@ -203,7 +207,9 @@ where
         LockStats {
             lock_count: AtomicUsize::new(self.stats.lock_count.load(Ordering::SeqCst)),
             read_acquisitions: AtomicU64::new(self.stats.read_acquisitions.load(Ordering::SeqCst)),
-            write_acquisitions: AtomicU64::new(self.stats.write_acquisitions.load(Ordering::SeqCst)),
+            write_acquisitions: AtomicU64::new(
+                self.stats.write_acquisitions.load(Ordering::SeqCst),
+            ),
             lock_waits: AtomicU64::new(self.stats.lock_waits.load(Ordering::SeqCst)),
         }
     }
@@ -329,7 +335,7 @@ where
 
     /// 根据键获取分片索引
     fn shard_index(&self, key: &K) -> usize {
-        use std::hash::{Hasher, BuildHasher};
+        use std::hash::{BuildHasher, Hasher};
         let mut h = self.hasher.build_hasher();
         key.hash(&mut h);
         h.finish() as usize % self.shard_count

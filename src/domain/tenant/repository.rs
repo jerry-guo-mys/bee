@@ -119,10 +119,7 @@ mod tests {
     use super::*;
 
     fn create_test_tenant() -> Tenant {
-        Tenant::create(
-            "Test Tenant".to_string(),
-            "test-tenant".to_string(),
-        ).unwrap()
+        Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap()
     }
 
     #[tokio::test]

@@ -2,11 +2,11 @@
 //!
 //! 测试 Gateway 的认证、会话管理和消息处理
 
-use bee_agents::gateway::auth::{
+use bee::gateway::auth::{
     AuthContext, JwtAuthenticator, JwtClaims, extract_client_metadata,
 };
-use bee_agents::gateway::session::{Session, SessionManager, SessionScope};
-use bee_agents::gateway::message::{ClientInfo, SpokeType, SessionStatus};
+use bee::gateway::session::{Session, SessionManager, SessionScope};
+use bee::gateway::message::{ClientInfo, SpokeType, SessionStatus};
 
 #[tokio::test]
 async fn test_gateway_session_manager_basic() {

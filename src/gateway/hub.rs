@@ -21,6 +21,9 @@ use super::runtime::{AgentRuntime, RuntimeConfig};
 use super::session_store::{create_session_store, SessionStore};
 use super::spoke::SpokeAdapter;
 use super::task_queue::{TaskNotification, TaskQueue};
+use super::cqrs_integration::GatewayCqrsService;
+use crate::application::queries::handler::InMemoryQueryBus;
+use crate::application::commands::handler::InMemoryCommandBus;
 use crate::llm::{create_embedder_from_config, EmbeddingProvider};
 use crate::memory::{UserMemoryConfig, UserMemoryManager};
 
@@ -87,6 +90,10 @@ pub struct Hub {
     notification_rx: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<TaskNotification>>>>,
     /// 用户记忆管理器
     user_memory: Arc<UserMemoryManager>,
+    /// 命令总线（共享实例）
+    command_bus: Arc<InMemoryCommandBus>,
+    /// 查询总线（共享实例）
+    query_bus: Arc<InMemoryQueryBus>,
 }
 
 impl Hub {
@@ -98,6 +105,16 @@ impl Hub {
             config.session_timeout,
         )
         .await;
+
+        // 创建命令总线和查询总线
+        let mut command_bus = InMemoryCommandBus::new();
+        let mut query_bus = InMemoryQueryBus::new();
+
+        // 注册所有处理器
+        super::handler_registry::register_all_handlers(&mut command_bus, &mut query_bus);
+
+        let command_bus = Arc::new(command_bus);
+        let query_bus = Arc::new(query_bus);
 
         let runtime = Arc::new(AgentRuntime::new(
             config.runtime.clone(),
@@ -114,8 +131,7 @@ impl Hub {
                     Ok(q) => q,
                     Err(e) => {
                         tracing::warn!(
-                            "Failed to create persistent task queue: {}, using in-memory",
-                            e
+                            "Failed to create persistent task queue: {}", e
                         );
                         TaskQueue::new()
                     }
@@ -161,6 +177,8 @@ impl Hub {
             task_queue: Arc::new(task_queue),
             notification_rx: Arc::new(tokio::sync::Mutex::new(Some(notification_rx))),
             user_memory,
+            command_bus,
+            query_bus,
         }
     }
 
@@ -191,6 +209,8 @@ impl Hub {
         let session_store = Arc::clone(&self.session_store);
         let runtime = Arc::clone(&self.runtime);
         let heartbeat_interval = self.config.heartbeat_interval;
+        let command_bus = Arc::clone(&self.command_bus);
+        let query_bus = Arc::clone(&self.query_bus);
 
         tokio::spawn(async move {
             let cleanup_interval = tokio::time::Duration::from_secs(60);
@@ -215,6 +235,8 @@ impl Hub {
                                 let connections = Arc::clone(&connections);
                                 let session_store = Arc::clone(&session_store);
                                 let runtime = Arc::clone(&runtime);
+                                let command_bus = Arc::clone(&command_bus);
+                                let query_bus = Arc::clone(&query_bus);
 
                                 tokio::spawn(async move {
                                     if let Err(e) = handle_connection(
@@ -224,6 +246,8 @@ impl Hub {
                                         session_store,
                                         runtime,
                                         heartbeat_interval,
+                                        command_bus,
+                                        query_bus,
                                     ).await {
                                         tracing::error!("Connection error from {}: {}", addr, e);
                                     }
@@ -365,6 +389,8 @@ async fn handle_connection(
     session_store: Arc<dyn SessionStore>,
     runtime: Arc<AgentRuntime>,
     _heartbeat_interval: u64,
+    command_bus: Arc<InMemoryCommandBus>,
+    query_bus: Arc<InMemoryQueryBus>,
 ) -> Result<(), String> {
     let ws_stream = tokio_tungstenite::accept_async(stream)
         .await
@@ -511,6 +537,152 @@ async fn handle_connection(
                     MessageType::Ping { timestamp } => {
                         let pong = GatewayMessage::pong(timestamp);
                         let _ = tx.send(serde_json::to_string(&pong).unwrap_or_default());
+                    }
+
+                    // ========== 多租户管理消息 ==========
+
+                    MessageType::CreateTenant { name, slug } => {
+                        if let Some(ref info) = client_info {
+                            let tx_for_service = tx.clone();
+                            let info_clone = info.clone();
+                            let cmd_bus = Arc::clone(&command_bus);
+                            let qry_bus = Arc::clone(&query_bus);
+                            tokio::spawn(async move {
+                                let cmd_service = GatewayCqrsService::new_for_string_tx(
+                                    cmd_bus,
+                                    qry_bus,
+                                    tx_for_service,
+                                    info_clone,
+                                );
+                                let _ = cmd_service.handle_create_tenant(name, slug).await;
+                            });
+                        }
+                    }
+
+                    MessageType::GetTenant { tenant_id } => {
+                        if let Some(ref info) = client_info {
+                            let tx_for_service = tx.clone();
+                            let info_clone = info.clone();
+                            let cmd_bus = Arc::clone(&command_bus);
+                            let qry_bus = Arc::clone(&query_bus);
+                            tokio::spawn(async move {
+                                let cmd_service = GatewayCqrsService::new_for_string_tx(
+                                    cmd_bus,
+                                    qry_bus,
+                                    tx_for_service,
+                                    info_clone,
+                                );
+                                let _ = cmd_service.handle_get_tenant(tenant_id).await;
+                            });
+                        }
+                    }
+
+                    MessageType::CreateOrganization { tenant_id, name, slug } => {
+                        if let Some(ref info) = client_info {
+                            let tx_for_service = tx.clone();
+                            let info_clone = info.clone();
+                            let cmd_bus = Arc::clone(&command_bus);
+                            let qry_bus = Arc::clone(&query_bus);
+                            tokio::spawn(async move {
+                                let cmd_service = GatewayCqrsService::new_for_string_tx(
+                                    cmd_bus,
+                                    qry_bus,
+                                    tx_for_service,
+                                    info_clone,
+                                );
+                                let _ = cmd_service.handle_create_organization(tenant_id, name, slug).await;
+                            });
+                        }
+                    }
+
+                    MessageType::CreateTeam { tenant_id, organization_id, name, code } => {
+                        if let Some(ref info) = client_info {
+                            let tx_for_service = tx.clone();
+                            let info_clone = info.clone();
+                            let cmd_bus = Arc::clone(&command_bus);
+                            let qry_bus = Arc::clone(&query_bus);
+                            tokio::spawn(async move {
+                                let cmd_service = GatewayCqrsService::new_for_string_tx(
+                                    cmd_bus,
+                                    qry_bus,
+                                    tx_for_service,
+                                    info_clone,
+                                );
+                                let _ = cmd_service.handle_create_team(tenant_id, organization_id, name, code).await;
+                            });
+                        }
+                    }
+
+                    MessageType::InviteMember { tenant_id, organization_id, team_id, user_email, role } => {
+                        if let Some(ref info) = client_info {
+                            let tx_for_service = tx.clone();
+                            let info_clone = info.clone();
+                            let cmd_bus = Arc::clone(&command_bus);
+                            let qry_bus = Arc::clone(&query_bus);
+                            tokio::spawn(async move {
+                                let cmd_service = GatewayCqrsService::new_for_string_tx(
+                                    cmd_bus,
+                                    qry_bus,
+                                    tx_for_service,
+                                    info_clone,
+                                );
+                                let _ = cmd_service.handle_invite_member(tenant_id, organization_id, team_id, user_email, role).await;
+                            });
+                        }
+                    }
+
+                    MessageType::AcceptInvite { membership_id } => {
+                        if let Some(ref info) = client_info {
+                            let tx_for_service = tx.clone();
+                            let info_clone = info.clone();
+                            let cmd_bus = Arc::clone(&command_bus);
+                            let qry_bus = Arc::clone(&query_bus);
+                            tokio::spawn(async move {
+                                let cmd_service = GatewayCqrsService::new_for_string_tx(
+                                    cmd_bus,
+                                    qry_bus,
+                                    tx_for_service,
+                                    info_clone,
+                                );
+                                let _ = cmd_service.handle_accept_invite(membership_id).await;
+                            });
+                        }
+                    }
+
+                    MessageType::SuspendMember { membership_id, reason } => {
+                        if let Some(ref info) = client_info {
+                            let tx_for_service = tx.clone();
+                            let info_clone = info.clone();
+                            let cmd_bus = Arc::clone(&command_bus);
+                            let qry_bus = Arc::clone(&query_bus);
+                            tokio::spawn(async move {
+                                let cmd_service = GatewayCqrsService::new_for_string_tx(
+                                    cmd_bus,
+                                    qry_bus,
+                                    tx_for_service,
+                                    info_clone,
+                                );
+                                let _ = cmd_service.handle_suspend_member(membership_id, reason).await;
+                            });
+                        }
+                    }
+
+                    MessageType::ListMembers { tenant_id, organization_id, team_id } => {
+                        if let Some(ref info) = client_info {
+                            let tx_for_service = tx.clone();
+                            let info_clone = info.clone();
+                            let cmd_bus = Arc::clone(&command_bus);
+                            let qry_bus = Arc::clone(&query_bus);
+                            tokio::spawn(async move {
+                                let cmd_service = GatewayCqrsService::new_for_string_tx(
+                                    cmd_bus,
+                                    qry_bus,
+                                    tx_for_service,
+                                    info_clone,
+                                );
+                                let _ = cmd_service.handle_list_members(tenant_id, organization_id, team_id).await;
+                            });
+                        }
                     }
 
                     _ => {}

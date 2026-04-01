@@ -45,13 +45,7 @@ fn test_has_role() {
 
 #[test]
 fn test_has_permission() {
-    let mut claims = BeeClaims::new(
-        "user-123",
-        None,
-        None,
-        None,
-        vec!["Member".to_string()],
-    );
+    let mut claims = BeeClaims::new("user-123", None, None, None, vec!["Member".to_string()]);
     claims.permissions = vec!["read:documents".to_string()];
 
     assert!(claims.has_permission("read:documents"));
@@ -88,8 +82,8 @@ async fn test_refresh_token() {
 
 #[test]
 fn test_expired_token() {
+    use chrono::{Duration, Utc};
     use jsonwebtoken::{encode, EncodingKey, Header};
-    use chrono::{Utc, Duration};
 
     let service = JwtService::new();
 
@@ -98,8 +92,12 @@ fn test_expired_token() {
     claims.exp = (Utc::now() - Duration::seconds(100)).timestamp() as usize;
     claims.iat = (Utc::now() - Duration::seconds(200)).timestamp() as usize;
 
-    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret("default-secret-change-in-production".as_bytes()))
-        .unwrap();
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret("default-secret-change-in-production".as_bytes()),
+    )
+    .unwrap();
 
     // 验证应返回 TokenExpired 错误
     match service.validate_token(&token) {
@@ -111,15 +109,19 @@ fn test_expired_token() {
 
 #[test]
 fn test_invalid_signature() {
-    use jsonwebtoken::{encode, Header, EncodingKey};
+    use jsonwebtoken::{encode, EncodingKey, Header};
 
     let service = JwtService::new();
     let claims = BeeClaims::new("user-123", None, None, None, vec![]);
 
     // 使用不同的密钥创建 token
     let wrong_secret = "wrong-secret-key";
-    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(wrong_secret.as_bytes()))
-        .unwrap();
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(wrong_secret.as_bytes()),
+    )
+    .unwrap();
 
     // 验证应返回 InvalidToken 错误
     match service.validate_token(&token) {
@@ -130,9 +132,10 @@ fn test_invalid_signature() {
 }
 
 #[test]
+#[cfg(feature = "web")]
 fn test_require_role() {
-    use bee::infrastructure::auth::require_role;
     use axum::http::StatusCode;
+    use bee::infrastructure::auth::require_role;
 
     let claims = BeeClaims::new(
         "user-123",

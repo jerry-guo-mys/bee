@@ -23,12 +23,22 @@ impl JwtService {
             .parse()
             .unwrap_or(86400);
 
-        Self { secret, expiry_secs }
+        Self {
+            secret,
+            expiry_secs,
+        }
     }
 
     /// 生成 JWT token
-    pub fn generate_token(&self, claims: &BeeClaims) -> Result<String, jsonwebtoken::errors::Error> {
-        encode(&Header::default(), claims, &EncodingKey::from_secret(self.secret.as_bytes()))
+    pub fn generate_token(
+        &self,
+        claims: &BeeClaims,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
+        encode(
+            &Header::default(),
+            claims,
+            &EncodingKey::from_secret(self.secret.as_bytes()),
+        )
     }
 
     /// 验证并解析 token
@@ -43,22 +53,28 @@ impl JwtService {
         ) {
             Ok(token_data) => Ok(token_data.claims),
             Err(e) => match e.kind() {
-                jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
-                    Err(JwtError::TokenExpired)
-                }
+                jsonwebtoken::errors::ErrorKind::ExpiredSignature => Err(JwtError::TokenExpired),
                 _ => Err(JwtError::InvalidToken(e)),
             },
         }
     }
 
     /// 刷新 token
-    pub fn refresh_token(&self, old_claims: &BeeClaims) -> Result<String, jsonwebtoken::errors::Error> {
+    pub fn refresh_token(
+        &self,
+        old_claims: &BeeClaims,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
         let mut new_claims = old_claims.clone();
         let now = chrono::Utc::now();
-        new_claims.exp = (now + chrono::Duration::seconds(self.expiry_secs as i64)).timestamp() as usize;
+        new_claims.exp =
+            (now + chrono::Duration::seconds(self.expiry_secs as i64)).timestamp() as usize;
         new_claims.iat = now.timestamp() as usize;
 
-        encode(&Header::default(), &new_claims, &EncodingKey::from_secret(self.secret.as_bytes()))
+        encode(
+            &Header::default(),
+            &new_claims,
+            &EncodingKey::from_secret(self.secret.as_bytes()),
+        )
     }
 }
 

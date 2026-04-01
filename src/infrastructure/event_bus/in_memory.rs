@@ -62,10 +62,7 @@ impl EventBus for InMemoryEventBus {
         Ok(())
     }
 
-    async fn publish_batch(
-        &self,
-        envelopes: Vec<EventEnvelope>,
-    ) -> Result<(), Self::Error> {
+    async fn publish_batch(&self, envelopes: Vec<EventEnvelope>) -> Result<(), Self::Error> {
         for envelope in envelopes {
             let aggregate_id = envelope.aggregate_id.clone();
 
@@ -88,10 +85,7 @@ impl EventBus for InMemoryEventBus {
 impl InMemoryEventBus {
     /// 获取所有事件（用于测试）
     pub fn all_events(&self) -> Vec<EventEnvelope> {
-        self.events
-            .iter()
-            .flat_map(|e| e.value().clone())
-            .collect()
+        self.events.iter().flat_map(|e| e.value().clone()).collect()
     }
 }
 

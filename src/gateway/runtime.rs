@@ -235,7 +235,10 @@ impl AgentRuntime {
         _model: Option<&str>,
     ) -> Result<String, AgentError> {
         // 获取取消令牌（会话不存在时拒绝请求）
-        let cancel_token = self.session_store.new_cancel_token(session_id).await
+        let cancel_token = self
+            .session_store
+            .new_cancel_token(session_id)
+            .await
             .ok_or_else(|| AgentError::SessionNotFound(session_id.to_string()))?;
         let scope = self
             .session_store

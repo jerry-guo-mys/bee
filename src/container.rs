@@ -27,12 +27,14 @@ impl Container {
 
     /// 注册组件
     pub fn register<T: 'static + Send + Sync>(&mut self, component: T) {
-        self.components.insert(TypeId::of::<T>(), Box::new(component));
+        self.components
+            .insert(TypeId::of::<T>(), Box::new(component));
     }
 
     /// 注册 Arc 组件
     pub fn register_arc<T: 'static + Send + Sync>(&mut self, component: Arc<T>) {
-        self.components.insert(TypeId::of::<Arc<T>>(), Box::new(component));
+        self.components
+            .insert(TypeId::of::<Arc<T>>(), Box::new(component));
     }
 
     /// 获取组件引用
@@ -62,12 +64,12 @@ mod tests {
     #[test]
     fn test_container_register_and_get() {
         let mut container = Container::new();
-        
+
         #[derive(Debug, PartialEq)]
         struct TestComponent(String);
-        
+
         container.register(TestComponent("test".to_string()));
-        
+
         let component = container.get::<TestComponent>().unwrap();
         assert_eq!(component.0, "test");
     }

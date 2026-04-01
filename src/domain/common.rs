@@ -110,6 +110,31 @@ pub enum MembershipStatus {
     Removed,
 }
 
+impl std::fmt::Display for MembershipStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MembershipStatus::Pending => write!(f, "pending"),
+            MembershipStatus::Active => write!(f, "active"),
+            MembershipStatus::Suspended => write!(f, "suspended"),
+            MembershipStatus::Removed => write!(f, "removed"),
+        }
+    }
+}
+
+impl std::str::FromStr for MembershipStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "pending" => Ok(MembershipStatus::Pending),
+            "active" => Ok(MembershipStatus::Active),
+            "suspended" => Ok(MembershipStatus::Suspended),
+            "removed" => Ok(MembershipStatus::Removed),
+            _ => Err(format!("Invalid membership status: {}", s)),
+        }
+    }
+}
+
 /// 租户状态
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TenantStatus {
@@ -211,7 +236,8 @@ mod tests {
         assert!(MembershipRole::PlatformAdmin.has_permission(&Permission::TenantRead));
         assert!(MembershipRole::PlatformAdmin.has_permission(&Permission::TenantWrite));
         assert!(MembershipRole::PlatformAdmin.has_permission(&Permission::TenantDelete));
-        assert!(MembershipRole::PlatformAdmin.has_permission(&Permission::ToolExecute("shell".to_string())));
+        assert!(MembershipRole::PlatformAdmin
+            .has_permission(&Permission::ToolExecute("shell".to_string())));
 
         // OrgAdmin 有组织级权限
         assert!(MembershipRole::OrgAdmin.has_permission(&Permission::OrgRead));

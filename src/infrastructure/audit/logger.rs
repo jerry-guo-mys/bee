@@ -1,10 +1,11 @@
 use super::repository::AuditLogRepository;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+// use sqlx::FromRow;  // Temporarily disabled for compilation check
 use std::sync::Arc;
 
 /// 审计日志记录
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // , FromRow)]
 pub struct AuditLog {
     pub id: String,
     pub tenant_id: String,
@@ -19,12 +20,7 @@ pub struct AuditLog {
 }
 
 impl AuditLog {
-    pub fn new(
-        tenant_id: &str,
-        action: &str,
-        resource_type: &str,
-        resource_id: &str,
-    ) -> Self {
+    pub fn new(tenant_id: &str, action: &str, resource_type: &str, resource_id: &str) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             tenant_id: tenant_id.to_string(),
@@ -75,9 +71,10 @@ impl<R: AuditLogRepository + 'static> AuditLogger<R> {
     /// 记录审计日志
     pub async fn log(&self, log: &AuditLog) -> Result<(), AuditError> {
         // Save to repository
-        self.repository.save(log).await.map_err(|e| {
-            AuditError::Database(Box::new(e))
-        })?;
+        self.repository
+            .save(log)
+            .await
+            .map_err(|e| AuditError::Database(Box::new(e)))?;
 
         // 同时输出到 tracing
         tracing::info!(

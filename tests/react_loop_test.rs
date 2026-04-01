@@ -62,7 +62,10 @@ mod tests {
         let has_system = messages
             .iter()
             .any(|m| matches!(m.role, bee::memory::Role::System));
-        assert!(has_system, "System message should be preserved when not pruning");
+        assert!(
+            has_system,
+            "System message should be preserved when not pruning"
+        );
     }
 
     #[tokio::test]
@@ -70,8 +73,7 @@ mod tests {
         // 测试会话状态在 ReAct 循环中的转换
         use bee::domain::session::{Session, SessionConfig, SessionStatus};
 
-        let config = SessionConfig::new()
-            .with_system_prompt("You are a helpful assistant.");
+        let config = SessionConfig::new().with_system_prompt("You are a helpful assistant.");
         let mut session = Session::new(config);
 
         // 初始状态
@@ -101,10 +103,14 @@ mod tests {
 
         context.push_message(Message::user("Search for Rust programming"));
         context.push_message(Message::assistant("Searching..."));
-        context.push_message(Message::tool("Search results: Rust is a systems programming language..."));
+        context.push_message(Message::tool(
+            "Search results: Rust is a systems programming language...",
+        ));
 
         // 工具结果应该被正确记录
-        let tool_messages: Vec<_> = context.conversation.messages()
+        let tool_messages: Vec<_> = context
+            .conversation
+            .messages()
             .iter()
             .filter(|m| matches!(m.role, bee::memory::Role::Tool))
             .collect();
@@ -122,7 +128,9 @@ mod tests {
         context.push_message(Message::tool("Error: Tool execution failed"));
 
         // 助手应该能够处理错误
-        context.push_message(Message::assistant("Sorry, there was an error. Let me try another approach."));
+        context.push_message(Message::assistant(
+            "Sorry, there was an error. Let me try another approach.",
+        ));
 
         assert_eq!(context.conversation.messages().len(), 4);
     }
@@ -167,27 +175,33 @@ mod tests {
         let tool_msg = messages.iter().find(|m| m.content.contains("Tool: echo"));
 
         assert!(tool_msg.is_some(), "Should find tool message");
-        assert_eq!(tool_msg.unwrap().role, bee::memory::Role::Tool,
-                   "Tool message should use Role::Tool, not Role::Assistant");
+        assert_eq!(
+            tool_msg.unwrap().role,
+            bee::memory::Role::Tool,
+            "Tool message should use Role::Tool, not Role::Assistant"
+        );
 
         // 验证没有 Assistant 角色包含工具调用文本
-        let assistant_with_tool: Vec<_> = messages.iter()
+        let assistant_with_tool: Vec<_> = messages
+            .iter()
             .filter(|m| matches!(m.role, bee::memory::Role::Assistant))
             .filter(|m| m.content.contains("Tool call:") || m.content.contains("Tool:"))
             .collect();
 
-        assert!(assistant_with_tool.is_empty(),
-                "No Assistant message should contain tool call text");
+        assert!(
+            assistant_with_tool.is_empty(),
+            "No Assistant message should contain tool call text"
+        );
     }
 
     #[tokio::test]
     async fn test_react_loop_with_echo_tool() {
         // 真实调用 echo 工具验证工具消息的角色
-        use bee::react::ContextManager;
+        use bee::core::RecoveryEngine;
         use bee::llm::MockLlmClient;
+        use bee::react::ContextManager;
         use bee::react::{react_loop, Planner};
         use bee::tools::{EchoTool, ToolExecutor, ToolRegistry};
-        use bee::core::RecoveryEngine;
         use std::sync::Arc;
 
         // 创建 Mock LLM（返回固定的工具调用响应）
@@ -227,17 +241,21 @@ mod tests {
         let messages = context.conversation.messages();
 
         // 检查是否存在 Tool 角色的消息（如果有工具调用）
-        let tool_messages: Vec<_> = messages.iter()
+        let tool_messages: Vec<_> = messages
+            .iter()
             .filter(|m| matches!(m.role, bee::memory::Role::Tool))
             .collect();
 
         // 检查 Assistant 角色是否包含工具调用文本（不应该）
-        let assistant_tool_calls: Vec<_> = messages.iter()
+        let assistant_tool_calls: Vec<_> = messages
+            .iter()
             .filter(|m| matches!(m.role, bee::memory::Role::Assistant))
             .filter(|m| m.content.contains("Tool call:") || m.content.contains("Tool: echo"))
             .collect();
 
-        assert!(assistant_tool_calls.is_empty(),
-                "Assistant messages should not contain tool call text");
+        assert!(
+            assistant_tool_calls.is_empty(),
+            "Assistant messages should not contain tool call text"
+        );
     }
 }

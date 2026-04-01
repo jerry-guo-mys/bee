@@ -12,8 +12,14 @@ mod tests {
     async fn test_memory_store_append_and_load() {
         let store = InMemoryStore::new();
 
-        store.append("conv1", &Message::user("Hello")).await.unwrap();
-        store.append("conv1", &Message::assistant("Hi there!")).await.unwrap();
+        store
+            .append("conv1", &Message::user("Hello"))
+            .await
+            .unwrap();
+        store
+            .append("conv1", &Message::assistant("Hi there!"))
+            .await
+            .unwrap();
 
         let messages = store.load("conv1", 0).await.unwrap();
 
@@ -27,7 +33,8 @@ mod tests {
         let store = InMemoryStore::new();
 
         for i in 0..10 {
-            store.append("conv1", &Message::user(&format!("Message {}", i)))
+            store
+                .append("conv1", &Message::user(&format!("Message {}", i)))
                 .await
                 .unwrap();
         }
@@ -45,7 +52,10 @@ mod tests {
     async fn test_memory_store_delete() {
         let store = InMemoryStore::new();
 
-        store.append("conv1", &Message::user("Hello")).await.unwrap();
+        store
+            .append("conv1", &Message::user("Hello"))
+            .await
+            .unwrap();
         store.delete("conv1").await.unwrap();
 
         let messages = store.load("conv1", 0).await.unwrap();
@@ -57,12 +67,24 @@ mod tests {
         let store = InMemoryStore::new();
 
         // Conversation 1
-        store.append("conv1", &Message::user("Hello from conv1")).await.unwrap();
-        store.append("conv1", &Message::assistant("Hi from conv1")).await.unwrap();
+        store
+            .append("conv1", &Message::user("Hello from conv1"))
+            .await
+            .unwrap();
+        store
+            .append("conv1", &Message::assistant("Hi from conv1"))
+            .await
+            .unwrap();
 
         // Conversation 2
-        store.append("conv2", &Message::user("Hello from conv2")).await.unwrap();
-        store.append("conv2", &Message::assistant("Hi from conv2")).await.unwrap();
+        store
+            .append("conv2", &Message::user("Hello from conv2"))
+            .await
+            .unwrap();
+        store
+            .append("conv2", &Message::assistant("Hi from conv2"))
+            .await
+            .unwrap();
 
         // Load conv1
         let conv1_messages = store.load("conv1", 0).await.unwrap();
@@ -79,8 +101,14 @@ mod tests {
     async fn test_sqlite_memory_store_persistence() {
         let store = SqliteMemoryStore::in_memory().unwrap();
 
-        store.append("conv1", &Message::user("Hello")).await.unwrap();
-        store.append("conv1", &Message::assistant("Hi!")).await.unwrap();
+        store
+            .append("conv1", &Message::user("Hello"))
+            .await
+            .unwrap();
+        store
+            .append("conv1", &Message::assistant("Hi!"))
+            .await
+            .unwrap();
 
         let messages = store.load("conv1", 0).await.unwrap();
         assert_eq!(messages.len(), 2);
@@ -91,7 +119,8 @@ mod tests {
         let store = SqliteMemoryStore::in_memory().unwrap();
 
         for i in 0..10 {
-            store.append("conv1", &Message::user(&format!("Msg {}", i)))
+            store
+                .append("conv1", &Message::user(&format!("Msg {}", i)))
                 .await
                 .unwrap();
         }
@@ -107,7 +136,10 @@ mod tests {
     async fn test_sqlite_memory_store_delete() {
         let store = SqliteMemoryStore::in_memory().unwrap();
 
-        store.append("conv1", &Message::user("Hello")).await.unwrap();
+        store
+            .append("conv1", &Message::user("Hello"))
+            .await
+            .unwrap();
         store.delete("conv1").await.unwrap();
 
         let messages = store.load("conv1", 0).await.unwrap();
@@ -118,9 +150,18 @@ mod tests {
     async fn test_memory_store_system_message() {
         let store = InMemoryStore::new();
 
-        store.append("conv1", &Message::system("You are a helpful assistant.")).await.unwrap();
-        store.append("conv1", &Message::user("Hello")).await.unwrap();
-        store.append("conv1", &Message::assistant("Hi!")).await.unwrap();
+        store
+            .append("conv1", &Message::system("You are a helpful assistant."))
+            .await
+            .unwrap();
+        store
+            .append("conv1", &Message::user("Hello"))
+            .await
+            .unwrap();
+        store
+            .append("conv1", &Message::assistant("Hi!"))
+            .await
+            .unwrap();
 
         let messages = store.load("conv1", 0).await.unwrap();
         assert_eq!(messages.len(), 3);
@@ -131,15 +172,25 @@ mod tests {
     async fn test_memory_store_tool_message() {
         let store = InMemoryStore::new();
 
-        store.append("conv1", &Message::user("Calculate 2+2")).await.unwrap();
-        store.append("conv1", &Message::assistant("Let me use the calculator.")).await.unwrap();
+        store
+            .append("conv1", &Message::user("Calculate 2+2"))
+            .await
+            .unwrap();
+        store
+            .append("conv1", &Message::assistant("Let me use the calculator."))
+            .await
+            .unwrap();
         store.append("conv1", &Message::tool("4")).await.unwrap();
-        store.append("conv1", &Message::assistant("The answer is 4.")).await.unwrap();
+        store
+            .append("conv1", &Message::assistant("The answer is 4."))
+            .await
+            .unwrap();
 
         let messages = store.load("conv1", 0).await.unwrap();
         assert_eq!(messages.len(), 4);
 
-        let tool_messages: Vec<_> = messages.iter()
+        let tool_messages: Vec<_> = messages
+            .iter()
             .filter(|m| matches!(m.role, bee::memory::Role::Tool))
             .collect();
         assert_eq!(tool_messages.len(), 1);

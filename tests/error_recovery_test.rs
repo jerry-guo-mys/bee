@@ -77,7 +77,9 @@ mod tests {
     #[test]
     fn test_recovery_engine_llm_error() {
         let engine = RecoveryEngine::new();
-        let err = AgentError::LlmError(bee::llm::LlmError::RateLimited { retry_after_ms: 1000 });
+        let err = AgentError::LlmError(bee::llm::LlmError::RateLimited {
+            retry_after_ms: 1000,
+        });
         let action = engine.handle(&err, &mut []);
 
         assert!(matches!(action, RecoveryAction::DowngradeModel));
@@ -96,7 +98,9 @@ mod tests {
         context.push_message(Message::tool("Error: Tool not found"));
 
         // 助手应该能够从错误中恢复
-        context.push_message(Message::assistant("Sorry, let me try a different approach."));
+        context.push_message(Message::assistant(
+            "Sorry, let me try a different approach.",
+        ));
 
         // 验证消息历史完整
         assert_eq!(context.conversation.messages().len(), 5);
@@ -154,7 +158,9 @@ mod tests {
         context.push_message(Message::tool("Error: Tool execution timeout"));
 
         // 恢复：通知用户超时
-        context.push_message(Message::assistant("The task took too long. Let me try a simpler approach."));
+        context.push_message(Message::assistant(
+            "The task took too long. Let me try a simpler approach.",
+        ));
 
         assert_eq!(context.conversation.messages().len(), 4);
     }
@@ -171,7 +177,9 @@ mod tests {
         // 恢复：使用替代工具
         context.push_message(Message::assistant("Let me try openweathermap instead..."));
         context.push_message(Message::tool("Paris: 20°C, Sunny"));
-        context.push_message(Message::assistant("The weather in Paris is 20°C and sunny."));
+        context.push_message(Message::assistant(
+            "The weather in Paris is 20°C and sunny.",
+        ));
 
         assert_eq!(context.conversation.messages().len(), 6);
     }

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, Mutex};
 
 use crate::config::AppConfig;
 use crate::core::{AgentComponents, AgentError};
@@ -123,7 +123,7 @@ impl AgentService for AgentServiceImpl {
 
         let mut session = self.get_or_create_session(session_id).await;
         let mut context = ContextManager::new(self.config.app.max_context_turns);
-        
+
         // 从 SQLite 加载历史消息
         {
             let persistence = self.sqlite_persistence.lock().await;

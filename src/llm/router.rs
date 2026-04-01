@@ -216,10 +216,7 @@ impl TaskClassifier {
         }
 
         // 结构化内容检测
-        if content.contains("1.")
-            && content.contains("2.")
-            && content.contains("3.")
-        {
+        if content.contains("1.") && content.contains("2.") && content.contains("3.") {
             complexity_score += 15;
         }
         if content.contains("- [ ]") || content.contains("- [x]") {
@@ -231,10 +228,29 @@ impl TaskClassifier {
 
         // 技术术语密度
         let tech_terms = [
-            "API", "HTTP", "REST", "GraphQL", "WebSocket", "TCP", "UDP",
-            "Kubernetes", "Docker", "MySQL", "PostgreSQL", "Redis", "MongoDB",
-            "AWS", "GCP", "Azure", "Linux", "Nginx",
-            "微服务", "分布式", "高并发", "负载均衡", "消息队列",
+            "API",
+            "HTTP",
+            "REST",
+            "GraphQL",
+            "WebSocket",
+            "TCP",
+            "UDP",
+            "Kubernetes",
+            "Docker",
+            "MySQL",
+            "PostgreSQL",
+            "Redis",
+            "MongoDB",
+            "AWS",
+            "GCP",
+            "Azure",
+            "Linux",
+            "Nginx",
+            "微服务",
+            "分布式",
+            "高并发",
+            "负载均衡",
+            "消息队列",
         ];
         let tech_count = tech_terms.iter().filter(|t| content.contains(*t)).count();
         if tech_count >= 3 {
@@ -249,25 +265,99 @@ impl TaskClassifier {
 
     fn contains_code_keywords(content: &str) -> bool {
         let keywords = [
-            "代码", "编程", "函数", "bug", "error", "compile", "rust", "python",
-            "javascript", "typescript", "java", "go", "implement", "fix", "refactor",
-            "debug", "写个", "写一个", "function", "class", "struct", "enum", "trait",
-            "impl", "mod", "macro", "iterator", "async", "await", "future", "stream",
-            "api", "http", "rest", "graphql", "websocket", "tcp", "udp",
-            "kubernetes", "docker", "mysql", "postgresql", "redis", "mongodb",
-            "aws", "gcp", "azure", "linux", "nginx",
-            "微服务", "分布式", "高并发", "负载均衡", "消息队列",
+            "代码",
+            "编程",
+            "函数",
+            "bug",
+            "error",
+            "compile",
+            "rust",
+            "python",
+            "javascript",
+            "typescript",
+            "java",
+            "go",
+            "implement",
+            "fix",
+            "refactor",
+            "debug",
+            "写个",
+            "写一个",
+            "function",
+            "class",
+            "struct",
+            "enum",
+            "trait",
+            "impl",
+            "mod",
+            "macro",
+            "iterator",
+            "async",
+            "await",
+            "future",
+            "stream",
+            "api",
+            "http",
+            "rest",
+            "graphql",
+            "websocket",
+            "tcp",
+            "udp",
+            "kubernetes",
+            "docker",
+            "mysql",
+            "postgresql",
+            "redis",
+            "mongodb",
+            "aws",
+            "gcp",
+            "azure",
+            "linux",
+            "nginx",
+            "微服务",
+            "分布式",
+            "高并发",
+            "负载均衡",
+            "消息队列",
         ];
         keywords.iter().any(|k| content.contains(k))
     }
 
     fn contains_reasoning_keywords(content: &str) -> bool {
         let keywords = [
-            "分析", "解释", "为什么", "怎么", "如何", "推理", "思考", "深度",
-            "analyze", "explain", "why", "how", "reason", "think", "compare",
-            "evaluate", "assess", "比较", "评估", "判断", "决策", "优化",
-            "算法", "复杂度", "时间复杂度", "空间复杂度", "性能", "效率",
-            "原理", "机制", "架构", "设计模式", "最佳实践",
+            "分析",
+            "解释",
+            "为什么",
+            "怎么",
+            "如何",
+            "推理",
+            "思考",
+            "深度",
+            "analyze",
+            "explain",
+            "why",
+            "how",
+            "reason",
+            "think",
+            "compare",
+            "evaluate",
+            "assess",
+            "比较",
+            "评估",
+            "判断",
+            "决策",
+            "优化",
+            "算法",
+            "复杂度",
+            "时间复杂度",
+            "空间复杂度",
+            "性能",
+            "效率",
+            "原理",
+            "机制",
+            "架构",
+            "设计模式",
+            "最佳实践",
         ];
         keywords.iter().any(|k| content.contains(k))
     }
@@ -609,7 +699,9 @@ mod tests {
     #[test]
     fn test_complexity_code_block() {
         // 包含代码块的消息会被归类为代码生成（这是合理的）
-        let messages = vec![Message::user("```rust\nfn main() { println!(\"Hello\"); }\n```")];
+        let messages = vec![Message::user(
+            "```rust\nfn main() { println!(\"Hello\"); }\n```",
+        )];
         let task_type = TaskClassifier::classify(&messages);
         assert_eq!(task_type, TaskType::CodeGeneration);
     }
@@ -617,7 +709,9 @@ mod tests {
     #[test]
     fn test_complexity_multi_question() {
         // 多个问题触发复杂度分析（无代码关键词）
-        let messages = vec![Message::user("什么是所有权？借用规则是什么？生命周期怎么用？")];
+        let messages = vec![Message::user(
+            "什么是所有权？借用规则是什么？生命周期怎么用？",
+        )];
         let task_type = TaskClassifier::classify(&messages);
         assert_eq!(task_type, TaskType::ComplexReasoning);
     }
@@ -626,7 +720,9 @@ mod tests {
     fn test_complexity_tech_terms() {
         // 高技术术语密度触发复杂度分析
         // 使用 ??? 问号（3 个问题）来触发复杂度分析
-        let messages = vec![Message::user("第一个问题是什么？第二个问题怎么办？第三个问题如何解决？")];
+        let messages = vec![Message::user(
+            "第一个问题是什么？第二个问题怎么办？第三个问题如何解决？",
+        )];
         let task_type = TaskClassifier::classify(&messages);
         assert_eq!(task_type, TaskType::ComplexReasoning);
     }

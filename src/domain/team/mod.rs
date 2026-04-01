@@ -12,4 +12,5 @@ pub mod value_object;
 pub use entity::Team;
 pub use event::{TeamCreated, TeamDeleted, TeamEvent, TeamUpdated};
 pub use repository::{InMemoryTeamRepository, TeamRepository};
+pub use crate::domain::service::TeamDomainService;
 pub use value_object::{TeamCode, TeamError, TeamId, TeamName};

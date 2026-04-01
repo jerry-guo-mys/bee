@@ -5,8 +5,8 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 use crate::core::AgentError;
-use crate::domain::tool::ToolRegistry;
 use crate::domain::tool::trait_::Tool;
+use crate::domain::tool::ToolRegistry;
 
 /// 工具执行器
 pub struct ToolExecutor {
@@ -23,8 +23,13 @@ impl ToolExecutor {
     }
 
     /// 执行工具
-    pub async fn execute(&self, tool_name: &str, args: serde_json::Value) -> Result<String, AgentError> {
-        self.execute_cancellable(tool_name, args, CancellationToken::new()).await
+    pub async fn execute(
+        &self,
+        tool_name: &str,
+        args: serde_json::Value,
+    ) -> Result<String, AgentError> {
+        self.execute_cancellable(tool_name, args, CancellationToken::new())
+            .await
     }
 
     /// 执行可取消的工具
@@ -35,7 +40,7 @@ impl ToolExecutor {
         cancel_token: CancellationToken,
     ) -> Result<String, AgentError> {
         let start = Instant::now();
-        
+
         // 获取工具超时
         let tool_timeout = self
             .registry
@@ -52,7 +57,7 @@ impl ToolExecutor {
         };
 
         let duration = start.elapsed();
-        
+
         tracing::debug!(
             tool = tool_name,
             duration_ms = duration.as_millis() as u64,

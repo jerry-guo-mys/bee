@@ -72,7 +72,8 @@ impl Planner {
         if messages.is_empty() {
             return Ok(String::new());
         }
-        let system = "You are a summarizer. Summarize the following conversation in one short paragraph.";
+        let system =
+            "You are a summarizer. Summarize the following conversation in one short paragraph.";
         let mut full = vec![Message::system(system.to_string())];
         full.extend(messages.to_vec());
         self.llm.complete(&full).await.map_err(AgentError::LlmError)

@@ -8,34 +8,34 @@
 pub mod cognitive;
 pub mod common;
 pub mod event;
-pub mod memory;
 pub mod member;
+pub mod memory;
+pub mod organization;
 pub mod service;
 pub mod session;
+pub mod team;
 pub mod tenant;
 pub mod tool;
 
 // 重新导出常用类型
-pub use common::*;
 pub use cognitive::{
     context::ContextManager,
     critic::{Critic, CriticResult, CriticReview},
     planner::{Planner, PlannerOutput, ToolCall},
     react::{ReactResult, ReactSession},
 };
-pub use memory::{
-    conversation::ConversationMemory,
-    Message,
-    working::WorkingMemory,
-};
+pub use common::*;
 pub use member::{
-    MemberDomainError, MemberDomainService, MemberEvent, Membership, MembershipFilter,
-    MembershipRepository, PermissionError, ToolId, ToolPolicy, ToolRiskLevel, UserEmail,
+    MemberDomainError, MemberEvent, Membership, MembershipFilter, MembershipRepository, ToolId,
+    ToolPolicy, ToolRiskLevel, UserEmail,
 };
-pub use service::TenantDomainService;
+pub use memory::{conversation::ConversationMemory, working::WorkingMemory, Message};
+pub use organization::{Organization, OrganizationError, OrganizationId, OrganizationRepository};
+pub use service::{
+    MemberDomainService, PermissionCheckService, PermissionError, TenantDomainService,
+    ToolPolicyBuilder, ToolPolicyError, ToolPolicyService,
+};
+pub use team::{Team, TeamError, TeamId, TeamRepository};
 pub use tool::{
-    executor::ToolExecutor,
-    metadata::ToolMetadata,
-    registry::ToolRegistry,
-    trait_::Tool,
+    executor::ToolExecutor, metadata::ToolMetadata, registry::ToolRegistry, trait_::Tool,
 };

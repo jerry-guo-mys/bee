@@ -66,7 +66,8 @@ pub fn create_llm_from_config(cfg: &AppConfig) -> Arc<dyn LlmClient> {
         if let Some(reasoner_model) = cfg.llm.deepseek.model.clone() {
             if reasoner_model != chat_model && reasoner_model.contains("reasoner") {
                 tracing::info!("Using DeepSeek Reasoner LLM ({})", reasoner_model);
-                let reasoner_client: Arc<dyn LlmClient> = Arc::new(create_deepseek_client(Some(&reasoner_model)));
+                let reasoner_client: Arc<dyn LlmClient> =
+                    Arc::new(create_deepseek_client(Some(&reasoner_model)));
                 router.add_model(
                     ModelCapabilities::new("deepseek-reasoner")
                         .with_code(95)

@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::domain::tool::ToolMetadata;
 use crate::domain::tool::trait_::Tool;
+use crate::domain::tool::ToolMetadata;
 
 /// 工具链：顺序执行多个工具
 pub struct ToolChain {

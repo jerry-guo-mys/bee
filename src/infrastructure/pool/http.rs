@@ -100,7 +100,9 @@ impl HttpClientPool {
                         url,
                         attempt + 1,
                         self.config.max_retries,
-                        last_error.as_ref().expect("logic error: last_error should be set")
+                        last_error
+                            .as_ref()
+                            .expect("logic error: last_error should be set")
                     );
 
                     if attempt < self.config.max_retries - 1 {
@@ -111,7 +113,7 @@ impl HttpClientPool {
         }
 
         Err(HttpClientPoolError::RequestFailed(
-            last_error.expect("retry loop should always set last_error")
+            last_error.expect("retry loop should always set last_error"),
         ))
     }
 
@@ -124,13 +126,7 @@ impl HttpClientPool {
         let mut last_error = None;
 
         for attempt in 0..self.config.max_retries {
-            match self
-                .client
-                .post(url)
-                .json(body)
-                .send()
-                .await
-            {
+            match self.client.post(url).json(body).send().await {
                 Ok(response) => return Ok(response),
                 Err(e) => {
                     last_error = Some(e);
@@ -139,7 +135,9 @@ impl HttpClientPool {
                         url,
                         attempt + 1,
                         self.config.max_retries,
-                        last_error.as_ref().expect("logic error: last_error should be set")
+                        last_error
+                            .as_ref()
+                            .expect("logic error: last_error should be set")
                     );
 
                     if attempt < self.config.max_retries - 1 {
@@ -150,7 +148,7 @@ impl HttpClientPool {
         }
 
         Err(HttpClientPoolError::RequestFailed(
-            last_error.expect("retry loop should always set last_error")
+            last_error.expect("retry loop should always set last_error"),
         ))
     }
 
@@ -207,14 +205,16 @@ mod tests {
 
     #[test]
     fn test_http_client_pool_creation() {
-        let pool = HttpClientPool::with_default_config().expect("Failed to create HTTP client pool");
+        let pool =
+            HttpClientPool::with_default_config().expect("Failed to create HTTP client pool");
         // Client 创建成功即表示有效
         assert!(true);
     }
 
     #[test]
     fn test_http_client_pool_status() {
-        let _pool = HttpClientPool::with_default_config().expect("Failed to create HTTP client pool");
+        let _pool =
+            HttpClientPool::with_default_config().expect("Failed to create HTTP client pool");
         let _status = _pool.status();
 
         assert_eq!(_pool.config().pool_max_idle_per_host, 10);

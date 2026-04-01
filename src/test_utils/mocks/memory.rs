@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 
-use crate::domain::memory::{Message, store::MemoryStore};
+use crate::domain::memory::{store::MemoryStore, Message};
 
 /// Mock 记忆存储，用于测试
 pub struct MockMemoryStore {
@@ -33,8 +33,6 @@ impl MockMemoryStore {
         *self.should_fail.write().unwrap() = true;
         self
     }
-
-
 }
 
 #[async_trait]

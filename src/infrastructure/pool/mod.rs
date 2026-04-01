@@ -5,7 +5,7 @@
 pub mod http;
 pub mod sqlite;
 
-pub use http::{HttpClientPool, HttpClientPoolConfig, HttpClientPoolStatus, HttpClientPoolError};
+pub use http::{HttpClientPool, HttpClientPoolConfig, HttpClientPoolError, HttpClientPoolStatus};
 pub use sqlite::{
     PoolConfig, PoolStatus, PooledConnection, PooledConnectionGuard, SqliteConnectionPool,
 };

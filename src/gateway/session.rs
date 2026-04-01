@@ -240,7 +240,11 @@ impl SessionManager {
 
         let expired: Vec<_> = sessions
             .iter()
-            .filter(|(_, s)| s.try_read().map(|s| s.is_expired(self.session_timeout)).unwrap_or(false))
+            .filter(|(_, s)| {
+                s.try_read()
+                    .map(|s| s.is_expired(self.session_timeout))
+                    .unwrap_or(false)
+            })
             .map(|(id, _)| id.clone())
             .collect();
 
@@ -301,7 +305,10 @@ mod tests {
 
         // 第二次获取会话 - 应该仍然能获取到（不会被 remove）
         let session2 = manager.get(&session_id).await;
-        assert!(session2.is_some(), "Should still get session on second call");
+        assert!(
+            session2.is_some(),
+            "Should still get session on second call"
+        );
 
         // 验证两次获取的是同一个 Arc
         assert!(Arc::ptr_eq(&session1.unwrap(), &session2.unwrap()));
@@ -336,7 +343,10 @@ mod tests {
             .collect();
 
         // 验证每个会话 ID 都不同
-        let unique_count = session_ids.iter().collect::<std::collections::HashSet<_>>().len();
+        let unique_count = session_ids
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
         assert_eq!(unique_count, 5, "All session IDs should be unique");
     }
 

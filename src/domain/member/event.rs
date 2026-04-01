@@ -7,9 +7,8 @@ use thiserror::Error;
 
 use crate::domain::common::MembershipRole;
 use crate::domain::event::LegacyDomainEvent as TraitDomainEvent;
-use crate::domain::tenant::value_object::{
-    MembershipId, OrganizationId, TeamId, TenantId, UserId,
-};
+use crate::domain::tenant::event::DomainEvent;
+use crate::domain::tenant::value_object::{MembershipId, OrganizationId, TeamId, TenantId, UserId};
 
 use super::value_object::{ToolId, ToolRiskLevel, UserEmail};
 
@@ -36,6 +35,9 @@ pub enum MemberDomainError {
 
     #[error("工具执行被拒绝：{0}")]
     ToolExecutionDenied(String),
+
+    #[error("数据库错误：{0}")]
+    DatabaseError(String),
 
     #[error("值对象错误：{0}")]
     ValueObject(#[from] crate::domain::member::value_object::ValueObjectError),
@@ -155,6 +157,121 @@ impl MemberEvent {
     }
 }
 
+/// 为 MemberEvent 实现 DomainEvent trait
+impl DomainEvent for MemberEvent {
+    fn aggregate_id(&self) -> &str {
+        match self {
+            Self::Invited { membership_id, .. } => membership_id.as_str(),
+            Self::InvitationAccepted { membership_id, .. } => membership_id.as_str(),
+            Self::Suspended { membership_id, .. } => membership_id.as_str(),
+            Self::Removed { membership_id, .. } => membership_id.as_str(),
+            Self::RoleChanged { membership_id, .. } => membership_id.as_str(),
+            Self::ToolPolicyAdded { membership_id, .. } => membership_id.as_str(),
+            Self::ToolPolicyRemoved { membership_id, .. } => membership_id.as_str(),
+        }
+    }
+
+    fn aggregate_type(&self) -> &str {
+        "membership"
+    }
+
+    fn event_type(&self) -> &str {
+        match self {
+            Self::Invited { .. } => "member.invited",
+            Self::InvitationAccepted { .. } => "member.invitation_accepted",
+            Self::Suspended { .. } => "member.suspended",
+            Self::Removed { .. } => "member.removed",
+            Self::RoleChanged { .. } => "member.role_changed",
+            Self::ToolPolicyAdded { .. } => "member.tool_policy_added",
+            Self::ToolPolicyRemoved { .. } => "member.tool_policy_removed",
+        }
+    }
+
+    fn occurred_at(&self) -> DateTime<Utc> {
+        self.occurred_on()
+    }
+
+    fn to_json(&self) -> String {
+        match self {
+            Self::Invited {
+                membership_id,
+                email,
+                role,
+                ..
+            } => {
+                format!(
+                    r#"{{"membership_id":"{}","email":"{}","role":"{:?}"}}"#,
+                    membership_id.as_str(),
+                    email.as_str(),
+                    role
+                )
+            }
+            Self::InvitationAccepted {
+                membership_id,
+                user_id,
+                ..
+            } => {
+                format!(
+                    r#"{{"membership_id":"{}","user_id":"{}"}}"#,
+                    membership_id.as_str(),
+                    user_id.as_str()
+                )
+            }
+            Self::Suspended {
+                membership_id,
+                reason,
+                ..
+            } => {
+                format!(
+                    r#"{{"membership_id":"{}","reason":"{}"}}"#,
+                    membership_id.as_str(),
+                    reason
+                )
+            }
+            Self::Removed { membership_id, .. } => {
+                format!(r#"{{"membership_id":"{}"}}"#, membership_id.as_str())
+            }
+            Self::RoleChanged {
+                membership_id,
+                old_role,
+                new_role,
+                ..
+            } => {
+                format!(
+                    r#"{{"membership_id":"{}","old_role":"{:?}","new_role":"{:?}"}}"#,
+                    membership_id.as_str(),
+                    old_role,
+                    new_role
+                )
+            }
+            Self::ToolPolicyAdded {
+                membership_id,
+                tool_id,
+                risk_level,
+                ..
+            } => {
+                format!(
+                    r#"{{"membership_id":"{}","tool_id":"{}","risk_level":"{:?}"}}"#,
+                    membership_id.as_str(),
+                    tool_id.as_str(),
+                    risk_level
+                )
+            }
+            Self::ToolPolicyRemoved {
+                membership_id,
+                tool_id,
+                ..
+            } => {
+                format!(
+                    r#"{{"membership_id":"{}","tool_id":"{}"}}"#,
+                    membership_id.as_str(),
+                    tool_id.as_str()
+                )
+            }
+        }
+    }
+}
+
 /// 将 MemberEvent 转换为通用 DomainEvent
 impl From<MemberEvent> for TraitDomainEvent {
     fn from(event: MemberEvent) -> Self {
@@ -162,9 +279,9 @@ impl From<MemberEvent> for TraitDomainEvent {
             MemberEvent::Invited { membership_id, .. } => {
                 TraitDomainEvent::Custom(format!("member.invited:{}", membership_id.as_str()))
             }
-            MemberEvent::InvitationAccepted { membership_id, .. } => {
-                TraitDomainEvent::Custom(format!("member.invitation_accepted:{}", membership_id.as_str()))
-            }
+            MemberEvent::InvitationAccepted { membership_id, .. } => TraitDomainEvent::Custom(
+                format!("member.invitation_accepted:{}", membership_id.as_str()),
+            ),
             MemberEvent::Suspended { membership_id, .. } => {
                 TraitDomainEvent::Custom(format!("member.suspended:{}", membership_id.as_str()))
             }
@@ -174,12 +291,12 @@ impl From<MemberEvent> for TraitDomainEvent {
             MemberEvent::RoleChanged { membership_id, .. } => {
                 TraitDomainEvent::Custom(format!("member.role_changed:{}", membership_id.as_str()))
             }
-            MemberEvent::ToolPolicyAdded { membership_id, .. } => {
-                TraitDomainEvent::Custom(format!("member.tool_policy_added:{}", membership_id.as_str()))
-            }
-            MemberEvent::ToolPolicyRemoved { membership_id, .. } => {
-                TraitDomainEvent::Custom(format!("member.tool_policy_removed:{}", membership_id.as_str()))
-            }
+            MemberEvent::ToolPolicyAdded { membership_id, .. } => TraitDomainEvent::Custom(
+                format!("member.tool_policy_added:{}", membership_id.as_str()),
+            ),
+            MemberEvent::ToolPolicyRemoved { membership_id, .. } => TraitDomainEvent::Custom(
+                format!("member.tool_policy_removed:{}", membership_id.as_str()),
+            ),
         }
     }
 }

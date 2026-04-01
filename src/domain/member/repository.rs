@@ -4,9 +4,7 @@
 
 use async_trait::async_trait;
 
-use crate::domain::tenant::value_object::{
-    MembershipId, OrganizationId, TeamId, UserId,
-};
+use crate::domain::tenant::value_object::{MembershipId, OrganizationId, TeamId, UserId};
 
 use super::entity::Membership;
 
@@ -100,7 +98,10 @@ pub trait MembershipRepository: Send + Sync {
     async fn find_by_user(&self, user_id: &UserId) -> Result<Vec<Membership>, Self::Error>;
 
     /// 根据组织 ID 查找所有成员
-    async fn find_by_organization(&self, org_id: &OrganizationId) -> Result<Vec<Membership>, Self::Error>;
+    async fn find_by_organization(
+        &self,
+        org_id: &OrganizationId,
+    ) -> Result<Vec<Membership>, Self::Error>;
 
     /// 根据团队 ID 查找所有成员
     async fn find_by_team(&self, team_id: &TeamId) -> Result<Vec<Membership>, Self::Error>;
@@ -109,7 +110,10 @@ pub trait MembershipRepository: Send + Sync {
     async fn find_by_tenant(&self, tenant_id: &TenantId) -> Result<Vec<Membership>, Self::Error>;
 
     /// 根据过滤器查找成员
-    async fn find_by_filter(&self, filter: &MembershipFilter) -> Result<Vec<Membership>, Self::Error>;
+    async fn find_by_filter(
+        &self,
+        filter: &MembershipFilter,
+    ) -> Result<Vec<Membership>, Self::Error>;
 
     /// 删除成员
     async fn delete(&self, id: &MembershipId) -> Result<(), Self::Error>;
@@ -132,6 +136,131 @@ pub trait MembershipRepository: Send + Sync {
 
 // 重新导出必要类型
 pub use crate::domain::tenant::value_object::TenantId;
+
+/// 内存成员 Repository（用于测试）
+pub struct InMemoryMembershipRepository {
+    data: tokio::sync::RwLock<std::collections::HashMap<String, Membership>>,
+}
+
+impl InMemoryMembershipRepository {
+    pub fn new() -> Self {
+        Self {
+            data: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
+impl Default for InMemoryMembershipRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl MembershipRepository for InMemoryMembershipRepository {
+    type Error = crate::domain::member::MemberDomainError;
+
+    async fn save(&self, membership: &Membership) -> Result<(), Self::Error> {
+        let mut data = self.data.write().await;
+        let id = membership.id().as_str().to_string();
+        data.insert(id, membership.clone());
+        Ok(())
+    }
+
+    async fn find_by_id(&self, id: &MembershipId) -> Result<Option<Membership>, Self::Error> {
+        let data = self.data.read().await;
+        Ok(data.get(id.as_str()).cloned())
+    }
+
+    async fn find_by_user(&self, user_id: &UserId) -> Result<Vec<Membership>, Self::Error> {
+        let data = self.data.read().await;
+        Ok(data
+            .values()
+            .filter(|m| m.user_id().map(|uid| uid.as_str()) == Some(user_id.as_str()))
+            .cloned()
+            .collect())
+    }
+
+    async fn find_by_organization(
+        &self,
+        org_id: &OrganizationId,
+    ) -> Result<Vec<Membership>, Self::Error> {
+        let data = self.data.read().await;
+        Ok(data
+            .values()
+            .filter(|m| m.organization_id().as_str() == org_id.as_str())
+            .cloned()
+            .collect())
+    }
+
+    async fn find_by_team(&self, team_id: &TeamId) -> Result<Vec<Membership>, Self::Error> {
+        let data = self.data.read().await;
+        Ok(data
+            .values()
+            .filter(|m| m.team_id().map(|tid| tid.as_str()) == Some(team_id.as_str()))
+            .cloned()
+            .collect())
+    }
+
+    async fn find_by_tenant(&self, tenant_id: &TenantId) -> Result<Vec<Membership>, Self::Error> {
+        let data = self.data.read().await;
+        Ok(data
+            .values()
+            .filter(|m| m.tenant_id().as_str() == tenant_id.as_str())
+            .cloned()
+            .collect())
+    }
+
+    async fn find_by_filter(
+        &self,
+        filter: &MembershipFilter,
+    ) -> Result<Vec<Membership>, Self::Error> {
+        let data = self.data.read().await;
+        Ok(data
+            .values()
+            .filter(|m| {
+                if let Some(ref tid) = filter.tenant_id {
+                    if m.tenant_id().as_str() != tid.as_str() {
+                        return false;
+                    }
+                }
+                if let Some(ref oid) = filter.organization_id {
+                    if m.organization_id().as_str() != oid.as_str() {
+                        return false;
+                    }
+                }
+                if let Some(ref tmid) = filter.team_id {
+                    if m.team_id().map(|t| t.as_str()) != Some(tmid.as_str()) {
+                        return false;
+                    }
+                }
+                if let Some(ref uid) = filter.user_id {
+                    if m.user_id().map(|u| u.as_str()) != Some(uid.as_str()) {
+                        return false;
+                    }
+                }
+                if let Some(ref role) = filter.role {
+                    if m.role() != role {
+                        return false;
+                    }
+                }
+                if let Some(ref status) = filter.status {
+                    if m.status() != status {
+                        return false;
+                    }
+                }
+                true
+            })
+            .cloned()
+            .collect())
+    }
+
+    async fn delete(&self, id: &MembershipId) -> Result<(), Self::Error> {
+        let mut data = self.data.write().await;
+        data.remove(id.as_str());
+        Ok(())
+    }
+}
 
 // PostgreSQL 实现
 #[cfg(feature = "postgres")]

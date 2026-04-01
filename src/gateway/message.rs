@@ -161,6 +161,147 @@ pub enum MessageType {
         result: Option<String>,
         error: Option<String>,
     },
+
+    // ========== 多租户管理消息 ==========
+
+    /// 创建租户
+    CreateTenant {
+        name: String,
+        slug: String,
+    },
+
+    /// 租户创建结果
+    TenantCreated {
+        tenant_id: String,
+        name: String,
+        slug: String,
+    },
+
+    /// 获取租户
+    GetTenant {
+        tenant_id: String,
+    },
+
+    /// 租户响应
+    Tenant {
+        tenant_id: String,
+        name: String,
+        slug: String,
+        status: String,
+    },
+
+    /// 创建组织
+    CreateOrganization {
+        tenant_id: String,
+        name: String,
+        slug: String,
+    },
+
+    /// 组织创建结果
+    OrganizationCreated {
+        organization_id: String,
+        name: String,
+        slug: String,
+    },
+
+    /// 获取组织
+    GetOrganization {
+        organization_id: String,
+    },
+
+    /// 组织响应
+    Organization {
+        organization_id: String,
+        name: String,
+        slug: String,
+        tenant_id: String,
+    },
+
+    /// 创建团队
+    CreateTeam {
+        tenant_id: String,
+        organization_id: String,
+        name: String,
+        code: Option<String>,
+    },
+
+    /// 团队创建结果
+    TeamCreated {
+        team_id: String,
+        name: String,
+        code: Option<String>,
+    },
+
+    /// 邀请成员
+    InviteMember {
+        tenant_id: String,
+        organization_id: String,
+        team_id: Option<String>,
+        user_email: String,
+        role: String,
+    },
+
+    /// 邀请结果
+    MemberInvited {
+        membership_id: String,
+        user_email: String,
+        role: String,
+    },
+
+    /// 接受邀请
+    AcceptInvite {
+        membership_id: String,
+    },
+
+    /// 邀请接受结果
+    InviteAccepted {
+        membership_id: String,
+        success: bool,
+    },
+
+    /// 暂停成员
+    SuspendMember {
+        membership_id: String,
+        reason: String,
+    },
+
+    /// 成员暂停结果
+    MemberSuspended {
+        membership_id: String,
+        success: bool,
+    },
+
+    /// 列出成员
+    ListMembers {
+        tenant_id: String,
+        organization_id: String,
+        team_id: Option<String>,
+    },
+
+    /// 成员列表响应
+    MembersList {
+        members: Vec<MemberDto>,
+    },
+
+    /// 通用操作结果
+    OperationResult {
+        success: bool,
+        message: String,
+        data: Option<serde_json::Value>,
+    },
+}
+
+/// 成员数据传输对象
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemberDto {
+    pub id: String,
+    pub user_id: String,
+    pub display_name: Option<String>,
+    pub email: Option<String>,
+    pub role: String,
+    pub status: String,
+    pub team_name: Option<String>,
+    pub joined_at: String,
 }
 
 /// 会话状态

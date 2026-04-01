@@ -145,7 +145,9 @@ pub fn init_trace_collection(collector: Arc<TraceCollector>) {
     static INITIALIZED: std::sync::Once = std::sync::Once::new();
     INITIALIZED.call_once(|| {
         // 使用 builder pattern 初始化
-        let subscriber = tracing_subscriber::registry().with(layer).with(filter_layer);
+        let subscriber = tracing_subscriber::registry()
+            .with(layer)
+            .with(filter_layer);
         subscriber.try_init().ok();
     });
 }

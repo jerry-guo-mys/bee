@@ -207,7 +207,9 @@ impl AgentBuilder {
             .iter()
             .find_map(|p| {
                 std::fs::read_to_string(p)
-                    .inspect_err(|e| tracing::debug!("Failed to read critic prompt from {}: {}", p.display(), e))
+                    .inspect_err(|e| {
+                        tracing::debug!("Failed to read critic prompt from {}: {}", p.display(), e)
+                    })
                     .ok()
             })
             .unwrap_or_else(|| self.config.critic.prompt_template.clone());

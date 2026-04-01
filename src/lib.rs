@@ -5,12 +5,13 @@
 //! - **application**: 应用服务层
 //! - **config**: 应用配置加载（TOML + 环境变量）
 //! - **container**: 依赖注入容器
-//! - **core**: 编排、状态、恢复、会话监管、任务调度
+//! - **core**: 编排、状态、恢复、恢复、会话监管、任务调度
 //! - **domain**: 领域层（cognitive, tool, memory）
 //! - **evolution**: 自我进化
 //! - **gateway**: 轮毂式网关架构（WebSocket 服务器 + Agent Runtime）
 //! - **infrastructure**: 基础设施层
 //! - **integrations**: 外部集成
+//! - **interfaces**: 接口层（HTTP REST API）
 //! - **llm**: LLM 客户端抽象与实现（OpenAI 兼容 / DeepSeek / Mock）
 //! - **messaging**: 统一消息通道
 //! - **memory**: 短期 / 中期 / 长期记忆与持久化
@@ -36,9 +37,11 @@ pub mod evolution;
 pub mod gateway;
 pub mod infrastructure;
 pub mod integrations;
+#[cfg(feature = "gateway")]
+pub mod interfaces;
 pub mod llm;
-pub mod messaging;
 pub mod memory;
+pub mod messaging;
 pub mod observability;
 pub mod plugins;
 pub mod react;

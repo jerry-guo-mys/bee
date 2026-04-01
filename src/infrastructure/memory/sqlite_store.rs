@@ -108,8 +108,7 @@ impl MemoryStore for SqliteMemoryStore {
             Ok::<(), String>(())
         })
         .await
-        .map_err(|e| format!("Blocking task failed: {}", e))?
-        ?;
+        .map_err(|e| format!("Blocking task failed: {}", e))??;
         Ok(())
     }
 
@@ -120,7 +119,9 @@ impl MemoryStore for SqliteMemoryStore {
         let messages = spawn_blocking(move || {
             let conn = conn.blocking_lock();
             let mut stmt = conn
-                .prepare("SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY id")
+                .prepare(
+                    "SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY id",
+                )
                 .map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
             let message_iter = stmt
@@ -131,9 +132,7 @@ impl MemoryStore for SqliteMemoryStore {
                 })
                 .map_err(|e| format!("Failed to query messages: {}", e))?;
 
-            let messages: Vec<Message> = message_iter
-                .filter_map(|r| r.ok())
-                .collect();
+            let messages: Vec<Message> = message_iter.filter_map(|r| r.ok()).collect();
             Ok::<Vec<Message>, String>(messages)
         })
         .await
@@ -162,8 +161,7 @@ impl MemoryStore for SqliteMemoryStore {
             Ok::<(), String>(())
         })
         .await
-        .map_err(|e| format!("Blocking task failed: {}", e))?
-        ?;
+        .map_err(|e| format!("Blocking task failed: {}", e))??;
         Ok(())
     }
 }

@@ -45,7 +45,8 @@ impl MockTool {
 
     /// 重置调用计数
     pub fn reset_call_count(&self) {
-        self.call_count.store(0, std::sync::atomic::Ordering::SeqCst);
+        self.call_count
+            .store(0, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -64,8 +65,9 @@ impl Tool for MockTool {
     }
 
     async fn execute(&self, _args: Value) -> Result<String, String> {
-        self.call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        
+        self.call_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
         if self.should_fail {
             Err("Mock tool failed".to_string())
         } else {
@@ -91,7 +93,7 @@ mod tests {
     async fn test_mock_tool_execute() {
         let tool = MockTool::new("test", "Test tool");
         let result = tool.execute(json!({})).await;
-        
+
         assert!(result.is_ok());
         assert!(result.unwrap().contains("Mock test response"));
     }
@@ -100,7 +102,7 @@ mod tests {
     async fn test_mock_tool_failure() {
         let tool = MockTool::new("test", "Test tool").with_failure();
         let result = tool.execute(json!({})).await;
-        
+
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Mock tool failed");
     }
@@ -108,12 +110,12 @@ mod tests {
     #[tokio::test]
     async fn test_mock_tool_call_count() {
         let tool = MockTool::new("test", "Test tool");
-        
+
         assert_eq!(tool.call_count(), 0);
-        
+
         let _ = tool.execute(json!({})).await;
         assert_eq!(tool.call_count(), 1);
-        
+
         let _ = tool.execute(json!({})).await;
         assert_eq!(tool.call_count(), 2);
     }
@@ -121,7 +123,7 @@ mod tests {
     #[test]
     fn test_create_mock_registry() {
         let registry = create_mock_registry();
-        
+
         assert!(registry.get("mock_echo").is_some());
         assert!(registry.get("mock_cat").is_some());
     }

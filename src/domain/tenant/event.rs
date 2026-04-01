@@ -292,6 +292,32 @@ impl InMemoryEventPublisher {
                             },
                         )) as Box<dyn DomainEvent>
                     }
+                    "member.invited" => {
+                        Box::new(crate::domain::member::MemberEvent::Invited {
+                            membership_id: crate::domain::tenant::MembershipId::from_str(e.aggregate_id()),
+                            tenant_id: crate::domain::tenant::TenantId::from_str(e.aggregate_id()),
+                            organization_id: crate::domain::tenant::OrganizationId::from_str(e.aggregate_id()),
+                            team_id: None,
+                            user_id: crate::domain::tenant::UserId::from_str(e.aggregate_id()),
+                            email: crate::domain::member::value_object::UserEmail::new("test@example.com".to_string()).unwrap(),
+                            role: crate::domain::common::MembershipRole::Member,
+                            occurred_at: e.occurred_at(),
+                        }) as Box<dyn DomainEvent>
+                    }
+                    "member.invitation_accepted" => {
+                        Box::new(crate::domain::member::MemberEvent::InvitationAccepted {
+                            membership_id: crate::domain::tenant::MembershipId::from_str(e.aggregate_id()),
+                            user_id: crate::domain::tenant::UserId::from_str(e.aggregate_id()),
+                            occurred_at: e.occurred_at(),
+                        }) as Box<dyn DomainEvent>
+                    }
+                    "member.suspended" => {
+                        Box::new(crate::domain::member::MemberEvent::Suspended {
+                            membership_id: crate::domain::tenant::MembershipId::from_str(e.aggregate_id()),
+                            reason: "Test".to_string(),
+                            occurred_at: e.occurred_at(),
+                        }) as Box<dyn DomainEvent>
+                    }
                     _ => panic!("Unknown event type: {}", e.event_type()),
                 }
             })

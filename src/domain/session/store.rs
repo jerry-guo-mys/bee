@@ -1,7 +1,7 @@
 //! 会话存储 trait
 
-use async_trait::async_trait;
 use crate::domain::session::{Session, SessionConfig, SessionId, SessionState};
+use async_trait::async_trait;
 
 /// 会话存储 trait
 #[async_trait]

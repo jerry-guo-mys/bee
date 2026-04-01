@@ -1,23 +1,21 @@
-//! Bee Web UI
+//! 共享 HTTP 实现：bee-web（对话 + 静态）与 bee-admin（管理 API）
 //!
-//! 启动: cargo run --bin bee-web --features web
-//! 浏览器访问 http://127.0.0.1:8080
+//! bee-web: `cargo run --bin bee-web --features web`
+//! bee-admin: `cargo run --bin bee-admin --features web`
 
-#![cfg(feature = "web")]
-
-#[path = "web/assistant_catalog.rs"]
+#[path = "assistant_catalog.rs"]
 mod assistant_catalog;
-#[path = "web/dynamic_agent_catalog.rs"]
+#[path = "dynamic_agent_catalog.rs"]
 mod dynamic_agent_catalog;
-#[path = "web/inbox_service.rs"]
+#[path = "inbox_service.rs"]
 mod inbox_service;
-#[path = "web/session_store.rs"]
+#[path = "session_store.rs"]
 mod session_store;
-#[path = "web/task_coordinator_service.rs"]
+#[path = "task_coordinator_service.rs"]
 mod task_coordinator_service;
-#[path = "web/task_service.rs"]
+#[path = "task_service.rs"]
 mod task_service;
-#[path = "web/workflow_product_service.rs"]
+#[path = "workflow_product_service.rs"]
 mod workflow_product_service;
 
 use std::collections::HashMap;
@@ -901,23 +899,15 @@ async fn resolve_allowed_tools_for_scope(
     default_tools
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::registry()
+fn init_tracing_subscriber() {
+    let _ = tracing_subscriber::registry()
         .with(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
         .with(fmt::layer())
-        .init();
+        .try_init();
+}
 
-    // 初始化全链路追踪系统
-    match bee::observability::init_tracing_system().await {
-        Ok(_collector) => {
-            tracing::info!("Tracing system initialized");
-        }
-        Err(e) => {
-            tracing::warn!("Tracing system initialization failed: {}", e);
-        }
-    }
-
+/// 构建与 bee-web / bee-admin 共享的 `AppState`
+async fn build_app_state() -> anyhow::Result<Arc<AppState>> {
     let cfg = load_config(None).unwrap_or_default();
     let workspace = cfg
         .app
@@ -1051,22 +1041,12 @@ async fn main() -> anyhow::Result<()> {
         active_cancellations: Arc::new(RwLock::new(HashMap::new())),
     });
 
-    let app = Router::new()
-        .route("/", get(index))
-        .route("/metrics", get(serve_metrics_dashboard))
-        .route("/traces", get(serve_traces_page))
-        .route("/traces.html", get(serve_traces_page))
-        .route("/js/marked.min.js", get(serve_marked_js))
-        .route("/js/highlight.min.js", get(serve_highlight_js))
-        .route("/css/github-dark.min.css", get(serve_highlight_css))
-        .route("/api/chat", post(api_chat))
-        .route("/api/chat/stream", post(api_chat_stream))
-        .route("/api/history", get(api_history))
-        .route("/api/sessions", get(api_sessions_list))
-        .route("/api/session/clear", post(api_session_clear))
-        .route("/api/session/cancel", post(api_session_cancel))
-        .route("/api/compact", post(api_compact))
-        .route("/api/session/rename", post(api_session_rename))
+    Ok(state)
+}
+
+/// 管理类 REST（供 web-ui / 运维）；不含对话与静态页
+fn router_admin_api() -> Router<Arc<AppState>> {
+    Router::new()
         .route("/api/assistants", get(api_assistants_list))
         .route("/api/agent-templates", get(api_agent_templates_list))
         .route("/api/agents", get(api_agents_list).post(api_agents_create))
@@ -1085,7 +1065,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/tasks", get(api_tasks_list).post(api_tasks_create))
         .route("/api/tasks/:id", axum::routing::patch(api_tasks_update))
         .route("/api/tasks/:id/start", post(api_tasks_start))
-        .route("/api/inbox/process", post(api_inbox_process))
         .route("/api/tools", get(api_tools_list))
         .route(
             "/api/tool-policies",
@@ -1120,10 +1099,32 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/events", get(api_events_sse))
         .route("/api/traces/recent", get(api_traces_recent))
         .route("/api/traces/:request_id", get(api_traces_get))
+}
+
+/// 对话、收件箱与静态资源（仅 bee-web）
+fn router_chat_and_static() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/", get(index))
+        .route("/metrics", get(serve_metrics_dashboard))
+        .route("/traces", get(serve_traces_page))
+        .route("/traces.html", get(serve_traces_page))
+        .route("/js/marked.min.js", get(serve_marked_js))
+        .route("/js/highlight.min.js", get(serve_highlight_js))
+        .route("/css/github-dark.min.css", get(serve_highlight_css))
+        .route("/api/chat", post(api_chat))
+        .route("/api/chat/stream", post(api_chat_stream))
+        .route("/api/history", get(api_history))
+        .route("/api/sessions", get(api_sessions_list))
+        .route("/api/session/clear", post(api_session_clear))
+        .route("/api/session/cancel", post(api_session_cancel))
+        .route("/api/compact", post(api_compact))
+        .route("/api/session/rename", post(api_session_rename))
+        .route("/api/inbox/process", post(api_inbox_process))
         .route("/swarm", get(serve_swarm_page))
         .route("/tasks", get(serve_tasks_page))
-        .with_state(Arc::clone(&state));
+}
 
+fn spawn_background_tasks(state: &Arc<AppState>, cfg: &AppConfig) {
     // 定期整理记忆：每 24 小时将近期短期日志归纳写入长期记忆
     let memory_root_periodic = state.memory_root.clone();
     tokio::spawn(async move {
@@ -1159,7 +1160,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 心跳：若配置启用了 heartbeat，后台定期让 Agent 自主检查待办与反思
     if cfg.heartbeat.enabled {
-        let heartbeat_state = Arc::clone(&state);
+        let heartbeat_state = Arc::clone(state);
         let interval_secs = cfg.heartbeat.interval_secs;
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
@@ -1195,6 +1196,24 @@ async fn main() -> anyhow::Result<()> {
         });
         tracing::info!("heartbeat enabled, interval {}s", interval_secs);
     }
+}
+
+/// bee-web：对话 UI + 静态资源 + 管理 API（与历史行为一致）
+#[allow(dead_code)] // bee-admin 二进制不调用；由 `bee-web` 使用
+pub async fn run_web_server() -> anyhow::Result<()> {
+    init_tracing_subscriber();
+    match bee::observability::init_tracing_system().await {
+        Ok(_) => tracing::info!("Tracing system initialized"),
+        Err(e) => tracing::warn!("Tracing system initialization failed: {}", e),
+    }
+
+    let state = build_app_state().await?;
+    let cfg = state.config.clone();
+    let app = router_chat_and_static()
+        .merge(router_admin_api())
+        .with_state(Arc::clone(&state));
+
+    spawn_background_tasks(&state, &cfg);
 
     let port = std::env::var("BEE_WEB_PORT")
         .ok()
@@ -1205,16 +1224,42 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
+    Ok(())
+}
 
+/// bee-admin：仅管理 REST，默认端口 8081（`BEE_ADMIN_PORT`）
+#[allow(dead_code)] // bee-web 二进制不调用；由 `bee-admin` 使用
+pub async fn run_admin_server() -> anyhow::Result<()> {
+    init_tracing_subscriber();
+    match bee::observability::init_tracing_system().await {
+        Ok(_) => tracing::info!("Tracing system initialized"),
+        Err(e) => tracing::warn!("Tracing system initialization failed: {}", e),
+    }
+
+    let state = build_app_state().await?;
+    let cfg = state.config.clone();
+    let app = router_admin_api().with_state(Arc::clone(&state));
+
+    spawn_background_tasks(&state, &cfg);
+
+    let port = std::env::var("BEE_ADMIN_PORT")
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(8081);
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+    tracing::info!("Bee Admin API: http://{}", addr);
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
     Ok(())
 }
 
 async fn index() -> Html<&'static str> {
-    Html(include_str!("../../static/index.html"))
+    Html(include_str!("../../../static/index.html"))
 }
 
 async fn serve_metrics_dashboard() -> Html<&'static str> {
-    Html(include_str!("../../static/metrics.html"))
+    Html(include_str!("../../../static/metrics.html"))
 }
 
 async fn serve_marked_js() -> Response {
@@ -1224,7 +1269,7 @@ async fn serve_marked_js() -> Response {
             header::CONTENT_TYPE,
             "application/javascript; charset=utf-8",
         )
-        .body(Body::from(include_str!("../../static/js/marked.min.js")))
+        .body(Body::from(include_str!("../../../static/js/marked.min.js")))
         .unwrap()
 }
 
@@ -1235,7 +1280,7 @@ async fn serve_highlight_js() -> Response {
             header::CONTENT_TYPE,
             "application/javascript; charset=utf-8",
         )
-        .body(Body::from(include_str!("../../static/js/highlight.min.js")))
+        .body(Body::from(include_str!("../../../static/js/highlight.min.js")))
         .unwrap()
 }
 
@@ -1244,7 +1289,7 @@ async fn serve_highlight_css() -> Response {
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/css; charset=utf-8")
         .body(Body::from(include_str!(
-            "../../static/css/github-dark.min.css"
+            "../../../static/css/github-dark.min.css"
         )))
         .unwrap()
 }
@@ -3412,22 +3457,20 @@ async fn api_events_sse(
 
 /// GET /swarm：蜂群拓扑 Graph 页
 async fn serve_swarm_page() -> Html<&'static str> {
-    Html(include_str!("../../static/swarm.html"))
+    Html(include_str!("../../../static/swarm.html"))
 }
 
 /// GET /tasks：任务看板页
 async fn serve_tasks_page() -> Html<&'static str> {
-    Html(include_str!("../../static/tasks.html"))
+    Html(include_str!("../../../static/tasks.html"))
 }
 
 async fn serve_traces_page() -> Html<&'static str> {
-    Html(include_str!("../../static/traces.html"))
+    Html(include_str!("../../../static/traces.html"))
 }
 
 /// GET /api/traces/recent：获取最近的追踪列表
-async fn api_traces_recent(
-    Query(params): Query<TracesRecentParams>,
-) -> Json<serde_json::Value> {
+async fn api_traces_recent(Query(params): Query<TracesRecentParams>) -> Json<serde_json::Value> {
     use bee::observability::TraceCollector;
 
     let limit = params.limit.unwrap_or(50);

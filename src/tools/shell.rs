@@ -45,10 +45,14 @@ fn is_forbidden_command(raw: &str) -> Result<(), String> {
 
     // 检查 rm 命令的危险参数组合
     if cmd == "rm" || cmd.ends_with("/rm") {
-        let has_recursive = args.iter().any(|a| a.starts_with("-r") || *a == "--recursive");
+        let has_recursive = args
+            .iter()
+            .any(|a| a.starts_with("-r") || *a == "--recursive");
         let has_force = args.iter().any(|a| a.starts_with("-f") || *a == "--force");
         let has_root = args.iter().any(|a| *a == "/" || a.starts_with("/*"));
-        let has_home = args.iter().any(|a| a.starts_with("~") || a.starts_with("$HOME"));
+        let has_home = args
+            .iter()
+            .any(|a| a.starts_with("~") || a.starts_with("$HOME"));
 
         if has_recursive && has_force {
             return Err("Forbidden pattern: rm with -r and -f flags".to_string());
@@ -60,7 +64,10 @@ fn is_forbidden_command(raw: &str) -> Result<(), String> {
 
     // 检查 chmod 危险模式
     if cmd == "chmod" || cmd.ends_with("/chmod") {
-        if args.iter().any(|a| *a == "777" || a.starts_with("777") || *a == "+s") {
+        if args
+            .iter()
+            .any(|a| *a == "777" || a.starts_with("777") || *a == "+s")
+        {
             return Err("Forbidden pattern: chmod with dangerous permissions".to_string());
         }
     }

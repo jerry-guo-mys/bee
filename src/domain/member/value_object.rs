@@ -38,23 +38,17 @@ impl UserEmail {
     /// 简单的邮箱格式验证
     fn validate(email: &str) -> Result<(), ValueObjectError> {
         if email.is_empty() {
-            return Err(ValueObjectError::InvalidEmail(
-                "邮箱不能为空".to_string(),
-            ));
+            return Err(ValueObjectError::InvalidEmail("邮箱不能为空".to_string()));
         }
 
         // 基本格式验证：包含 @ 和 .
         if !email.contains('@') {
-            return Err(ValueObjectError::InvalidEmail(
-                "邮箱必须包含 @".to_string(),
-            ));
+            return Err(ValueObjectError::InvalidEmail("邮箱必须包含 @".to_string()));
         }
 
         let parts: Vec<&str> = email.split('@').collect();
         if parts.len() != 2 {
-            return Err(ValueObjectError::InvalidEmail(
-                "邮箱格式不正确".to_string(),
-            ));
+            return Err(ValueObjectError::InvalidEmail("邮箱格式不正确".to_string()));
         }
 
         let (local, domain) = (parts[0], parts[1]);
@@ -200,9 +194,10 @@ impl ToolRiskLevel {
             "medium" => Ok(Self::Medium),
             "high" => Ok(Self::High),
             "critical" => Ok(Self::Critical),
-            _ => Err(ValueObjectError::InvalidRiskLevel(
-                format!("无效的风险等级：{}", level),
-            )),
+            _ => Err(ValueObjectError::InvalidRiskLevel(format!(
+                "无效的风险等级：{}",
+                level
+            ))),
         }
     }
 
@@ -247,11 +242,7 @@ pub struct ToolPolicy {
 
 impl ToolPolicy {
     /// 创建新的工具策略
-    pub fn new(
-        tool_id: ToolId,
-        risk_level: ToolRiskLevel,
-        allowed: bool,
-    ) -> Self {
+    pub fn new(tool_id: ToolId, risk_level: ToolRiskLevel, allowed: bool) -> Self {
         Self {
             tool_id,
             risk_level,
@@ -363,9 +354,18 @@ mod tests {
     #[test]
     fn test_tool_risk_level_from_str() {
         assert_eq!(ToolRiskLevel::from_str("low").unwrap(), ToolRiskLevel::Low);
-        assert_eq!(ToolRiskLevel::from_str("medium").unwrap(), ToolRiskLevel::Medium);
-        assert_eq!(ToolRiskLevel::from_str("high").unwrap(), ToolRiskLevel::High);
-        assert_eq!(ToolRiskLevel::from_str("critical").unwrap(), ToolRiskLevel::Critical);
+        assert_eq!(
+            ToolRiskLevel::from_str("medium").unwrap(),
+            ToolRiskLevel::Medium
+        );
+        assert_eq!(
+            ToolRiskLevel::from_str("high").unwrap(),
+            ToolRiskLevel::High
+        );
+        assert_eq!(
+            ToolRiskLevel::from_str("critical").unwrap(),
+            ToolRiskLevel::Critical
+        );
         assert!(ToolRiskLevel::from_str("invalid").is_err());
     }
 
@@ -393,11 +393,7 @@ mod tests {
 
     #[test]
     fn test_tool_policy_can_execute() {
-        let policy = ToolPolicy::new(
-            ToolId::from_str("shell"),
-            ToolRiskLevel::Medium,
-            true,
-        );
+        let policy = ToolPolicy::new(ToolId::from_str("shell"), ToolRiskLevel::Medium, true);
 
         // 可以执行低风险工具
         assert!(policy.can_execute(ToolRiskLevel::Low));
@@ -421,11 +417,8 @@ mod tests {
 
     #[test]
     fn test_tool_policy_with_note() {
-        let policy = ToolPolicy::new(
-            ToolId::from_str("shell"),
-            ToolRiskLevel::High,
-            true,
-        ).with_note("仅管理员可用".to_string());
+        let policy = ToolPolicy::new(ToolId::from_str("shell"), ToolRiskLevel::High, true)
+            .with_note("仅管理员可用".to_string());
 
         assert_eq!(policy.note(), Some("仅管理员可用"));
     }

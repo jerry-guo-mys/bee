@@ -5,14 +5,11 @@
 #![cfg(feature = "postgres")]
 
 use bee::domain::common::{MembershipRole, MembershipStatus};
-use bee::domain::member::{
-    MemberDomainError, Membership, MembershipFilter,
-    ToolId, ToolPolicy, ToolRiskLevel, UserEmail,
-};
 use bee::domain::member::repository::MembershipRepository;
-use bee::domain::tenant::value_object::{
-    MembershipId, OrganizationId, TeamId, TenantId, UserId,
+use bee::domain::member::{
+    MemberDomainError, Membership, MembershipFilter, ToolId, ToolPolicy, ToolRiskLevel, UserEmail,
 };
+use bee::domain::tenant::value_object::{MembershipId, OrganizationId, TeamId, TenantId, UserId};
 use bee::infrastructure::persistence::postgres::PostgresConnection;
 
 /// 获取测试数据库连接
@@ -59,7 +56,8 @@ async fn test_save_and_find_membership() {
         Some(UserId::generate()),
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
 
     // 接受邀请
     let user_id = UserId::generate();
@@ -114,7 +112,8 @@ async fn test_update_membership() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     membership.accept_invite(UserId::generate()).unwrap();
 
     // 保存
@@ -153,7 +152,8 @@ async fn test_delete_membership() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
 
     // 保存
     repo.save(&membership).await.unwrap();
@@ -191,7 +191,8 @@ async fn test_find_by_user() {
         Some(user_id.clone()),
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     membership1.accept_invite(user_id.clone()).unwrap();
 
     let mut membership2 = Membership::invite(
@@ -201,7 +202,8 @@ async fn test_find_by_user() {
         Some(user_id.clone()),
         email.clone(),
         MembershipRole::OrgAdmin,
-    ).unwrap();
+    )
+    .unwrap();
     membership2.accept_invite(user_id.clone()).unwrap();
 
     // 保存
@@ -237,7 +239,8 @@ async fn test_find_by_organization() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     membership.accept_invite(UserId::generate()).unwrap();
 
     // 保存
@@ -273,7 +276,8 @@ async fn test_find_by_team() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     membership.accept_invite(UserId::generate()).unwrap();
 
     // 保存
@@ -308,7 +312,8 @@ async fn test_find_by_tenant() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     membership.accept_invite(UserId::generate()).unwrap();
 
     // 保存
@@ -347,20 +352,14 @@ async fn test_save_and_load_tool_policies() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     membership.accept_invite(UserId::generate()).unwrap();
 
     // 添加工具策略
-    let policy1 = ToolPolicy::new(
-        ToolId::from_str("shell"),
-        ToolRiskLevel::Medium,
-        true,
-    );
-    let policy2 = ToolPolicy::new(
-        ToolId::from_str("file_read"),
-        ToolRiskLevel::Low,
-        true,
-    ).with_note("只读访问".to_string());
+    let policy1 = ToolPolicy::new(ToolId::from_str("shell"), ToolRiskLevel::Medium, true);
+    let policy2 = ToolPolicy::new(ToolId::from_str("file_read"), ToolRiskLevel::Low, true)
+        .with_note("只读访问".to_string());
 
     membership.add_tool_policy(policy1).unwrap();
     membership.add_tool_policy(policy2).unwrap();
@@ -375,7 +374,10 @@ async fn test_save_and_load_tool_policies() {
 
     assert_eq!(loaded.tool_policies().len(), 2);
     assert_eq!(loaded.tool_policies()[0].tool_id().as_str(), "shell");
-    assert_eq!(loaded.tool_policies()[0].risk_level(), ToolRiskLevel::Medium);
+    assert_eq!(
+        loaded.tool_policies()[0].risk_level(),
+        ToolRiskLevel::Medium
+    );
     assert_eq!(loaded.tool_policies()[1].tool_id().as_str(), "file_read");
 
     // 清理
@@ -402,14 +404,11 @@ async fn test_delete_membership_cascades_to_tool_policies() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     membership.accept_invite(UserId::generate()).unwrap();
 
-    let policy = ToolPolicy::new(
-        ToolId::from_str("shell"),
-        ToolRiskLevel::Medium,
-        true,
-    );
+    let policy = ToolPolicy::new(ToolId::from_str("shell"), ToolRiskLevel::Medium, true);
     membership.add_tool_policy(policy).unwrap();
 
     // 保存
@@ -447,7 +446,8 @@ async fn test_find_by_filter_with_role() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     member.accept_invite(UserId::generate()).unwrap();
 
     let mut admin = Membership::invite(
@@ -457,7 +457,8 @@ async fn test_find_by_filter_with_role() {
         None,
         email.clone(),
         MembershipRole::OrgAdmin,
-    ).unwrap();
+    )
+    .unwrap();
     admin.accept_invite(UserId::generate()).unwrap();
 
     // 保存
@@ -465,8 +466,7 @@ async fn test_find_by_filter_with_role() {
     repo.save(&admin).await.unwrap();
 
     // 按角色过滤
-    let filter = MembershipFilter::new()
-        .with_role(MembershipRole::OrgAdmin);
+    let filter = MembershipFilter::new().with_role(MembershipRole::OrgAdmin);
 
     let founds = repo.find_by_filter(&filter).await.unwrap();
     assert_eq!(founds.len(), 1);
@@ -497,7 +497,8 @@ async fn test_find_by_filter_with_status() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     active.accept_invite(UserId::generate()).unwrap();
 
     let pending = Membership::invite(
@@ -507,7 +508,8 @@ async fn test_find_by_filter_with_status() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     // 保持 Pending 状态
 
     // 保存
@@ -515,8 +517,7 @@ async fn test_find_by_filter_with_status() {
     repo.save(&pending).await.unwrap();
 
     // 按状态过滤
-    let filter = MembershipFilter::new()
-        .with_status(MembershipStatus::Active);
+    let filter = MembershipFilter::new().with_status(MembershipStatus::Active);
 
     let founds = repo.find_by_filter(&filter).await.unwrap();
     assert_eq!(founds.len(), 1);
@@ -548,7 +549,8 @@ async fn test_find_by_filter_combined() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     member1.accept_invite(UserId::generate()).unwrap();
 
     let mut member2 = Membership::invite(
@@ -558,7 +560,8 @@ async fn test_find_by_filter_combined() {
         None,
         email.clone(),
         MembershipRole::OrgAdmin,
-    ).unwrap();
+    )
+    .unwrap();
     member2.accept_invite(UserId::generate()).unwrap();
 
     // 保存
@@ -605,7 +608,8 @@ async fn test_membership_exists() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
 
     // 初始不存在
     let exists = repo.exists(membership.id()).await.unwrap();
@@ -642,7 +646,8 @@ async fn test_count_memberships() {
         None,
         email.clone(),
         MembershipRole::Member,
-    ).unwrap();
+    )
+    .unwrap();
     member1.accept_invite(UserId::generate()).unwrap();
 
     let mut member2 = Membership::invite(
@@ -652,7 +657,8 @@ async fn test_count_memberships() {
         None,
         email.clone(),
         MembershipRole::OrgAdmin,
-    ).unwrap();
+    )
+    .unwrap();
     member2.accept_invite(UserId::generate()).unwrap();
 
     // 保存
@@ -660,14 +666,12 @@ async fn test_count_memberships() {
     repo.save(&member2).await.unwrap();
 
     // 计数
-    let filter = MembershipFilter::new()
-        .with_organization_id(org_id.clone());
+    let filter = MembershipFilter::new().with_organization_id(org_id.clone());
     let count = repo.count(&filter).await.unwrap();
     assert_eq!(count, 2);
 
     // 按角色计数
-    let filter = MembershipFilter::new()
-        .with_role(MembershipRole::Member);
+    let filter = MembershipFilter::new().with_role(MembershipRole::Member);
     let count = repo.count(&filter).await.unwrap();
     assert_eq!(count, 1);
 

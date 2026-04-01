@@ -7,6 +7,7 @@ Guidelines for AI coding agents working in this Rust personal AI agent system.
 ```bash
 cargo run                          # Run TUI (default)
 cargo run --bin bee-web --features web
+cargo run --bin bee-admin --features web
 cargo run --bin bee-whatsapp --features whatsapp
 cargo run --bin bee-lark --features lark
 cargo run --bin bee-gateway --features gateway

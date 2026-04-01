@@ -81,13 +81,10 @@ async fn test_in_memory_event_bus_subscribe() {
     bus.publish(envelope.clone()).await.unwrap();
 
     // 接收广播事件
-    let received = tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        receiver.recv(),
-    )
-    .await
-    .expect("timeout")
-    .expect("channel closed");
+    let received = tokio::time::timeout(std::time::Duration::from_secs(1), receiver.recv())
+        .await
+        .expect("timeout")
+        .expect("channel closed");
 
     assert_eq!(received.event_type, "domain.test");
     assert_eq!(received.aggregate_id, test_id.to_string());
@@ -112,8 +109,14 @@ async fn test_event_envelope_metadata() {
 
     bus.publish(envelope.clone()).await.unwrap();
 
-    assert_eq!(envelope.metadata.correlation_id, Some("corr-123".to_string()));
-    assert_eq!(envelope.metadata.causation_id, Some("cause-456".to_string()));
+    assert_eq!(
+        envelope.metadata.correlation_id,
+        Some("corr-123".to_string())
+    );
+    assert_eq!(
+        envelope.metadata.causation_id,
+        Some("cause-456".to_string())
+    );
     assert_eq!(envelope.metadata.user_id, Some("user-789".to_string()));
     assert_eq!(envelope.metadata.tenant_id, Some("tenant-abc".to_string()));
 }

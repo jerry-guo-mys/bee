@@ -38,10 +38,10 @@ impl TenantRow {
     /// 将数据库行转换为 Tenant 实体
     fn into_tenant(self) -> Result<Tenant, TenantError> {
         let id = TenantId::new(self.id.to_string());
-        let name = TenantName::new(self.name)
-            .map_err(|e| TenantError::InvalidName(e.to_string()))?;
-        let slug = TenantSlug::new(self.slug)
-            .map_err(|e| TenantError::InvalidSlug(e.to_string()))?;
+        let name =
+            TenantName::new(self.name).map_err(|e| TenantError::InvalidName(e.to_string()))?;
+        let slug =
+            TenantSlug::new(self.slug).map_err(|e| TenantError::InvalidSlug(e.to_string()))?;
         let status = self
             .status
             .parse::<TenantStatus>()
@@ -70,9 +70,13 @@ impl super::TenantRepository for PostgresTenantRepository {
                 name = $2, slug = $3, status = $4, updated_at = $6
             "#,
         )
-        .bind(tenant.id().as_str().parse::<uuid::Uuid>().map_err(|e| {
-            TenantError::DatabaseError(format!("Invalid UUID: {}", e))
-        })?)
+        .bind(
+            tenant
+                .id()
+                .as_str()
+                .parse::<uuid::Uuid>()
+                .map_err(|e| TenantError::DatabaseError(format!("Invalid UUID: {}", e)))?,
+        )
         .bind(tenant.name().as_str())
         .bind(tenant.slug().as_str())
         .bind(tenant.status().to_string())
@@ -91,15 +95,15 @@ impl super::TenantRepository for PostgresTenantRepository {
     }
 
     async fn find_by_id(&self, id: &TenantId) -> Result<Option<Tenant>, TenantError> {
-        let tenant = sqlx::query_as::<_, TenantRow>(
-            "SELECT * FROM tenants WHERE id = $1",
-        )
-        .bind(id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-            TenantError::DatabaseError(format!("Invalid UUID: {}", e))
-        })?)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| TenantError::DatabaseError(e.to_string()))?;
+        let tenant = sqlx::query_as::<_, TenantRow>("SELECT * FROM tenants WHERE id = $1")
+            .bind(
+                id.as_str()
+                    .parse::<uuid::Uuid>()
+                    .map_err(|e| TenantError::DatabaseError(format!("Invalid UUID: {}", e)))?,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| TenantError::DatabaseError(e.to_string()))?;
 
         match tenant {
             Some(row) => row.into_tenant().map(Some),
@@ -108,13 +112,11 @@ impl super::TenantRepository for PostgresTenantRepository {
     }
 
     async fn find_by_slug(&self, slug: &str) -> Result<Option<Tenant>, TenantError> {
-        let tenant = sqlx::query_as::<_, TenantRow>(
-            "SELECT * FROM tenants WHERE slug = $1",
-        )
-        .bind(slug)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| TenantError::DatabaseError(e.to_string()))?;
+        let tenant = sqlx::query_as::<_, TenantRow>("SELECT * FROM tenants WHERE slug = $1")
+            .bind(slug)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| TenantError::DatabaseError(e.to_string()))?;
 
         match tenant {
             Some(row) => row.into_tenant().map(Some),
@@ -124,9 +126,11 @@ impl super::TenantRepository for PostgresTenantRepository {
 
     async fn delete(&self, id: &TenantId) -> Result<(), TenantError> {
         let result = sqlx::query("DELETE FROM tenants WHERE id = $1")
-            .bind(id.as_str().parse::<uuid::Uuid>().map_err(|e| {
-                TenantError::DatabaseError(format!("Invalid UUID: {}", e))
-            })?)
+            .bind(
+                id.as_str()
+                    .parse::<uuid::Uuid>()
+                    .map_err(|e| TenantError::DatabaseError(format!("Invalid UUID: {}", e)))?,
+            )
             .execute(&self.pool)
             .await
             .map_err(|e| TenantError::DatabaseError(e.to_string()))?;
@@ -139,13 +143,12 @@ impl super::TenantRepository for PostgresTenantRepository {
     }
 
     async fn exists_by_slug(&self, slug: &str) -> Result<bool, TenantError> {
-        let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM tenants WHERE slug = $1)",
-        )
-        .bind(slug)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| TenantError::DatabaseError(e.to_string()))?;
+        let exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM tenants WHERE slug = $1)")
+                .bind(slug)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| TenantError::DatabaseError(e.to_string()))?;
 
         Ok(exists)
     }
@@ -229,7 +232,8 @@ mod tests {
         let repo = PostgresTenantRepository::new(&conn);
 
         // 创建并保存
-        let mut tenant = Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
+        let mut tenant =
+            Tenant::create("Test Tenant".to_string(), "test-tenant".to_string()).unwrap();
         repo.save(&tenant).await.unwrap();
 
         // 修改并保存

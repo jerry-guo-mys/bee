@@ -8,8 +8,8 @@ pub mod locking;
 pub mod postgres;
 
 pub use locking::{
-    FineGrainedLockStore, FineGrainedReadGuard, FineGrainedWriteGuard,
-    LockError, LockStats, ShardedMap,
+    FineGrainedLockStore, FineGrainedReadGuard, FineGrainedWriteGuard, LockError, LockStats,
+    ShardedMap,
 };
 
 #[cfg(any(feature = "async-sqlite", feature = "postgres"))]

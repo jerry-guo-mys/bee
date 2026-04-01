@@ -1,7 +1,7 @@
 //! 记忆存储抽象
 
-use async_trait::async_trait;
 use crate::memory::Message;
+use async_trait::async_trait;
 
 /// 记忆存储 trait
 #[async_trait]
@@ -28,7 +28,9 @@ pub fn create_memory_store(
             Ok(Box::new(FileStore::new(path)))
         }
         // SQLite 需要异步运行时，留给 infrastructure 层实现
-        MemoryBackend::Sqlite => Err("Sqlite backend should be created via infrastructure layer".to_string()),
+        MemoryBackend::Sqlite => {
+            Err("Sqlite backend should be created via infrastructure layer".to_string())
+        }
     }
 }
 

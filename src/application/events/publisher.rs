@@ -13,7 +13,9 @@ pub enum EventPublisherError {
 impl std::fmt::Display for EventPublisherError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EventPublisherError::EnvelopeCreationError(e) => write!(f, "Envelope creation error: {}", e),
+            EventPublisherError::EnvelopeCreationError(e) => {
+                write!(f, "Envelope creation error: {}", e)
+            }
             EventPublisherError::PublishError(e) => write!(f, "Publish error: {}", e),
         }
     }
@@ -55,7 +57,9 @@ impl<EB: EventBus + 'static> EventPublisher for EventBusPublisher<EB> {
         let envelope = EventEnvelope::new(event)
             .map_err(|e| EventPublisherError::EnvelopeCreationError(e.to_string()))?;
 
-        self.event_bus.publish(envelope).await
+        self.event_bus
+            .publish(envelope)
+            .await
             .map_err(|_| EventPublisherError::PublishError("Failed to publish event".to_string()))
     }
 }

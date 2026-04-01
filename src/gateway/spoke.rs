@@ -190,8 +190,9 @@ impl CapabilitySpoke for SkillSpoke {
 
             let stdout = String::from_utf8_lossy(&output.stdout);
             // JSON 解析失败时返回明确错误
-            let result: serde_json::Value = serde_json::from_str(&stdout)
-                .map_err(|e| format!("Script output is not valid JSON: {}. Output: {}", e, stdout))?;
+            let result: serde_json::Value = serde_json::from_str(&stdout).map_err(|e| {
+                format!("Script output is not valid JSON: {}. Output: {}", e, stdout)
+            })?;
             Ok(result)
         } else {
             Ok(serde_json::json!({
@@ -270,8 +271,12 @@ impl CapabilitySpoke for ApiPluginSpoke {
             .error_for_status()
             .map_err(|e| {
                 // 记录详细错误日志，但返回通用错误消息
-                tracing::error!("API request failed: status={}, error={}",
-                    e.status().unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR), e);
+                tracing::error!(
+                    "API request failed: status={}, error={}",
+                    e.status()
+                        .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
+                    e
+                );
                 "API request failed".to_string()
             })?
             .text()
@@ -313,7 +318,10 @@ impl WebSocketSpoke {
 
     /// 添加新的 WebSocket 连接
     pub async fn add_connection(&self, client_id: String, tx: mpsc::UnboundedSender<String>) {
-        self.connections.write().await.insert(client_id, WebSocketConnection { tx });
+        self.connections
+            .write()
+            .await
+            .insert(client_id, WebSocketConnection { tx });
     }
 
     /// 移除 WebSocket 连接
@@ -407,9 +415,14 @@ impl SpokeAdapter for HttpSpoke {
                 .await
                 .map_err(|e| format!("HTTP callback failed: {}", e))?;
 
-            response
-                .error_for_status()
-                .map_err(|e| format!("HTTP callback failed with status {}: {}", e.status().unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR), e))?;
+            response.error_for_status().map_err(|e| {
+                format!(
+                    "HTTP callback failed with status {}: {}",
+                    e.status()
+                        .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
+                    e
+                )
+            })?;
         }
         Ok(())
     }

@@ -1,9 +1,9 @@
 //! 记忆存储性能基准测试
 
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
 use bee::domain::memory::store::MemoryStore;
 use bee::infrastructure::memory::{InMemoryStore, SqliteMemoryStore};
 use bee::memory::Message;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use tokio::runtime::Runtime;
 
 fn bench_memory_store_append(c: &mut Criterion) {
@@ -17,7 +17,10 @@ fn bench_memory_store_append(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 let store = InMemoryStore::new();
-                let _: () = store.append("conv1", &Message::user("test message")).await.unwrap();
+                let _: () = store
+                    .append("conv1", &Message::user("test message"))
+                    .await
+                    .unwrap();
             })
         });
     });
@@ -27,7 +30,10 @@ fn bench_memory_store_append(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 let store = SqliteMemoryStore::in_memory().unwrap();
-                let _: () = store.append("conv1", &Message::user("test message")).await.unwrap();
+                let _: () = store
+                    .append("conv1", &Message::user("test message"))
+                    .await
+                    .unwrap();
             })
         });
     });
@@ -42,24 +48,34 @@ fn bench_memory_store_load(c: &mut Criterion) {
 
     // 不同消息数量的基准测试
     for &size in &[10, 100, 1000] {
-        group.bench_with_input(BenchmarkId::new("in_memory_load", size), &size, |b, &size| {
-            b.iter(|| {
-                rt.block_on(async {
-                    let store = InMemoryStore::new();
-                    for i in 0..size {
-                        let _: () = store.append("conv1", &Message::user(&format!("msg{}", i))).await.unwrap();
-                    }
-                    let _: Vec<Message> = store.load("conv1", 0).await.unwrap();
-                })
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("in_memory_load", size),
+            &size,
+            |b, &size| {
+                b.iter(|| {
+                    rt.block_on(async {
+                        let store = InMemoryStore::new();
+                        for i in 0..size {
+                            let _: () = store
+                                .append("conv1", &Message::user(&format!("msg{}", i)))
+                                .await
+                                .unwrap();
+                        }
+                        let _: Vec<Message> = store.load("conv1", 0).await.unwrap();
+                    })
+                });
+            },
+        );
 
         group.bench_with_input(BenchmarkId::new("sqlite_load", size), &size, |b, &size| {
             b.iter(|| {
                 rt.block_on(async {
                     let store = SqliteMemoryStore::in_memory().unwrap();
                     for i in 0..size {
-                        let _: () = store.append("conv1", &Message::user(&format!("msg{}", i))).await.unwrap();
+                        let _: () = store
+                            .append("conv1", &Message::user(&format!("msg{}", i)))
+                            .await
+                            .unwrap();
                     }
                     let _: Vec<Message> = store.load("conv1", 0).await.unwrap();
                 })
@@ -78,17 +94,24 @@ fn bench_memory_store_load_with_limit(c: &mut Criterion) {
     let size = 1000;
 
     // InMemoryStore 带限制的加载
-    group.bench_with_input(BenchmarkId::new("in_memory_limit", size), &size, |b, &size| {
-        b.iter(|| {
-            rt.block_on(async {
-                let store = InMemoryStore::new();
-                for i in 0..size {
-                    let _: () = store.append("conv1", &Message::user(&format!("msg{}", i))).await.unwrap();
-                }
-                let _: Vec<Message> = store.load("conv1", 10).await.unwrap();
-            })
-        });
-    });
+    group.bench_with_input(
+        BenchmarkId::new("in_memory_limit", size),
+        &size,
+        |b, &size| {
+            b.iter(|| {
+                rt.block_on(async {
+                    let store = InMemoryStore::new();
+                    for i in 0..size {
+                        let _: () = store
+                            .append("conv1", &Message::user(&format!("msg{}", i)))
+                            .await
+                            .unwrap();
+                    }
+                    let _: Vec<Message> = store.load("conv1", 10).await.unwrap();
+                })
+            });
+        },
+    );
 
     // SqliteMemoryStore 带限制的加载
     group.bench_with_input(BenchmarkId::new("sqlite_limit", size), &size, |b, &size| {
@@ -96,7 +119,10 @@ fn bench_memory_store_load_with_limit(c: &mut Criterion) {
             rt.block_on(async {
                 let store = SqliteMemoryStore::in_memory().unwrap();
                 for i in 0..size {
-                    let _: () = store.append("conv1", &Message::user(&format!("msg{}", i))).await.unwrap();
+                    let _: () = store
+                        .append("conv1", &Message::user(&format!("msg{}", i)))
+                        .await
+                        .unwrap();
                 }
                 let _: Vec<Message> = store.load("conv1", 10).await.unwrap();
             })
@@ -141,39 +167,53 @@ fn bench_memory_store_multiple_conversations(c: &mut Criterion) {
     let mut group = c.benchmark_group("memory_store_multiple_conversations");
 
     for &conv_count in &[5, 10, 50] {
-        group.bench_with_input(BenchmarkId::new("in_memory_multi_conv", conv_count), &conv_count, |b, &count| {
-            b.iter(|| {
-                rt.block_on(async {
-                    let store = InMemoryStore::new();
-                    for i in 0..count {
-                        let conv_id = format!("conv{}", i);
-                        let _: () = store.append(&conv_id, &Message::user("message")).await.unwrap();
-                    }
-                    // 加载所有对话
-                    for i in 0..count {
-                        let conv_id = format!("conv{}", i);
-                        let _: Vec<Message> = store.load(&conv_id, 0).await.unwrap();
-                    }
-                })
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("in_memory_multi_conv", conv_count),
+            &conv_count,
+            |b, &count| {
+                b.iter(|| {
+                    rt.block_on(async {
+                        let store = InMemoryStore::new();
+                        for i in 0..count {
+                            let conv_id = format!("conv{}", i);
+                            let _: () = store
+                                .append(&conv_id, &Message::user("message"))
+                                .await
+                                .unwrap();
+                        }
+                        // 加载所有对话
+                        for i in 0..count {
+                            let conv_id = format!("conv{}", i);
+                            let _: Vec<Message> = store.load(&conv_id, 0).await.unwrap();
+                        }
+                    })
+                });
+            },
+        );
 
-        group.bench_with_input(BenchmarkId::new("sqlite_multi_conv", conv_count), &conv_count, |b, &count| {
-            b.iter(|| {
-                rt.block_on(async {
-                    let store = SqliteMemoryStore::in_memory().unwrap();
-                    for i in 0..count {
-                        let conv_id = format!("conv{}", i);
-                        let _: () = store.append(&conv_id, &Message::user("message")).await.unwrap();
-                    }
-                    // 加载所有对话
-                    for i in 0..count {
-                        let conv_id = format!("conv{}", i);
-                        let _: Vec<Message> = store.load(&conv_id, 0).await.unwrap();
-                    }
-                })
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("sqlite_multi_conv", conv_count),
+            &conv_count,
+            |b, &count| {
+                b.iter(|| {
+                    rt.block_on(async {
+                        let store = SqliteMemoryStore::in_memory().unwrap();
+                        for i in 0..count {
+                            let conv_id = format!("conv{}", i);
+                            let _: () = store
+                                .append(&conv_id, &Message::user("message"))
+                                .await
+                                .unwrap();
+                        }
+                        // 加载所有对话
+                        for i in 0..count {
+                            let conv_id = format!("conv{}", i);
+                            let _: Vec<Message> = store.load(&conv_id, 0).await.unwrap();
+                        }
+                    })
+                });
+            },
+        );
     }
 
     group.finish();

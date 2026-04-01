@@ -64,19 +64,14 @@ pub enum TraceEvent {
     /// 记录请求追踪
     RecordRequest(RequestTrace),
     /// 添加 Span 到请求
-    AddSpan {
-        request_id: String,
-        span: SpanTrace,
-    },
+    AddSpan { request_id: String, span: SpanTrace },
     /// 更新请求状态
     UpdateStatus {
         request_id: String,
         status: TraceStatus,
     },
     /// 清理旧数据
-    Cleanup {
-        keep_recent: usize,
-    },
+    Cleanup { keep_recent: usize },
     /// 按 request_id 查询
     Query {
         request_id: String,
@@ -234,7 +229,9 @@ impl SqliteTraceStore {
     pub async fn save_request(&self, trace: &RequestTrace) -> SqliteResult<()> {
         let conn = self.conn.lock().await;
 
-        let metadata_json = trace.metadata.as_ref()
+        let metadata_json = trace
+            .metadata
+            .as_ref()
             .map(|m| serde_json::to_string(m).ok())
             .flatten();
 
@@ -337,7 +334,8 @@ impl SqliteTraceStore {
                 status,
                 input_summary: row.get(6)?,
                 output_summary: row.get(7)?,
-                metadata: row.get::<_, Option<String>>(8)?
+                metadata: row
+                    .get::<_, Option<String>>(8)?
                     .and_then(|s| serde_json::from_str(&s).ok()),
                 error_message: row.get(9)?,
                 react_steps_total: row.get(10)?,
@@ -367,10 +365,13 @@ impl SqliteTraceStore {
                 let operation_kind = Self::deserialize_operation_kind(&row.get::<_, String>(3)?);
                 let status = Self::deserialize_span_status(&row.get::<_, String>(7)?);
 
-                let attributes: std::collections::HashMap<String, crate::observability::trace_types::AttributeValue> =
-                    row.get::<_, Option<String>>(8)?
-                        .and_then(|s| serde_json::from_str(&s).ok())
-                        .unwrap_or_default();
+                let attributes: std::collections::HashMap<
+                    String,
+                    crate::observability::trace_types::AttributeValue,
+                > = row
+                    .get::<_, Option<String>>(8)?
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_default();
 
                 Ok(SpanTrace {
                     span_id: row.get(0)?,
@@ -400,7 +401,10 @@ impl SqliteTraceStore {
     }
 
     /// 获取最近的追踪摘要列表
-    pub async fn get_recent_summaries(&self, limit: usize) -> SqliteResult<Vec<RequestTraceSummary>> {
+    pub async fn get_recent_summaries(
+        &self,
+        limit: usize,
+    ) -> SqliteResult<Vec<RequestTraceSummary>> {
         let conn = self.conn.lock().await;
 
         let mut stmt = conn.prepare(
@@ -430,11 +434,13 @@ impl SqliteTraceStore {
         for summary_result in summaries {
             if let Ok(mut summary) = summary_result {
                 // 查询 Span 数量
-                let span_count: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM span_traces WHERE request_id = ?1",
-                    params![summary.request_id],
-                    |row| row.get(0),
-                ).unwrap_or(0);
+                let span_count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM span_traces WHERE request_id = ?1",
+                        params![summary.request_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
                 summary.span_count = span_count as usize;
                 result.push(summary);
             }
@@ -471,7 +477,10 @@ impl SqliteTraceStore {
             let placeholders: Vec<&str> = ids_to_delete.iter().map(|_| "?").collect();
             let in_clause = placeholders.join(", ");
             conn.execute(
-                &format!("DELETE FROM request_traces WHERE request_id IN ({})", in_clause),
+                &format!(
+                    "DELETE FROM request_traces WHERE request_id IN ({})",
+                    in_clause
+                ),
                 rusqlite::params_from_iter(ids_to_delete.iter()),
             )?;
 
@@ -572,7 +581,8 @@ pub struct TraceCollector {
 }
 
 /// 全局 TraceCollector 实例
-static GLOBAL_TRACE_COLLECTOR: std::sync::OnceLock<Arc<TraceCollector>> = std::sync::OnceLock::new();
+static GLOBAL_TRACE_COLLECTOR: std::sync::OnceLock<Arc<TraceCollector>> =
+    std::sync::OnceLock::new();
 
 impl TraceCollector {
     /// 获取全局 TraceCollector 实例
@@ -587,7 +597,9 @@ impl TraceCollector {
 
     /// 创建新的 TraceCollector
     pub async fn new(config: TraceCollectorConfig) -> Result<Self, String> {
-        let memory_store = Arc::new(RwLock::new(VecDeque::with_capacity(config.max_memory_traces)));
+        let memory_store = Arc::new(RwLock::new(VecDeque::with_capacity(
+            config.max_memory_traces,
+        )));
 
         let sqlite_store = if let Some(ref path) = config.sqlite_path {
             match SqliteTraceStore::new(path) {
@@ -596,7 +608,10 @@ impl TraceCollector {
                     Some(store)
                 }
                 Err(e) => {
-                    warn!("Failed to initialize SQLite trace store: {}. Using memory only.", e);
+                    warn!(
+                        "Failed to initialize SQLite trace store: {}. Using memory only.",
+                        e
+                    );
                     None
                 }
             }
@@ -696,17 +711,19 @@ impl TraceCollector {
                         }
                     }
                 }
-                TraceEvent::Query { request_id, response_tx } => {
+                TraceEvent::Query {
+                    request_id,
+                    response_tx,
+                } => {
                     let mem = memory.read().await;
-                    let result = mem.iter()
-                        .find(|t| t.request_id == request_id)
-                        .cloned();
+                    let result = mem.iter().find(|t| t.request_id == request_id).cloned();
 
                     let _ = response_tx.send(result).await;
                 }
                 TraceEvent::GetRecent { limit, response_tx } => {
                     let mem = memory.read().await;
-                    let summaries: Vec<RequestTraceSummary> = mem.iter()
+                    let summaries: Vec<RequestTraceSummary> = mem
+                        .iter()
                         .rev()
                         .take(limit)
                         .map(RequestTraceSummary::from)
@@ -735,10 +752,12 @@ impl TraceCollector {
     /// 添加 Span 到请求
     pub async fn add_span(&self, request_id: &str, span: SpanTrace) {
         if let Some(ref tx) = self.event_tx {
-            let _ = tx.send(TraceEvent::AddSpan {
-                request_id: request_id.to_string(),
-                span,
-            }).await;
+            let _ = tx
+                .send(TraceEvent::AddSpan {
+                    request_id: request_id.to_string(),
+                    span,
+                })
+                .await;
         } else {
             // 同步模式
             let mut mem = self.memory_store.write().await;
@@ -751,10 +770,12 @@ impl TraceCollector {
     /// 更新请求状态
     pub async fn update_status(&self, request_id: &str, status: TraceStatus) {
         if let Some(ref tx) = self.event_tx {
-            let _ = tx.send(TraceEvent::UpdateStatus {
-                request_id: request_id.to_string(),
-                status,
-            }).await;
+            let _ = tx
+                .send(TraceEvent::UpdateStatus {
+                    request_id: request_id.to_string(),
+                    status,
+                })
+                .await;
         } else {
             // 同步模式
             let mut mem = self.memory_store.write().await;
@@ -768,10 +789,12 @@ impl TraceCollector {
     pub async fn get_by_request_id(&self, request_id: &str) -> Option<RequestTrace> {
         if let Some(ref tx) = self.event_tx {
             let (response_tx, mut response_rx) = mpsc::channel(1);
-            let _ = tx.send(TraceEvent::Query {
-                request_id: request_id.to_string(),
-                response_tx,
-            }).await;
+            let _ = tx
+                .send(TraceEvent::Query {
+                    request_id: request_id.to_string(),
+                    response_tx,
+                })
+                .await;
 
             // 先从内存查找
             let mem = self.memory_store.read().await;
@@ -805,7 +828,11 @@ impl TraceCollector {
             }
         } else {
             let mem = self.memory_store.read().await;
-            mem.iter().rev().take(limit).map(RequestTraceSummary::from).collect()
+            mem.iter()
+                .rev()
+                .take(limit)
+                .map(RequestTraceSummary::from)
+                .collect()
         }
     }
 
@@ -914,7 +941,9 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        collector.update_status("test-req-3", TraceStatus::Success).await;
+        collector
+            .update_status("test-req-3", TraceStatus::Success)
+            .await;
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
@@ -1006,7 +1035,7 @@ mod tests {
         trace.metadata = Some(
             TraceMetadata::new()
                 .with_user_id("user-1")
-                .with_source("Test")
+                .with_source("Test"),
         );
 
         // 保存追踪
@@ -1055,7 +1084,9 @@ mod tests {
         assert_eq!(queried.spans.len(), 3);
 
         // 验证操作类型
-        let operation_kinds: Vec<_> = queried.spans.iter()
+        let operation_kinds: Vec<_> = queried
+            .spans
+            .iter()
             .map(|s| s.operation_kind.as_str())
             .collect();
         assert!(operation_kinds.contains(&"planner"));
@@ -1091,21 +1122,42 @@ mod tests {
         assert_eq!(parse_trace_status("success"), Some(TraceStatus::Success));
         assert_eq!(parse_trace_status("failure"), Some(TraceStatus::Failure));
         assert_eq!(parse_trace_status("failed"), Some(TraceStatus::Failure));
-        assert_eq!(parse_trace_status("cancelled"), Some(TraceStatus::Cancelled));
+        assert_eq!(
+            parse_trace_status("cancelled"),
+            Some(TraceStatus::Cancelled)
+        );
         assert_eq!(parse_trace_status("canceled"), Some(TraceStatus::Cancelled));
         assert_eq!(parse_trace_status("unknown"), None);
     }
 
     #[test]
     fn test_parse_operation_kind() {
-        assert_eq!(parse_operation_kind("orchestrator"), Some(OperationKind::Orchestrator));
-        assert_eq!(parse_operation_kind("planner"), Some(OperationKind::Planner));
+        assert_eq!(
+            parse_operation_kind("orchestrator"),
+            Some(OperationKind::Orchestrator)
+        );
+        assert_eq!(
+            parse_operation_kind("planner"),
+            Some(OperationKind::Planner)
+        );
         assert_eq!(parse_operation_kind("critic"), Some(OperationKind::Critic));
-        assert_eq!(parse_operation_kind("llm_call"), Some(OperationKind::LlmCall));
-        assert_eq!(parse_operation_kind("tool_execution"), Some(OperationKind::ToolExecution));
+        assert_eq!(
+            parse_operation_kind("llm_call"),
+            Some(OperationKind::LlmCall)
+        );
+        assert_eq!(
+            parse_operation_kind("tool_execution"),
+            Some(OperationKind::ToolExecution)
+        );
         assert_eq!(parse_operation_kind("memory"), Some(OperationKind::Memory));
-        assert_eq!(parse_operation_kind("rag_retrieval"), Some(OperationKind::RagRetrieval));
-        assert_eq!(parse_operation_kind("custom_op"), Some(OperationKind::Custom("custom_op".to_string())));
+        assert_eq!(
+            parse_operation_kind("rag_retrieval"),
+            Some(OperationKind::RagRetrieval)
+        );
+        assert_eq!(
+            parse_operation_kind("custom_op"),
+            Some(OperationKind::Custom("custom_op".to_string()))
+        );
     }
 
     #[test]

@@ -84,9 +84,7 @@ impl TenantName {
     pub fn new(name: String) -> Result<Self, TenantError> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
-            return Err(TenantError::InvalidName(
-                "名称不能为空".to_string(),
-            ));
+            return Err(TenantError::InvalidName("名称不能为空".to_string()));
         }
         if trimmed.len() < Self::MIN_LEN {
             return Err(TenantError::InvalidName(format!(
@@ -136,9 +134,7 @@ impl TenantSlug {
         let slug = slug.to_lowercase();
 
         if slug.is_empty() {
-            return Err(TenantError::InvalidSlug(
-                "slug 不能为空".to_string(),
-            ));
+            return Err(TenantError::InvalidSlug("slug 不能为空".to_string()));
         }
         if slug.len() < Self::MIN_LEN {
             return Err(TenantError::InvalidSlug(format!(

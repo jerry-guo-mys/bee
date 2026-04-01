@@ -243,7 +243,9 @@ impl CodeEditTool {
             // 尝试精确匹配
             if let Some(pos) = content.find(old_string) {
                 validated_edits.push((pos, old_string.clone(), new_string.clone()));
-            } else if let Some((pos, actual_old)) = self.find_with_indentation_tolerance(&content, old_string) {
+            } else if let Some((pos, actual_old)) =
+                self.find_with_indentation_tolerance(&content, old_string)
+            {
                 validated_edits.push((pos, actual_old, new_string.clone()));
             } else {
                 // 验证失败，返回错误且不修改文件

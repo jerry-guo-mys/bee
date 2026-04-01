@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cargo run                          # Run TUI (default)
 cargo run --bin bee-web --features web
+cargo run --bin bee-admin --features web   # 仅管理 REST，默认 8081（BEE_ADMIN_PORT）
 cargo run --bin bee-whatsapp --features whatsapp
 cargo run --bin bee-lark --features lark
 cargo run --bin bee-gateway --features gateway

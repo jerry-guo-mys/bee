@@ -555,23 +555,34 @@ mod tests {
 
         let trace = RequestTrace::new("req-123".to_string()).with_metadata(metadata.clone());
 
-        assert_eq!(trace.metadata.as_ref().unwrap().user_id, Some("user-456".to_string()));
-        assert_eq!(trace.metadata.as_ref().unwrap().session_id, Some("session-789".to_string()));
-        assert_eq!(trace.metadata.as_ref().unwrap().source, Some("TUI".to_string()));
-        assert_eq!(trace.metadata.as_ref().unwrap().request_type, Some("chat".to_string()));
-        assert_eq!(trace.metadata.as_ref().unwrap().tags.get("feature"), Some(&"test".to_string()));
+        assert_eq!(
+            trace.metadata.as_ref().unwrap().user_id,
+            Some("user-456".to_string())
+        );
+        assert_eq!(
+            trace.metadata.as_ref().unwrap().session_id,
+            Some("session-789".to_string())
+        );
+        assert_eq!(
+            trace.metadata.as_ref().unwrap().source,
+            Some("TUI".to_string())
+        );
+        assert_eq!(
+            trace.metadata.as_ref().unwrap().request_type,
+            Some("chat".to_string())
+        );
+        assert_eq!(
+            trace.metadata.as_ref().unwrap().tags.get("feature"),
+            Some(&"test".to_string())
+        );
     }
 
     #[test]
     fn test_span_trace_lifecycle() {
         let request_id = "req-123".to_string();
-        let mut span = SpanTrace::new(
-            request_id.clone(),
-            OperationKind::Planner,
-            "Generate plan",
-        )
-        .with_attribute("model", "deepseek-chat")
-        .with_attribute("step", 1i64);
+        let mut span = SpanTrace::new(request_id.clone(), OperationKind::Planner, "Generate plan")
+            .with_attribute("model", "deepseek-chat")
+            .with_attribute("step", 1i64);
 
         assert_eq!(span.request_id, request_id);
         assert_eq!(span.operation_kind, OperationKind::Planner);

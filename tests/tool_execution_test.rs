@@ -13,11 +13,16 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Tool for EchoTool {
-        fn name(&self) -> &str { "echo" }
-        fn description(&self) -> &str { "Echo back the input message" }
+        fn name(&self) -> &str {
+            "echo"
+        }
+        fn description(&self) -> &str {
+            "Echo back the input message"
+        }
 
         async fn execute(&self, args: Value) -> Result<String, String> {
-            let message = args.get("message")
+            let message = args
+                .get("message")
                 .and_then(|v| v.as_str())
                 .unwrap_or("no message");
             Ok(format!("Echo: {}", message))
@@ -28,19 +33,20 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Tool for MathTool {
-        fn name(&self) -> &str { "math" }
-        fn description(&self) -> &str { "Perform basic math calculations" }
+        fn name(&self) -> &str {
+            "math"
+        }
+        fn description(&self) -> &str {
+            "Perform basic math calculations"
+        }
 
         async fn execute(&self, args: Value) -> Result<String, String> {
-            let operation = args.get("operation")
+            let operation = args
+                .get("operation")
                 .and_then(|v| v.as_str())
                 .unwrap_or("add");
-            let a = args.get("a")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
-            let b = args.get("b")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
+            let a = args.get("a").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let b = args.get("b").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
             let result = match operation {
                 "add" => a + b,
@@ -94,14 +100,20 @@ mod tests {
 
         // Test addition
         let result = registry
-            .execute("math", serde_json::json!({"operation": "add", "a": 10, "b": 5}))
+            .execute(
+                "math",
+                serde_json::json!({"operation": "add", "a": 10, "b": 5}),
+            )
             .await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "15");
 
         // Test division by zero
         let result = registry
-            .execute("math", serde_json::json!({"operation": "divide", "a": 10, "b": 0}))
+            .execute(
+                "math",
+                serde_json::json!({"operation": "divide", "a": 10, "b": 0}),
+            )
             .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Division by zero"));
@@ -111,9 +123,7 @@ mod tests {
     async fn test_tool_not_found() {
         let registry = ToolRegistry::new();
 
-        let result = registry
-            .execute("nonexistent", serde_json::json!({}))
-            .await;
+        let result = registry.execute("nonexistent", serde_json::json!({})).await;
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown tool"));
@@ -125,9 +135,7 @@ mod tests {
         registry.register(MathTool);
 
         // Test with missing required fields
-        let result = registry
-            .execute("math", serde_json::json!({}))
-            .await;
+        let result = registry.execute("math", serde_json::json!({})).await;
 
         // Math tool should handle missing fields gracefully
         assert!(result.is_ok());
