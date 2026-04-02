@@ -54,6 +54,9 @@ export default function WorkflowsPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [newTaskKind, setNewTaskKind] = useState('');
+  const [newReviewReportJson, setNewReviewReportJson] = useState('');
+  const [newArtifactsJson, setNewArtifactsJson] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [templates, setTemplates] = useState<WorkflowTemplateSummary[]>([]);
   const [templateError, setTemplateError] = useState<string | null>(null);
@@ -63,6 +66,7 @@ export default function WorkflowsPage() {
   const [wfSubmitting, setWfSubmitting] = useState(false);
   const [wfMessage, setWfMessage] = useState<string | null>(null);
   const [showWorkflowStart, setShowWorkflowStart] = useState(false);
+  const [taskKindFilter, setTaskKindFilter] = useState('');
   const [scopeMissingTeam, setScopeMissingTeam] = useState(
     () => !loadAdminScope().team_id.trim()
   );
@@ -71,14 +75,14 @@ export default function WorkflowsPage() {
     try {
       setLoading(true);
       setError(null);
-      const list = await getTasks();
+      const list = await getTasks({ task_kind: taskKindFilter || undefined });
       setTasks(list);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [taskKindFilter]);
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -124,8 +128,21 @@ export default function WorkflowsPage() {
     if (!title || submitting) return;
     setSubmitting(true);
     try {
-      await createTask({ title });
+      const payload: Parameters<typeof createTask>[0] = {
+        title,
+        task_kind: newTaskKind || undefined,
+      };
+      if (newArtifactsJson.trim()) {
+        payload.artifacts = JSON.parse(newArtifactsJson);
+      }
+      if (newReviewReportJson.trim()) {
+        payload.review_report = JSON.parse(newReviewReportJson);
+      }
+      await createTask(payload);
       setNewTitle('');
+      setNewTaskKind('');
+      setNewReviewReportJson('');
+      setNewArtifactsJson('');
       setCreating(false);
       await load();
     } catch (err) {
@@ -287,15 +304,46 @@ export default function WorkflowsPage() {
         <Card>
           <CardContent className="p-4">
             <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-3 sm:items-center">
-              <input
-                className="flex-1 px-3 py-2 rounded-lg border border-surface-200 dark:border-surface-600 bg-surface-50 dark:bg-surface-700 text-surface-900 dark:text-surface-100"
-                placeholder="任务标题"
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-              />
-              <Button type="submit" disabled={submitting || !newTitle.trim()}>
-                {submitting ? '创建中…' : 'POST /api/tasks'}
-              </Button>
+              <div className="flex-1 grid gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    className="flex-1 px-3 py-2 rounded-lg border border-surface-200 dark:border-surface-600 bg-surface-50 dark:bg-surface-700 text-surface-900 dark:text-surface-100"
+                    placeholder="任务标题"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                  />
+                  <select
+                    className="px-3 py-2 rounded-lg border border-surface-200 dark:border-surface-600 bg-surface-50 dark:bg-surface-700 text-surface-900 dark:text-surface-100"
+                    value={newTaskKind}
+                    onChange={(e) => setNewTaskKind(e.target.value)}
+                  >
+                    <option value="">task_kind（可选）</option>
+                    <option value="requirement">requirement</option>
+                    <option value="design">design</option>
+                    <option value="implement">implement</option>
+                    <option value="code_review">code_review</option>
+                    <option value="bugfix">bugfix</option>
+                    <option value="retro">retro</option>
+                  </select>
+                  <Button type="submit" disabled={submitting || !newTitle.trim()}>
+                    {submitting ? '创建中…' : 'POST /api/tasks'}
+                  </Button>
+                </div>
+                <input
+                  className="px-3 py-2 rounded-lg border border-surface-200 dark:border-surface-600 bg-surface-50 dark:bg-surface-700 text-surface-900 dark:text-surface-100 font-mono text-xs"
+                  placeholder='artifacts JSON（可选）: [{"name":"spec","uri":"..."}]'
+                  value={newArtifactsJson}
+                  onChange={(e) => setNewArtifactsJson(e.target.value)}
+                />
+                {newTaskKind === 'code_review' && (
+                  <textarea
+                    className="px-3 py-2 rounded-lg border border-surface-200 dark:border-surface-600 bg-surface-50 dark:bg-surface-700 text-surface-900 dark:text-surface-100 font-mono text-xs min-h-[80px]"
+                    placeholder='review_report JSON（可选）: {"blocking":[],"non_blocking":[],"wont_fix":[],"backlog":[]}'
+                    value={newReviewReportJson}
+                    onChange={(e) => setNewReviewReportJson(e.target.value)}
+                  />
+                )}
+              </div>
             </form>
           </CardContent>
         </Card>
@@ -303,15 +351,30 @@ export default function WorkflowsPage() {
 
       <Card>
         <CardContent className="p-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-surface-400" />
-            <input
-              type="text"
-              placeholder="按标题筛选…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-lg border border-surface-200 dark:border-surface-600 bg-surface-50 dark:bg-surface-700 text-surface-900 dark:text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
+          <div className="flex gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-[240px] max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-surface-400" />
+              <input
+                type="text"
+                placeholder="按标题筛选…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 rounded-lg border border-surface-200 dark:border-surface-600 bg-surface-50 dark:bg-surface-700 text-surface-900 dark:text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <select
+              className="px-3 py-2 rounded-lg border border-surface-200 dark:border-surface-600 bg-surface-50 dark:bg-surface-700 text-surface-900 dark:text-surface-100"
+              value={taskKindFilter}
+              onChange={(e) => setTaskKindFilter(e.target.value)}
+            >
+              <option value="">全部 task_kind</option>
+              <option value="requirement">requirement</option>
+              <option value="design">design</option>
+              <option value="implement">implement</option>
+              <option value="code_review">code_review</option>
+              <option value="bugfix">bugfix</option>
+              <option value="retro">retro</option>
+            </select>
           </div>
         </CardContent>
       </Card>

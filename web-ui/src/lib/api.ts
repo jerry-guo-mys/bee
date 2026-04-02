@@ -6,12 +6,16 @@ import type {
   AuditLogRecord,
   CreateAgentBody,
   CreateTaskBody,
+  CreateProjectBody,
   DynamicAgent,
   MetricsResponse,
   PutToolPolicyBody,
   StartWorkflowBody,
   Task,
   TaskStatus,
+  ProjectRecord,
+  SpawnChildrenBody,
+  SpawnChildrenResponse,
   ToolAccessPolicy,
   ToolInfo,
   TracesRecentResponse,
@@ -103,10 +107,14 @@ export async function getTasks(params?: {
   status?: TaskStatus
   /** 与后端 `GET /api/tasks?workflow_run_id=` 一致 */
   workflow_run_id?: string
+  project_id?: string
+  task_kind?: string
 }): Promise<Task[]> {
   const q: Record<string, string> = { ...managementScopeQuery() }
   if (params?.status) q.status = params.status
   if (params?.workflow_run_id?.trim()) q.workflow_run_id = params.workflow_run_id.trim()
+  if (params?.project_id?.trim()) q.project_id = params.project_id.trim()
+  if (params?.task_kind?.trim()) q.task_kind = params.task_kind.trim()
   const res = await fetch(buildUrl('/api/tasks', q))
   return handleResponse<Task[]>(res)
 }
@@ -139,6 +147,11 @@ export async function createTask(body: CreateTaskBody): Promise<Task> {
   }
   if (body.description) payload.description = body.description
   if (body.assignee_ids?.length) payload.assignee_ids = body.assignee_ids
+  if (body.project_id?.trim()) payload.project_id = body.project_id.trim()
+  if (body.task_kind?.trim()) payload.task_kind = body.task_kind.trim()
+  if (body.artifacts !== undefined) payload.artifacts = body.artifacts
+  if (body.execution !== undefined) payload.execution = body.execution
+  if (body.review_report !== undefined) payload.review_report = body.review_report
   if (s.team_id) payload.team_id = s.team_id
 
   const res = await fetch(buildUrl('/api/tasks'), {
@@ -147,6 +160,45 @@ export async function createTask(body: CreateTaskBody): Promise<Task> {
     body: JSON.stringify(payload),
   })
   return handleResponse<Task>(res)
+}
+
+export async function getProjects(): Promise<ProjectRecord[]> {
+  const res = await fetch(buildUrl('/api/projects', managementScopeQuery()))
+  return handleResponse<ProjectRecord[]>(res)
+}
+
+export async function createProject(body: CreateProjectBody): Promise<ProjectRecord> {
+  const s = loadAdminScope()
+  const payload: Record<string, unknown> = {
+    ...scopeBody(s),
+    name: body.name,
+  }
+  if (body.description) payload.description = body.description
+  if (body.workflow_run_id) payload.workflow_run_id = body.workflow_run_id
+  const res = await fetch(buildUrl('/api/projects'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return handleResponse<ProjectRecord>(res)
+}
+
+export async function spawnChildren(
+  parentTaskId: string,
+  body: SpawnChildrenBody
+): Promise<SpawnChildrenResponse> {
+  const s = loadAdminScope()
+  const payload: Record<string, unknown> = {
+    ...scopeBody(s),
+    idempotency_key: body.idempotency_key,
+    children: body.children,
+  }
+  const res = await fetch(buildUrl(`/api/tasks/${encodeURIComponent(parentTaskId)}/spawn-children`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return handleResponse<SpawnChildrenResponse>(res)
 }
 
 export async function getAuditLogs(limit = 50): Promise<AuditLogRecord[]> {

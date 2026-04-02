@@ -3,6 +3,7 @@ import Layout from '@/components/Layout';
 import Dashboard from '@/pages/Dashboard';
 import Agents from '@/pages/Agents';
 import Workflows from '@/pages/Workflows';
+import Projects from '@/pages/Projects';
 import Monitoring from '@/pages/Monitoring';
 import Settings from '@/pages/Settings';
 import ToolPolicies from '@/pages/ToolPolicies';
@@ -29,6 +30,10 @@ const router = createBrowserRouter([
       {
         path: 'workbench/runs',
         element: <Workflows />,
+      },
+      {
+        path: 'workbench/projects',
+        element: <Projects />,
       },
       {
         path: 'workbench',

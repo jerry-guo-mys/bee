@@ -147,3 +147,5 @@ cargo fmt -- --check               # Check formatting (CI)
 | `MOONSHOT_API_KEY` | Kimi API Key |
 | `ZHIPU_API_KEY` | GLM API Key |
 | `TASK_PERSISTENCE` / `BEE_TASK_PERSISTENCE` | 任务存储：`json`（默认）\|`sql`\|`dual_write`；见 `task_repository` |
+| `REQUIRE_HUMAN_APPROVAL` | `code_review` 任务关闭到 `done` 时，要求 `execution.human_approval_user_id` |
+| `REQUIRE_CI_GREEN` | `code_review` 任务关闭到 `done` 时，要求 `execution.ci_status=success` |

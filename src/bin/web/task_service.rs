@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// 任务状态：看板列
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +41,18 @@ pub struct Task {
     pub workflow_template_version: Option<i32>,
     #[serde(default)]
     pub internal_group: bool,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub parent_task_id: Option<String>,
+    #[serde(default)]
+    pub task_kind: Option<String>,
+    #[serde(default)]
+    pub artifacts: Option<Value>,
+    #[serde(default)]
+    pub execution: Option<Value>,
+    #[serde(default)]
+    pub review_report: Option<Value>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -67,6 +80,16 @@ pub struct CreateTaskRequest {
     pub workflow_template_version: Option<i32>,
     #[serde(default)]
     pub internal_group: bool,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub task_kind: Option<String>,
+    #[serde(default)]
+    pub artifacts: Option<Value>,
+    #[serde(default)]
+    pub execution: Option<Value>,
+    #[serde(default)]
+    pub review_report: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,6 +106,16 @@ pub struct UpdateTaskRequest {
     pub coordinator_id: Option<String>,
     #[serde(default)]
     pub team_id: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub task_kind: Option<String>,
+    #[serde(default)]
+    pub artifacts: Option<Value>,
+    #[serde(default)]
+    pub execution: Option<Value>,
+    #[serde(default)]
+    pub review_report: Option<Value>,
 }
 
 const TASKS_FILE: &str = "tasks.json";
@@ -114,6 +147,8 @@ pub fn build_task(
     workflow_template_id: Option<String>,
     workflow_run_id: Option<String>,
     internal_group: bool,
+    project_id: Option<String>,
+    parent_task_id: Option<String>,
 ) -> Task {
     let now = chrono::Utc::now().to_rfc3339();
     let title = req.title.trim().to_string();
@@ -132,6 +167,12 @@ pub fn build_task(
         workflow_run_id,
         workflow_template_version: req.workflow_template_version,
         internal_group,
+        project_id,
+        parent_task_id,
+        task_kind: normalize_optional_text(req.task_kind.as_deref()),
+        artifacts: req.artifacts.clone(),
+        execution: req.execution.clone(),
+        review_report: req.review_report.clone(),
         created_at: now.clone(),
         updated_at: now,
     }
@@ -162,6 +203,21 @@ pub fn apply_task_update(task: &mut Task, req: UpdateTaskRequest) {
     }
     if let Some(team_id) = req.team_id {
         task.team_id = normalize_optional_text(Some(team_id.as_str()));
+    }
+    if let Some(project_id) = req.project_id {
+        task.project_id = normalize_optional_text(Some(project_id.as_str()));
+    }
+    if let Some(task_kind) = req.task_kind {
+        task.task_kind = normalize_optional_text(Some(task_kind.as_str()));
+    }
+    if let Some(artifacts) = req.artifacts {
+        task.artifacts = Some(artifacts);
+    }
+    if let Some(execution) = req.execution {
+        task.execution = Some(execution);
+    }
+    if let Some(review_report) = req.review_report {
+        task.review_report = Some(review_report);
     }
     task.updated_at = chrono::Utc::now().to_rfc3339();
 }

@@ -10,6 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Row};
+use serde_json::Value;
 
 use bee::saas::SaasSqliteStore;
 
@@ -64,6 +65,8 @@ pub trait TaskRepository {
         organization_id: Option<&str>,
         team_id: Option<&str>,
         workflow_run_id: Option<&str>,
+        project_id: Option<&str>,
+        task_kind: Option<&str>,
     ) -> Result<Vec<Task>, String>;
 
     fn get_by_id(&self, id: &str) -> Result<Option<Task>, String>;
@@ -97,6 +100,8 @@ impl TaskRepository for WorkspaceTaskRepo {
         organization_id: Option<&str>,
         team_id: Option<&str>,
         workflow_run_id: Option<&str>,
+        project_id: Option<&str>,
+        task_kind: Option<&str>,
     ) -> Result<Vec<Task>, String> {
         list_tasks(
             &self.workspace,
@@ -106,6 +111,8 @@ impl TaskRepository for WorkspaceTaskRepo {
             organization_id,
             team_id,
             workflow_run_id,
+            project_id,
+            task_kind,
         )
     }
 
@@ -156,6 +163,17 @@ fn parse_assignee_ids(json: Option<String>, fallback_agent: Option<String>) -> V
         .unwrap_or_default()
 }
 
+fn json_to_string(value: &Option<Value>) -> Result<Option<String>, String> {
+    match value {
+        Some(v) => serde_json::to_string(v).map(Some).map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
+fn parse_json_value(raw: Option<String>) -> Option<Value> {
+    raw.and_then(|v| serde_json::from_str::<Value>(&v).ok())
+}
+
 fn task_from_row(row: &Row) -> rusqlite::Result<Task> {
     let status_s: String = row.get("status")?;
     let status = task_status_from_db(&status_s).unwrap_or(TaskStatus::Todo);
@@ -186,6 +204,12 @@ fn task_from_row(row: &Row) -> rusqlite::Result<Task> {
         workflow_run_id: row.get::<_, Option<String>>("workflow_run_id")?,
         workflow_template_version,
         internal_group: internal_group != 0,
+        project_id: row.get::<_, Option<String>>("project_id")?,
+        parent_task_id: row.get::<_, Option<String>>("parent_task_id")?,
+        task_kind: row.get::<_, Option<String>>("task_kind")?,
+        artifacts: parse_json_value(row.get::<_, Option<String>>("artifacts_json")?),
+        execution: parse_json_value(row.get::<_, Option<String>>("execution_json")?),
+        review_report: parse_json_value(row.get::<_, Option<String>>("review_report_json")?),
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
@@ -199,7 +223,9 @@ fn list_tasks_sql(workspace: &Path) -> Result<Vec<Task>, String> {
             "SELECT id, tenant_id, organization_id, team_id, title, description, status,
                     created_at, updated_at, assignee_agent_id,
                     workflow_run_id, workflow_template_id, workflow_template_version,
-                    assignee_ids_json, group_id, coordinator_id, internal_group
+                    assignee_ids_json, group_id, coordinator_id, internal_group,
+                    project_id, parent_task_id, task_kind,
+                    artifacts_json, execution_json, review_report_json
              FROM saas_tasks",
         )
         .map_err(|e| e.to_string())?;
@@ -220,6 +246,9 @@ fn upsert_task_sql(workspace: &Path, task: &Task) -> Result<(), String> {
     let org_id = org_or_default(task);
     let status = task_status_to_db(task.status);
     let assignee_json = assignee_ids_json(task)?;
+    let artifacts_json = json_to_string(&task.artifacts)?;
+    let execution_json = json_to_string(&task.execution)?;
+    let review_report_json = json_to_string(&task.review_report)?;
     let internal_i: i64 = if task.internal_group { 1 } else { 0 };
 
     conn.execute(
@@ -228,9 +257,11 @@ fn upsert_task_sql(workspace: &Path, task: &Task) -> Result<(), String> {
             title, description, assignee_agent_id, creator_user_id, status,
             created_at, updated_at,
             workflow_run_id, workflow_template_id, workflow_template_version,
-            assignee_ids_json, group_id, coordinator_id, internal_group
+            assignee_ids_json, group_id, coordinator_id, internal_group,
+            project_id, parent_task_id, task_kind,
+            artifacts_json, execution_json, review_report_json
         ) VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL, NULL, ?7, ?8, ?9,
-                  ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                  ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
         ON CONFLICT(id) DO UPDATE SET
             tenant_id = excluded.tenant_id,
             organization_id = excluded.organization_id,
@@ -247,6 +278,12 @@ fn upsert_task_sql(workspace: &Path, task: &Task) -> Result<(), String> {
             group_id = excluded.group_id,
             coordinator_id = excluded.coordinator_id,
             internal_group = excluded.internal_group,
+            project_id = excluded.project_id,
+            parent_task_id = excluded.parent_task_id,
+            task_kind = excluded.task_kind,
+            artifacts_json = excluded.artifacts_json,
+            execution_json = excluded.execution_json,
+            review_report_json = excluded.review_report_json,
             assignee_agent_id = NULL",
         params![
             task.id,
@@ -265,6 +302,12 @@ fn upsert_task_sql(workspace: &Path, task: &Task) -> Result<(), String> {
             task.group_id,
             task.coordinator_id,
             internal_i,
+            task.project_id,
+            task.parent_task_id,
+            task.task_kind,
+            artifacts_json,
+            execution_json,
+            review_report_json,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -284,6 +327,8 @@ fn filter_tasks(
     organization_id: Option<&str>,
     team_id: Option<&str>,
     workflow_run_id: Option<&str>,
+    project_id: Option<&str>,
+    task_kind: Option<&str>,
 ) -> Vec<Task> {
     tasks.retain(|task| status.is_none_or(|s| task.status == s));
     tasks.retain(|task| {
@@ -296,6 +341,8 @@ fn filter_tasks(
     tasks.retain(|task| {
         workflow_run_id.is_none_or(|w| task.workflow_run_id.as_deref() == Some(w))
     });
+    tasks.retain(|task| project_id.is_none_or(|p| task.project_id.as_deref() == Some(p)));
+    tasks.retain(|task| task_kind.is_none_or(|k| task.task_kind.as_deref() == Some(k)));
     tasks
 }
 
@@ -308,6 +355,8 @@ pub fn list_tasks(
     organization_id: Option<&str>,
     team_id: Option<&str>,
     workflow_run_id: Option<&str>,
+    project_id: Option<&str>,
+    task_kind: Option<&str>,
 ) -> Result<Vec<Task>, String> {
     let tasks = match mode {
         TaskPersistenceMode::Json => load_tasks(workspace),
@@ -320,6 +369,8 @@ pub fn list_tasks(
         organization_id,
         team_id,
         workflow_run_id,
+        project_id,
+        task_kind,
     ))
 }
 
@@ -338,7 +389,9 @@ pub fn get_task(
                     "SELECT id, tenant_id, organization_id, team_id, title, description, status,
                             created_at, updated_at, assignee_agent_id,
                             workflow_run_id, workflow_template_id, workflow_template_version,
-                            assignee_ids_json, group_id, coordinator_id, internal_group
+                            assignee_ids_json, group_id, coordinator_id, internal_group,
+                            project_id, parent_task_id, task_kind,
+                            artifacts_json, execution_json, review_report_json
                      FROM saas_tasks WHERE id = ?1",
                 )
                 .map_err(|e| e.to_string())?;
@@ -489,6 +542,12 @@ mod tests {
             workflow_run_id: Some("run".to_string()),
             workflow_template_version: Some(2),
             internal_group: true,
+            project_id: None,
+            parent_task_id: None,
+            task_kind: Some("implement".to_string()),
+            artifacts: Some(serde_json::json!([{"name":"spec","uri":"x"}])),
+            execution: Some(serde_json::json!({"linked_pr_url":"https://example/pr/1"})),
+            review_report: Some(serde_json::json!({"blocking":[],"non_blocking":[],"wont_fix":[],"backlog":[]})),
             created_at: "2020-01-01T00:00:00Z".to_string(),
             updated_at: "2020-01-01T00:00:00Z".to_string(),
         };
@@ -497,6 +556,8 @@ mod tests {
         assert_eq!(got.title, task.title);
         assert_eq!(got.assignee_ids, task.assignee_ids);
         assert_eq!(got.workflow_template_version, task.workflow_template_version);
+        assert_eq!(got.task_kind.as_deref(), Some("implement"));
+        assert!(got.artifacts.is_some());
         assert_eq!(got.status, TaskStatus::Todo);
     }
 
@@ -518,6 +579,13 @@ mod tests {
             [],
         )
         .unwrap();
+        c.execute(
+            "INSERT OR IGNORE INTO saas_projects
+             (id, tenant_id, organization_id, team_id, name, description, workflow_run_id, created_at, updated_at)
+             VALUES ('proj-1', 'tenant-default', 'org-default', NULL, 'P1', NULL, NULL, '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
         let repo = WorkspaceTaskRepo::new(&dir, TaskPersistenceMode::Sql);
         let _: &dyn TaskRepository = &repo;
         let task = Task {
@@ -535,12 +603,26 @@ mod tests {
             workflow_run_id: Some("run-xyz".to_string()),
             workflow_template_version: None,
             internal_group: false,
+            project_id: Some("proj-1".to_string()),
+            parent_task_id: None,
+            task_kind: Some("design".to_string()),
+            artifacts: None,
+            execution: None,
+            review_report: None,
             created_at: "2020-01-01T00:00:00Z".to_string(),
             updated_at: "2020-01-01T00:00:00Z".to_string(),
         };
         TaskRepository::upsert(&repo, &task).unwrap();
         let listed = repo
-            .list_filtered(None, None, None, None, Some("run-xyz"))
+            .list_filtered(
+                None,
+                None,
+                None,
+                None,
+                Some("run-xyz"),
+                Some("proj-1"),
+                Some("design"),
+            )
             .unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, "tr1");
@@ -582,6 +664,12 @@ mod tests {
             workflow_run_id: None,
             workflow_template_version: None,
             internal_group: false,
+            project_id: None,
+            parent_task_id: None,
+            task_kind: None,
+            artifacts: None,
+            execution: None,
+            review_report: None,
             created_at: "2020-01-01T00:00:00Z".to_string(),
             updated_at: "2020-01-01T00:00:00Z".to_string(),
         };

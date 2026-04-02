@@ -41,6 +41,7 @@ use axum::{
 use bee::memory::{Message, Role};
 use bytes::Bytes;
 use futures_util::stream::{self, TryStreamExt};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -317,6 +318,8 @@ struct TaskBoardQuery {
     organization_id: Option<String>,
     #[serde(default)]
     team_id: Option<String>,
+    #[serde(default)]
+    task_kind: Option<String>,
     #[serde(flatten)]
     scope: WebScopeParams,
 }
@@ -335,6 +338,99 @@ struct StartWorkflowRequest {
     title: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+    #[serde(default)]
+    team_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectsQuery {
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+    #[serde(default)]
+    team_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateProjectRequest {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    workflow_run_id: Option<String>,
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+    #[serde(default)]
+    team_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Serialize)]
+struct ProjectRecord {
+    id: String,
+    tenant_id: String,
+    organization_id: String,
+    team_id: Option<String>,
+    name: String,
+    description: Option<String>,
+    workflow_run_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpawnChildrenRequest {
+    idempotency_key: String,
+    children: Vec<SpawnChildInput>,
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+    #[serde(default)]
+    team_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpawnChildInput {
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default = "default_true")]
+    inherit_workflow_run_id: bool,
+    #[serde(default)]
+    assignee_ids: Vec<String>,
+    #[serde(default)]
+    coordinator_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SpawnChildrenResponse {
+    parent_task_id: String,
+    idempotency_key: String,
+    child_task_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateTaskCiStatusRequest {
+    ci_status: String,
+    #[serde(default)]
+    correlation_id: Option<String>,
+    #[serde(default)]
+    linked_pr_url: Option<String>,
     #[serde(default)]
     tenant_id: Option<String>,
     #[serde(default)]
@@ -385,6 +481,69 @@ struct AuditLogsQuery {
 
 fn default_audit_limit() -> usize {
     50
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|v| {
+            let n = v.trim().to_ascii_lowercase();
+            n == "1" || n == "true" || n == "yes" || n == "on"
+        })
+        .unwrap_or(false)
+}
+
+fn json_get_non_empty_string(value: Option<&serde_json::Value>, key: &str) -> Option<String> {
+    value
+        .and_then(|v| v.get(key))
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn code_review_close_guard(existing: &Task, req: &UpdateTaskRequest) -> Result<(), String> {
+    if req.status != Some(TaskStatus::Done) {
+        return Ok(());
+    }
+    let task_kind = req
+        .task_kind
+        .as_deref()
+        .or(existing.task_kind.as_deref())
+        .unwrap_or("");
+    if task_kind != "code_review" {
+        return Ok(());
+    }
+    let merged_execution = req.execution.as_ref().or(existing.execution.as_ref());
+    let merged_report = req.review_report.as_ref().or(existing.review_report.as_ref());
+
+    if env_flag("REQUIRE_HUMAN_APPROVAL")
+        && json_get_non_empty_string(merged_execution, "human_approval_user_id").is_none()
+    {
+        return Err("closing code_review requires execution.human_approval_user_id".to_string());
+    }
+    if env_flag("REQUIRE_CI_GREEN")
+        && !matches!(
+            json_get_non_empty_string(merged_execution, "ci_status")
+                .as_deref()
+                .map(|s| s.to_ascii_lowercase()),
+            Some(ref s) if s == "success" || s == "green" || s == "passed"
+        )
+    {
+        return Err("closing code_review requires execution.ci_status=success".to_string());
+    }
+    let blocking_is_empty = merged_report
+        .and_then(|v| v.get("blocking"))
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.is_empty())
+        .unwrap_or(false);
+    if !blocking_is_empty {
+        return Err("closing code_review requires review_report.blocking = []".to_string());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1096,8 +1255,11 @@ fn router_admin_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
             "/api/teams/:team_id/agent-instances/bootstrap",
             post(api_team_agent_instances_bootstrap),
         )
+        .route("/api/projects", get(api_projects_list).post(api_projects_create))
         .route("/api/tasks", get(api_tasks_list).post(api_tasks_create))
         .route("/api/tasks/:id", axum::routing::patch(api_tasks_update))
+        .route("/api/tasks/:id/ci-status", post(api_tasks_ci_status))
+        .route("/api/tasks/:id/spawn-children", post(api_tasks_spawn_children))
         .route("/api/tasks/:id/start", post(api_tasks_start))
         .route("/api/tools", get(api_tools_list))
         .route(
@@ -1975,6 +2137,8 @@ async fn api_task_board(
             organization_id.as_deref(),
             team_id.as_deref(),
             None,
+            None,
+            query.task_kind.as_deref(),
         )
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(build_task_board(
@@ -2361,6 +2525,154 @@ async fn api_admin_workflow_template_publish(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// GET /api/projects：按 scope 列出项目
+async fn api_projects_list(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ProjectsQuery>,
+) -> Result<Json<Vec<ProjectRecord>>, (StatusCode, String)> {
+    let tenant_id = query
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| query.scope.management_tenant_id());
+    let organization_id = query
+        .organization_id
+        .clone()
+        .or_else(|| query.scope.management_organization_id());
+    let team_id = query.team_id.clone().or_else(|| query.scope.team_id.clone());
+    require_management_access(
+        &state.workspace,
+        &query
+            .scope
+            .to_access_context(tenant_id.clone(), organization_id.clone(), team_id.clone()),
+        if team_id.is_some() {
+            AccessRequirement::TeamAdmin
+        } else {
+            AccessRequirement::OrgAdmin
+        },
+    )?;
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let conn = store.connection();
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, tenant_id, organization_id, team_id, name, description, workflow_run_id, created_at, updated_at
+             FROM saas_projects
+             WHERE tenant_id = ?1
+               AND (?2 IS NULL OR organization_id = ?2)
+               AND (?3 IS NULL OR team_id = ?3)
+             ORDER BY created_at DESC",
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let rows = stmt
+        .query_map(params![tenant_id, organization_id, team_id], |row| {
+            Ok(ProjectRecord {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                organization_id: row.get(2)?,
+                team_id: row.get(3)?,
+                name: row.get(4)?,
+                description: row.get(5)?,
+                workflow_run_id: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?);
+    }
+    Ok(Json(out))
+}
+
+/// POST /api/projects：创建项目（最小字段）
+async fn api_projects_create(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateProjectRequest>,
+) -> Result<(StatusCode, Json<ProjectRecord>), (StatusCode, String)> {
+    let name = req.name.trim().to_string();
+    if name.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "name is required".to_string()));
+    }
+    let tenant_id = req
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| req.scope.management_tenant_id());
+    let organization_id = req
+        .organization_id
+        .clone()
+        .or_else(|| req.scope.management_organization_id());
+    let team_id = req.team_id.clone().or_else(|| req.scope.team_id.clone());
+    require_management_access(
+        &state.workspace,
+        &req.scope
+            .to_access_context(tenant_id.clone(), organization_id.clone(), team_id.clone()),
+        if team_id.is_some() {
+            AccessRequirement::TeamAdmin
+        } else {
+            AccessRequirement::OrgAdmin
+        },
+    )?;
+    let organization_id = organization_id.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "organization_id is required".to_string(),
+        )
+    })?;
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let id = uuid::Uuid::new_v4().to_string();
+    let description = req.description.and_then(|d| {
+        let d = d.trim().to_string();
+        if d.is_empty() { None } else { Some(d) }
+    });
+    let workflow_run_id = req.workflow_run_id.and_then(|v| {
+        let v = v.trim().to_string();
+        if v.is_empty() { None } else { Some(v) }
+    });
+    store
+        .connection()
+        .execute(
+            "INSERT INTO saas_projects
+             (id, tenant_id, organization_id, team_id, name, description, workflow_run_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                tenant_id,
+                organization_id,
+                team_id,
+                name,
+                description,
+                workflow_run_id,
+                now,
+                now
+            ],
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let project = ProjectRecord {
+        id: id.clone(),
+        tenant_id: tenant_id.clone(),
+        organization_id: organization_id.clone(),
+        team_id: team_id.clone(),
+        name,
+        description,
+        workflow_run_id,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    let _ = write_audit_log(
+        &state.workspace,
+        req.scope
+            .to_audit_actor(tenant_id, Some(organization_id), team_id.clone()),
+        "project.create",
+        "project",
+        id,
+        serde_json::json!({ "team_id": team_id }),
+    );
+    Ok((StatusCode::CREATED, Json(project)))
+}
+
 /// GET /api/tasks：列出所有任务（可选 status 过滤）
 async fn api_tasks_list(
     State(state): State<Arc<AppState>>,
@@ -2376,6 +2688,8 @@ async fn api_tasks_list(
     let org_filter = query.get("organization_id").cloned();
     let team_filter = query.get("team_id").cloned();
     let workflow_run_filter = query.get("workflow_run_id").cloned();
+    let project_filter = query.get("project_id").cloned();
+    let task_kind_filter = query.get("task_kind").cloned();
     let list = state
         .task_repo()
         .list_filtered(
@@ -2384,9 +2698,187 @@ async fn api_tasks_list(
             org_filter.as_deref(),
             team_filter.as_deref(),
             workflow_run_filter.as_deref(),
+            project_filter.as_deref(),
+            task_kind_filter.as_deref(),
         )
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(list))
+}
+
+/// POST /api/tasks/:id/spawn-children：按父任务派生子任务（含幂等）
+async fn api_tasks_spawn_children(
+    State(state): State<Arc<AppState>>,
+    Path(parent_task_id): Path<String>,
+    Json(req): Json<SpawnChildrenRequest>,
+) -> Result<(StatusCode, Json<SpawnChildrenResponse>), (StatusCode, String)> {
+    let parent = state
+        .task_repo()
+        .get_by_id(&parent_task_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "parent task not found".to_string()))?;
+    if parent.status != TaskStatus::Done {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "parent task must be done before spawn-children".to_string(),
+        ));
+    }
+    let tenant_id = req
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| req.scope.management_tenant_id());
+    let organization_id = req
+        .organization_id
+        .clone()
+        .or_else(|| req.scope.management_organization_id());
+    let team_id = req.team_id.clone().or_else(|| req.scope.team_id.clone());
+    if parent.tenant_id.as_deref() != Some(tenant_id.as_str())
+        || parent.organization_id.as_deref() != organization_id.as_deref()
+        || (team_id.is_some() && parent.team_id.as_deref() != team_id.as_deref())
+    {
+        return Err((StatusCode::FORBIDDEN, "parent task scope mismatch".to_string()));
+    }
+    require_management_access(
+        &state.workspace,
+        &req.scope
+            .to_access_context(tenant_id.clone(), organization_id.clone(), team_id.clone()),
+        if team_id.is_some() {
+            AccessRequirement::TeamAdmin
+        } else {
+            AccessRequirement::OrgAdmin
+        },
+    )?;
+    let idempotency_key = req.idempotency_key.trim().to_string();
+    if idempotency_key.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "idempotency_key is required".to_string()));
+    }
+    if req.children.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "children is required".to_string()));
+    }
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let conn = store.connection();
+    let existing_json: Option<String> = conn
+        .query_row(
+            "SELECT child_task_ids_json FROM saas_task_spawn_idempotency WHERE parent_task_id = ?1 AND idempotency_key = ?2",
+            params![parent_task_id, idempotency_key],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(child_json) = existing_json {
+        let ids: Vec<String> = serde_json::from_str(&child_json).unwrap_or_default();
+        return Ok((
+            StatusCode::OK,
+            Json(SpawnChildrenResponse {
+                parent_task_id,
+                idempotency_key,
+                child_task_ids: ids,
+            }),
+        ));
+    }
+
+    let mut children_tasks = Vec::new();
+    for child in &req.children {
+        let title = child.title.trim().to_string();
+        if title.is_empty() {
+            return Err((StatusCode::BAD_REQUEST, "child title is required".to_string()));
+        }
+        let task = build_task(
+            &CreateTaskRequest {
+                title,
+                description: child.description.clone(),
+                assignee_ids: child.assignee_ids.clone(),
+                coordinator_id: child.coordinator_id.clone(),
+                tenant_id: Some(tenant_id.clone()),
+                organization_id: organization_id.clone(),
+                team_id: team_id.clone(),
+                workflow_template_id: parent.workflow_template_id.clone(),
+                workflow_run_id: if child.inherit_workflow_run_id {
+                    parent.workflow_run_id.clone()
+                } else {
+                    None
+                },
+                workflow_template_version: parent.workflow_template_version,
+                internal_group: false,
+                project_id: parent.project_id.clone(),
+                task_kind: None,
+                artifacts: None,
+                execution: None,
+                review_report: None,
+            },
+            child
+                .assignee_ids
+                .iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            None,
+            Some(tenant_id.clone()),
+            organization_id.clone(),
+            team_id.clone(),
+            parent.workflow_template_id.clone(),
+            if child.inherit_workflow_run_id {
+                parent.workflow_run_id.clone()
+            } else {
+                None
+            },
+            false,
+            parent.project_id.clone(),
+            Some(parent.id.clone()),
+        );
+        children_tasks.push(task);
+    }
+    state
+        .task_repo()
+        .append(&children_tasks)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let child_task_ids: Vec<String> = children_tasks.iter().map(|t| t.id.clone()).collect();
+    let child_ids_json = serde_json::to_string(&child_task_ids)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    conn.execute(
+        "INSERT INTO saas_task_spawn_idempotency
+         (id, tenant_id, organization_id, team_id, parent_task_id, idempotency_key, child_task_ids_json, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            tenant_id,
+            organization_id,
+            team_id,
+            parent_task_id,
+            idempotency_key,
+            child_ids_json,
+            chrono::Utc::now().to_rfc3339()
+        ],
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    for task in &children_tasks {
+        emit_event(
+            &state.event_bus,
+            WorkspaceEvent::TaskCreated {
+                id: task.id.clone(),
+                title: task.title.clone(),
+            },
+        );
+    }
+    let _ = write_audit_log(
+        &state.workspace,
+        req.scope
+            .to_audit_actor(tenant_id, organization_id.clone(), team_id.clone()),
+        "task.spawn_children",
+        "task",
+        parent.id,
+        serde_json::json!({
+            "idempotency_key": req.idempotency_key,
+            "child_task_ids": child_task_ids,
+        }),
+    );
+    Ok((
+        StatusCode::CREATED,
+        Json(SpawnChildrenResponse {
+            parent_task_id,
+            idempotency_key: req.idempotency_key,
+            child_task_ids,
+        }),
+    ))
 }
 
 /// POST /api/tasks：创建任务，可选 assignee_ids 自动建群
@@ -2450,6 +2942,8 @@ async fn api_tasks_create(
         req.workflow_template_id.clone(),
         req.workflow_run_id.clone(),
         req.internal_group || group_id.is_some(),
+        req.project_id.clone(),
+        None,
     );
     state
         .task_repo()
@@ -2471,6 +2965,12 @@ async fn api_tasks_update(
     Path(task_id): Path<String>,
     Json(req): Json<UpdateTaskRequest>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
+    let existing = state
+        .task_repo()
+        .get_by_id(&task_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?;
+    code_review_close_guard(&existing, &req).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     let task = task_repository::patch_task(
         &state.workspace,
         state.task_persistence,
@@ -2479,6 +2979,101 @@ async fn api_tasks_update(
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
     .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?;
+    emit_event(
+        &state.event_bus,
+        WorkspaceEvent::TaskUpdated {
+            id: task.id.clone(),
+            status: status_label(task.status).to_string(),
+        },
+    );
+    Ok(Json(task))
+}
+
+/// POST /api/tasks/:id/ci-status：CI webhook 回写任务 execution.ci_status
+async fn api_tasks_ci_status(
+    State(state): State<Arc<AppState>>,
+    Path(task_id): Path<String>,
+    Json(req): Json<UpdateTaskCiStatusRequest>,
+) -> Result<Json<Task>, (StatusCode, String)> {
+    let ci_status = req.ci_status.trim().to_string();
+    if ci_status.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "ci_status is required".to_string()));
+    }
+    let tenant_id = req
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| req.scope.management_tenant_id());
+    let organization_id = req
+        .organization_id
+        .clone()
+        .or_else(|| req.scope.management_organization_id());
+    let team_id = req.team_id.clone().or_else(|| req.scope.team_id.clone());
+    require_management_access(
+        &state.workspace,
+        &req.scope
+            .to_access_context(tenant_id.clone(), organization_id.clone(), team_id.clone()),
+        if team_id.is_some() {
+            AccessRequirement::TeamAdmin
+        } else {
+            AccessRequirement::OrgAdmin
+        },
+    )?;
+    let task = task_repository::patch_task(
+        &state.workspace,
+        state.task_persistence,
+        &task_id,
+        |task| {
+            let mut execution = task
+                .execution
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({}));
+            if !execution.is_object() {
+                execution = serde_json::json!({});
+            }
+            if let Some(obj) = execution.as_object_mut() {
+                obj.insert("ci_status".to_string(), serde_json::Value::String(ci_status.clone()));
+                if let Some(correlation_id) = req
+                    .correlation_id
+                    .as_ref()
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                {
+                    obj.insert(
+                        "correlation_id".to_string(),
+                        serde_json::Value::String(correlation_id),
+                    );
+                }
+                if let Some(linked_pr_url) = req
+                    .linked_pr_url
+                    .as_ref()
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                {
+                    obj.insert(
+                        "linked_pr_url".to_string(),
+                        serde_json::Value::String(linked_pr_url),
+                    );
+                }
+            }
+            task.execution = Some(execution);
+            task.updated_at = chrono::Utc::now().to_rfc3339();
+        },
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+    .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?;
+    let _ = write_audit_log(
+        &state.workspace,
+        req.scope
+            .to_audit_actor(tenant_id, organization_id.clone(), team_id.clone()),
+        "task.ci_status_update",
+        "task",
+        task.id.clone(),
+        serde_json::json!({
+            "ci_status": ci_status,
+            "correlation_id": req.correlation_id,
+            "linked_pr_url": req.linked_pr_url,
+        }),
+    );
     emit_event(
         &state.event_bus,
         WorkspaceEvent::TaskUpdated {

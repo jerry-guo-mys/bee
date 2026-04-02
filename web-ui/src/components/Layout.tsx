@@ -20,6 +20,7 @@ import {
   UserCheck,
   FileText,
   GitBranch,
+  FolderKanban,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -28,6 +29,7 @@ type NavItem = { name: string; href: string; icon: ComponentType<{ className?: s
 const workbenchNav: NavItem[] = [
   { name: '总览', href: '/', icon: LayoutDashboard },
   { name: '流程与任务', href: '/workbench/runs', icon: Kanban },
+  { name: '项目', href: '/workbench/projects', icon: FolderKanban },
 ];
 
 const adminNav: NavItem[] = [

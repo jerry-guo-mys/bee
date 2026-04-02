@@ -75,6 +75,24 @@ export interface Task {
   workflow_run_id?: string | null
   workflow_template_version?: number | null
   internal_group?: boolean
+  project_id?: string | null
+  parent_task_id?: string | null
+  task_kind?: string | null
+  artifacts?: unknown
+  execution?: unknown
+  review_report?: unknown
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectRecord {
+  id: string
+  tenant_id: string
+  organization_id: string
+  team_id?: string | null
+  name: string
+  description?: string | null
+  workflow_run_id?: string | null
   created_at: string
   updated_at: string
 }
@@ -121,6 +139,36 @@ export interface CreateTaskBody {
   title: string
   description?: string
   assignee_ids?: string[]
+  project_id?: string
+  task_kind?: string
+  artifacts?: unknown
+  execution?: unknown
+  review_report?: unknown
+}
+
+export interface CreateProjectBody {
+  name: string
+  description?: string
+  workflow_run_id?: string
+}
+
+export interface SpawnChildInput {
+  title: string
+  description?: string
+  inherit_workflow_run_id?: boolean
+  assignee_ids?: string[]
+  coordinator_id?: string
+}
+
+export interface SpawnChildrenBody {
+  idempotency_key: string
+  children: SpawnChildInput[]
+}
+
+export interface SpawnChildrenResponse {
+  parent_task_id: string
+  idempotency_key: string
+  child_task_ids: string[]
 }
 
 export interface ToolInfo {

@@ -245,6 +245,11 @@ pub fn start_workflow_run(
                 workflow_run_id: Some(workflow_run_id.clone()),
                 workflow_template_version: Some(resolved.version),
                 internal_group: false,
+                project_id: None,
+                task_kind: None,
+                artifacts: None,
+                execution: None,
+                review_report: None,
             },
             assignee_ids,
             None,
@@ -254,6 +259,8 @@ pub fn start_workflow_run(
             Some(resolved.template_key.clone()),
             Some(workflow_run_id.clone()),
             false,
+            None,
+            None,
         );
         if index == 0 {
             task.status = TaskStatus::InProgress;

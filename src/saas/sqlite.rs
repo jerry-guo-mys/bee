@@ -183,9 +183,15 @@ const SAAS_SCHEMA_STATEMENTS: &[&str] = &[
         tenant_id TEXT NOT NULL,
         organization_id TEXT NOT NULL,
         team_id TEXT,
+        project_id TEXT,
+        parent_task_id TEXT,
         workspace_id TEXT,
         title TEXT NOT NULL,
         description TEXT,
+        task_kind TEXT,
+        artifacts_json TEXT,
+        execution_json TEXT,
+        review_report_json TEXT,
         assignee_agent_id TEXT,
         creator_user_id TEXT,
         status TEXT NOT NULL,
@@ -194,6 +200,8 @@ const SAAS_SCHEMA_STATEMENTS: &[&str] = &[
         FOREIGN KEY (tenant_id) REFERENCES saas_tenants(id) ON DELETE CASCADE,
         FOREIGN KEY (organization_id) REFERENCES saas_organizations(id) ON DELETE CASCADE,
         FOREIGN KEY (team_id) REFERENCES saas_teams(id) ON DELETE SET NULL,
+        FOREIGN KEY (project_id) REFERENCES saas_projects(id) ON DELETE SET NULL,
+        FOREIGN KEY (parent_task_id) REFERENCES saas_tasks(id) ON DELETE SET NULL,
         FOREIGN KEY (workspace_id) REFERENCES saas_workspaces(id) ON DELETE SET NULL,
         FOREIGN KEY (assignee_agent_id) REFERENCES saas_agent_instances(id) ON DELETE SET NULL,
         FOREIGN KEY (creator_user_id) REFERENCES saas_users(id) ON DELETE SET NULL
@@ -210,6 +218,8 @@ const SAAS_SCHEMA_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_saas_conversations_org ON saas_conversations(organization_id)",
     "CREATE INDEX IF NOT EXISTS idx_saas_messages_conversation ON saas_conversation_messages(conversation_id)",
     "CREATE INDEX IF NOT EXISTS idx_saas_tasks_org ON saas_tasks(organization_id)",
+    "CREATE INDEX IF NOT EXISTS idx_saas_tasks_project ON saas_tasks(project_id)",
+    "CREATE INDEX IF NOT EXISTS idx_saas_tasks_parent ON saas_tasks(parent_task_id)",
     "CREATE TABLE IF NOT EXISTS saas_workflow_templates (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
@@ -234,6 +244,39 @@ const SAAS_SCHEMA_STATEMENTS: &[&str] = &[
     )",
     "CREATE INDEX IF NOT EXISTS idx_saas_wf_templates_tenant ON saas_workflow_templates(tenant_id)",
     "CREATE INDEX IF NOT EXISTS idx_saas_wf_versions_template ON saas_workflow_template_versions(template_id)",
+    "CREATE TABLE IF NOT EXISTS saas_projects (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        team_id TEXT,
+        name TEXT NOT NULL,
+        description TEXT,
+        workflow_run_id TEXT,
+        pinned_workflow_template_id TEXT,
+        pinned_template_version INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (tenant_id) REFERENCES saas_tenants(id) ON DELETE CASCADE,
+        FOREIGN KEY (organization_id) REFERENCES saas_organizations(id) ON DELETE CASCADE,
+        FOREIGN KEY (team_id) REFERENCES saas_teams(id) ON DELETE SET NULL
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_saas_projects_org ON saas_projects(organization_id)",
+    "CREATE TABLE IF NOT EXISTS saas_task_spawn_idempotency (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        team_id TEXT,
+        parent_task_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        child_task_ids_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(parent_task_id, idempotency_key),
+        FOREIGN KEY (tenant_id) REFERENCES saas_tenants(id) ON DELETE CASCADE,
+        FOREIGN KEY (organization_id) REFERENCES saas_organizations(id) ON DELETE CASCADE,
+        FOREIGN KEY (team_id) REFERENCES saas_teams(id) ON DELETE SET NULL,
+        FOREIGN KEY (parent_task_id) REFERENCES saas_tasks(id) ON DELETE CASCADE
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_saas_spawn_parent ON saas_task_spawn_idempotency(parent_task_id)",
 ];
 
 pub struct SaasSqliteStore {
@@ -299,6 +342,12 @@ impl SaasSqliteStore {
             "internal_group",
             "INTEGER NOT NULL DEFAULT 0",
         )?;
+        ensure_column(&self.conn, "saas_tasks", "project_id", "TEXT")?;
+        ensure_column(&self.conn, "saas_tasks", "parent_task_id", "TEXT")?;
+        ensure_column(&self.conn, "saas_tasks", "task_kind", "TEXT")?;
+        ensure_column(&self.conn, "saas_tasks", "artifacts_json", "TEXT")?;
+        ensure_column(&self.conn, "saas_tasks", "execution_json", "TEXT")?;
+        ensure_column(&self.conn, "saas_tasks", "review_report_json", "TEXT")?;
         Ok(())
     }
 
