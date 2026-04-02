@@ -16,6 +16,8 @@ mod inbox_service;
 mod session_store;
 #[path = "task_coordinator_service.rs"]
 mod task_coordinator_service;
+#[path = "task_repository.rs"]
+mod task_repository;
 #[path = "task_service.rs"]
 mod task_service;
 #[path = "workflow_product_service.rs"]
@@ -64,6 +66,7 @@ use bee::saas::{
     resolve_effective_tool_allowlist, upsert_tool_policy, AccessContext, AccessRequirement,
     AuditActor, AuditLogInput, IndustryTemplate, OrganizationBootstrapRequest, SaasSqliteStore,
     SaasTemplateRepository, TeamTemplateInstantiationRequest, ToolPolicyInput, ToolPolicyScope,
+    WorkflowDefinitionJson, WorkflowTemplateRecord,
 };
 use bee::skills::{Skill, SkillLoader};
 use bee::tool_policy::refine_allowed_tools_for_input;
@@ -79,12 +82,14 @@ use session_store::{
     load_session_from_disk, save_group_session, save_groups_to_disk, save_session_to_disk,
     session_key, session_path, GroupChatMessage, GroupInfo, SessionSnapshot, WebSessionScope,
 };
+use task_repository::TaskPersistenceMode;
 use task_service::{
-    apply_task_update, build_task, load_tasks, save_tasks, status_label, CreateTaskRequest, Task,
-    TaskStatus, UpdateTaskRequest,
+    apply_task_update, build_task, status_label, CreateTaskRequest, Task, TaskStatus,
+    UpdateTaskRequest,
 };
 use workflow_product_service::{
-    build_task_board, list_workflow_templates, start_workflow_run, TaskBoardColumn,
+    build_task_board, merged_workflow_templates_for_tenant, resolve_workflow_template_for_start,
+    start_workflow_run, TaskBoardColumn,
     WorkflowRunResult as ProductWorkflowRunResult, WorkflowStartRequest, WorkflowTemplateSummary,
 };
 
@@ -183,6 +188,8 @@ pub(crate) struct AppState {
     event_bus: broadcast::Sender<String>,
     /// 正在运行的流式会话取消令牌（session_key -> token）
     active_cancellations: Arc<RwLock<HashMap<String, CancellationToken>>>,
+    /// 任务持久化：`TASK_PERSISTENCE` / `BEE_TASK_PERSISTENCE`（见 task_repository）
+    task_persistence: task_repository::TaskPersistenceMode,
 }
 
 #[derive(Debug, Deserialize)]
@@ -317,6 +324,8 @@ struct WorkflowTemplatesQuery {
 #[derive(Debug, Deserialize)]
 struct StartWorkflowRequest {
     template_id: String,
+    #[serde(default)]
+    template_version: Option<i32>,
     title: String,
     #[serde(default)]
     description: Option<String>,
@@ -1020,6 +1029,8 @@ async fn build_app_state() -> anyhow::Result<Arc<AppState>> {
     let groups_path = workspace.join("groups.json");
     let groups = load_groups_from_disk(&groups_path);
     let (event_bus, _) = broadcast::channel::<String>(64);
+    let task_persistence = TaskPersistenceMode::from_env();
+    tracing::info!(?task_persistence, "task persistence mode");
 
     let state = Arc::new(AppState {
         config: cfg.clone(),
@@ -1042,6 +1053,7 @@ async fn build_app_state() -> anyhow::Result<Arc<AppState>> {
         groups_path,
         event_bus,
         active_cancellations: Arc::new(RwLock::new(HashMap::new())),
+        task_persistence,
     });
 
     Ok(state)
@@ -1062,6 +1074,18 @@ fn router_admin_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/task-board", get(api_task_board))
         .route("/api/workflow-templates", get(api_workflow_templates_list))
         .route("/api/workflows/start", post(api_workflows_start))
+        .route(
+            "/api/admin/workflow-templates",
+            get(api_admin_workflow_templates_list).post(api_admin_workflow_templates_create),
+        )
+        .route(
+            "/api/admin/workflow-templates/:id/versions",
+            post(api_admin_workflow_template_add_version),
+        )
+        .route(
+            "/api/admin/workflow-templates/:id/publish",
+            post(api_admin_workflow_template_publish),
+        )
         .route(
             "/api/teams/:team_id/agent-instances/bootstrap",
             post(api_team_agent_instances_bootstrap),
@@ -1937,30 +1961,42 @@ async fn api_task_board(
             AccessRequirement::OrgAdmin
         },
     )?;
-    let tasks = load_tasks(&state.workspace);
+    let tasks = task_repository::list_tasks(
+        &state.workspace,
+        state.task_persistence,
+        None,
+        Some(tenant_id.as_str()),
+        organization_id.as_deref(),
+        team_id.as_deref(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(build_task_board(
         &tasks,
-        Some(&tenant_id),
+        Some(tenant_id.as_str()),
         organization_id.as_deref(),
         team_id.as_deref(),
     )))
 }
 
-/// GET /api/workflow-templates：列出产品级工作流模板
+/// GET /api/workflow-templates：内置模板 + 租户已发布模板合并（同 slug 时租户覆盖内置）
 async fn api_workflow_templates_list(
     State(state): State<Arc<AppState>>,
     Query(query): Query<WorkflowTemplatesQuery>,
 ) -> Result<Json<Vec<WorkflowTemplateSummary>>, (StatusCode, String)> {
+    let tenant_id = query.scope.management_tenant_id();
     require_management_access(
         &state.workspace,
         &query.scope.to_access_context(
-            query.scope.management_tenant_id(),
+            tenant_id.clone(),
             query.scope.management_organization_id(),
             query.scope.team_id.clone(),
         ),
         AccessRequirement::OrgAdmin,
     )?;
-    Ok(Json(list_workflow_templates()))
+    Ok(Json(merged_workflow_templates_for_tenant(
+        &tenant_id,
+        &state.workspace,
+    )))
 }
 
 /// POST /api/workflows/start：根据产品级模板创建一组任务
@@ -1992,18 +2028,33 @@ async fn api_workflows_start(
         },
     )?;
 
-    let mut tasks = load_tasks(&state.workspace);
-    let workflow = start_workflow_run(&WorkflowStartRequest {
-        tenant_id: Some(tenant_id.clone()),
-        organization_id: organization_id.clone(),
-        team_id: team_id.clone(),
-        title,
-        description: req.description.clone(),
-        template_id: req.template_id.clone(),
-    })
+    let template_key = req.template_id.trim().to_string();
+    if template_key.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "template_id is required".to_string()));
+    }
+    let resolved = resolve_workflow_template_for_start(
+        &state.workspace,
+        &tenant_id,
+        &template_key,
+        req.template_version,
+    )
+    .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace)).ok();
+    let workflow = start_workflow_run(
+        &WorkflowStartRequest {
+            tenant_id: Some(tenant_id.clone()),
+            organization_id: organization_id.clone(),
+            team_id: team_id.clone(),
+            title,
+            description: req.description.clone(),
+            template_id: template_key.clone(),
+            template_version: req.template_version,
+        },
+        &resolved,
+        store.as_ref(),
+    )
     .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
     for task in &workflow.tasks {
-        tasks.push(task.clone());
         emit_event(
             &state.event_bus,
             WorkspaceEvent::TaskCreated {
@@ -2012,7 +2063,8 @@ async fn api_workflows_start(
             },
         );
     }
-    save_tasks(&state.workspace, &tasks);
+    task_repository::append_tasks(&state.workspace, state.task_persistence, &workflow.tasks)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let _ = write_audit_log(
         &state.workspace,
         req.scope
@@ -2022,6 +2074,7 @@ async fn api_workflows_start(
         workflow.workflow_run_id.clone(),
         serde_json::json!({
             "workflow_template_id": workflow.workflow_template_id,
+            "workflow_template_version": workflow.workflow_template_version,
             "task_ids": workflow.tasks.iter().map(|task| task.id.clone()).collect::<Vec<_>>(),
             "team_id": team_id,
         }),
@@ -2030,12 +2083,280 @@ async fn api_workflows_start(
     Ok((StatusCode::CREATED, Json(workflow)))
 }
 
+// --- 工作流模板管理（专家 / OrgAdmin）---
+
+#[derive(Debug, Deserialize)]
+struct AdminWorkflowTemplatesListQuery {
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminWorkflowVersionSummary {
+    version: i32,
+    published_at: Option<String>,
+    created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminWorkflowTemplateDetail {
+    id: String,
+    slug: String,
+    name: String,
+    description: Option<String>,
+    status: String,
+    created_at: String,
+    updated_at: String,
+    versions: Vec<AdminWorkflowVersionSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminWorkflowTemplatesListResponse {
+    templates: Vec<AdminWorkflowTemplateDetail>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminCreateWorkflowTemplateBody {
+    slug: String,
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    definition: WorkflowDefinitionJson,
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminAddWorkflowVersionBody {
+    definition: WorkflowDefinitionJson,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminPublishWorkflowTemplateBody {
+    version: i32,
+    #[serde(flatten)]
+    scope: WebScopeParams,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminWorkflowTemplateCreateResponse {
+    id: String,
+    slug: String,
+}
+
+async fn api_admin_workflow_templates_list(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<AdminWorkflowTemplatesListQuery>,
+) -> Result<Json<AdminWorkflowTemplatesListResponse>, (StatusCode, String)> {
+    let tenant_id = q
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| q.scope.management_tenant_id());
+    require_management_access(
+        &state.workspace,
+        &q.scope.to_access_context(
+            tenant_id.clone(),
+            q.scope.management_organization_id(),
+            q.scope.team_id.clone(),
+        ),
+        AccessRequirement::OrgAdmin,
+    )?;
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let rows = store
+        .list_workflow_templates_for_tenant(&tenant_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut templates = Vec::with_capacity(rows.len());
+    for r in rows {
+        let versions_raw = store
+            .list_workflow_template_versions(&r.id)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let versions = versions_raw
+            .into_iter()
+            .map(|v| AdminWorkflowVersionSummary {
+                version: v.version,
+                published_at: v.published_at,
+                created_at: v.created_at,
+            })
+            .collect();
+        templates.push(AdminWorkflowTemplateDetail {
+            id: r.id,
+            slug: r.slug,
+            name: r.name,
+            description: r.description,
+            status: r.status,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            versions,
+        });
+    }
+    Ok(Json(AdminWorkflowTemplatesListResponse { templates }))
+}
+
+async fn api_admin_workflow_templates_create(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<AdminCreateWorkflowTemplateBody>,
+) -> Result<(StatusCode, Json<AdminWorkflowTemplateCreateResponse>), (StatusCode, String)> {
+    let tenant_id = body
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| body.scope.management_tenant_id());
+    require_management_access(
+        &state.workspace,
+        &body.scope.to_access_context(
+            tenant_id.clone(),
+            body.scope.management_organization_id(),
+            body.scope.team_id.clone(),
+        ),
+        AccessRequirement::OrgAdmin,
+    )?;
+    let slug = body.slug.trim().to_string();
+    if slug.is_empty() || !slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "slug must be non-empty alphanumeric/underscore/dash".to_string(),
+        ));
+    }
+    if body.definition.steps.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "definition.steps must not be empty".to_string(),
+        ));
+    }
+    let name = body.name.trim().to_string();
+    if name.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "name is required".to_string()));
+    }
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let id = uuid::Uuid::new_v4().to_string();
+    let record = WorkflowTemplateRecord {
+        id: id.clone(),
+        tenant_id: tenant_id.clone(),
+        slug: slug.clone(),
+        name,
+        description: body.description.clone(),
+        status: "draft".to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    store
+        .create_workflow_template(&record, &body.definition)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let _ = write_audit_log(
+        &state.workspace,
+        body
+            .scope
+            .to_audit_actor(tenant_id.clone(), body.scope.management_organization_id(), body.scope.team_id.clone()),
+        "workflow_template.create",
+        "workflow_template",
+        id.clone(),
+        serde_json::json!({ "slug": slug }),
+    );
+    Ok((
+        StatusCode::CREATED,
+        Json(AdminWorkflowTemplateCreateResponse { id, slug }),
+    ))
+}
+
+async fn api_admin_workflow_template_add_version(
+    State(state): State<Arc<AppState>>,
+    Path(template_id): Path<String>,
+    Json(body): Json<AdminAddWorkflowVersionBody>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let tenant_id = body.scope.management_tenant_id();
+    require_management_access(
+        &state.workspace,
+        &body.scope.to_access_context(
+            tenant_id.clone(),
+            body.scope.management_organization_id(),
+            body.scope.team_id.clone(),
+        ),
+        AccessRequirement::OrgAdmin,
+    )?;
+    if body.definition.steps.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "definition.steps must not be empty".to_string(),
+        ));
+    }
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let meta = store
+        .get_workflow_template_by_id(&template_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "template not found".to_string()))?;
+    if meta.tenant_id != tenant_id {
+        return Err((StatusCode::FORBIDDEN, "template tenant mismatch".to_string()));
+    }
+    let version = store
+        .add_workflow_template_version(&template_id, &body.definition)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let _ = write_audit_log(
+        &state.workspace,
+        body
+            .scope
+            .to_audit_actor(tenant_id.clone(), body.scope.management_organization_id(), body.scope.team_id.clone()),
+        "workflow_template.version.create",
+        "workflow_template",
+        template_id.clone(),
+        serde_json::json!({ "version": version }),
+    );
+    Ok(Json(serde_json::json!({ "version": version })))
+}
+
+async fn api_admin_workflow_template_publish(
+    State(state): State<Arc<AppState>>,
+    Path(template_id): Path<String>,
+    Json(body): Json<AdminPublishWorkflowTemplateBody>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let tenant_id = body.scope.management_tenant_id();
+    require_management_access(
+        &state.workspace,
+        &body.scope.to_access_context(
+            tenant_id.clone(),
+            body.scope.management_organization_id(),
+            body.scope.team_id.clone(),
+        ),
+        AccessRequirement::OrgAdmin,
+    )?;
+    let store = SaasSqliteStore::new(saas_db_path(&state.workspace))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let meta = store
+        .get_workflow_template_by_id(&template_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "template not found".to_string()))?;
+    if meta.tenant_id != tenant_id {
+        return Err((StatusCode::FORBIDDEN, "template tenant mismatch".to_string()));
+    }
+    store
+        .publish_workflow_template_version(&template_id, body.version)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let _ = write_audit_log(
+        &state.workspace,
+        body
+            .scope
+            .to_audit_actor(tenant_id.clone(), body.scope.management_organization_id(), body.scope.team_id.clone()),
+        "workflow_template.publish",
+        "workflow_template",
+        template_id.clone(),
+        serde_json::json!({ "version": body.version }),
+    );
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// GET /api/tasks：列出所有任务（可选 status 过滤）
 async fn api_tasks_list(
     State(state): State<Arc<AppState>>,
     Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Vec<Task>>, (StatusCode, String)> {
-    let tasks = load_tasks(&state.workspace);
     let status_filter = query.get("status").and_then(|s| match s.as_str() {
         "todo" => Some(TaskStatus::Todo),
         "in_progress" => Some(TaskStatus::InProgress),
@@ -2045,25 +2366,15 @@ async fn api_tasks_list(
     let tenant_filter = query.get("tenant_id").cloned();
     let org_filter = query.get("organization_id").cloned();
     let team_filter = query.get("team_id").cloned();
-    let list: Vec<Task> = tasks
-        .into_iter()
-        .filter(|task| status_filter.is_none_or(|status| task.status == status))
-        .filter(|task| {
-            tenant_filter
-                .as_deref()
-                .is_none_or(|tenant_id| task.tenant_id.as_deref() == Some(tenant_id))
-        })
-        .filter(|task| {
-            org_filter.as_deref().is_none_or(|organization_id| {
-                task.organization_id.as_deref() == Some(organization_id)
-            })
-        })
-        .filter(|task| {
-            team_filter
-                .as_deref()
-                .is_none_or(|team_id| task.team_id.as_deref() == Some(team_id))
-        })
-        .collect();
+    let list = task_repository::list_tasks(
+        &state.workspace,
+        state.task_persistence,
+        status_filter,
+        tenant_filter.as_deref(),
+        org_filter.as_deref(),
+        team_filter.as_deref(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(list))
 }
 
@@ -2129,9 +2440,8 @@ async fn api_tasks_create(
         req.workflow_run_id.clone(),
         req.internal_group || group_id.is_some(),
     );
-    let mut tasks = load_tasks(&state.workspace);
-    tasks.push(task.clone());
-    save_tasks(&state.workspace, &tasks);
+    task_repository::upsert_task(&state.workspace, state.task_persistence, &task)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     emit_event(
         &state.event_bus,
         WorkspaceEvent::TaskCreated {
@@ -2148,15 +2458,14 @@ async fn api_tasks_update(
     Path(task_id): Path<String>,
     Json(req): Json<UpdateTaskRequest>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
-    let mut tasks = load_tasks(&state.workspace);
-    let pos = tasks.iter().position(|t| t.id == task_id);
-    let task = match pos {
-        Some(i) => &mut tasks[i],
-        None => return Err((StatusCode::NOT_FOUND, "task not found".to_string())),
-    };
-    apply_task_update(task, req);
-    let task = task.clone();
-    save_tasks(&state.workspace, &tasks);
+    let task = task_repository::patch_task(
+        &state.workspace,
+        state.task_persistence,
+        &task_id,
+        |task| apply_task_update(task, req),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+    .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?;
     emit_event(
         &state.event_bus,
         WorkspaceEvent::TaskUpdated {

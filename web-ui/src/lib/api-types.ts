@@ -72,6 +72,7 @@ export interface Task {
   coordinator_id?: string | null
   workflow_template_id?: string | null
   workflow_run_id?: string | null
+  workflow_template_version?: number | null
   internal_group?: boolean
   created_at: string
   updated_at: string
@@ -144,6 +145,9 @@ export interface WorkflowTemplateSummary {
   description: string
   team_hint: string
   steps: string[]
+  /** 0 = 内置；租户模板为已发布版本号 */
+  version?: number
+  source?: string
 }
 
 export interface StartWorkflowBody {
@@ -158,7 +162,35 @@ export interface StartWorkflowBody {
 export interface WorkflowRunResult {
   workflow_run_id: string
   workflow_template_id: string
+  workflow_template_version?: number
   tasks: Task[]
+}
+
+/** GET /api/admin/workflow-templates */
+export interface AdminWorkflowVersionSummary {
+  version: number
+  published_at?: string | null
+  created_at: string
+}
+
+export interface AdminWorkflowTemplateDetail {
+  id: string
+  slug: string
+  name: string
+  description?: string | null
+  status: string
+  created_at: string
+  updated_at: string
+  versions: AdminWorkflowVersionSummary[]
+}
+
+export interface AdminWorkflowTemplatesListResponse {
+  templates: AdminWorkflowTemplateDetail[]
+}
+
+export interface AdminWorkflowTemplateCreateResponse {
+  id: string
+  slug: string
 }
 
 export interface PutToolPolicyBody {

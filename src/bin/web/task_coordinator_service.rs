@@ -6,7 +6,8 @@ use futures_util::stream;
 use tokio::sync::mpsc;
 
 use super::session_store::{save_session_to_disk, WebSessionScope};
-use super::task_service::{load_tasks, save_tasks, status_label, TaskStatus};
+use super::task_repository;
+use super::task_service::{status_label, TaskStatus};
 use super::{
     emit_event, get_or_create_vector_for_assistant, resolve_allowed_tools_for_scope, AppState,
     WorkspaceEvent, DEFAULT_MAX_TURNS,
@@ -20,11 +21,8 @@ pub async fn start_task(
     state: Arc<AppState>,
     task_id: String,
 ) -> Result<Response, (StatusCode, String)> {
-    let tasks = load_tasks(&state.workspace);
-    let task = tasks
-        .iter()
-        .find(|task| task.id == task_id)
-        .cloned()
+    let task = task_repository::get_task(&state.workspace, state.task_persistence, &task_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?;
     let coordinator_id = task
         .coordinator_id
@@ -82,6 +80,7 @@ pub async fn start_task(
     let task_id_clone = task_id.clone();
     let coordinator_id_clone = coordinator_id.clone();
     let scope_clone = scope.clone();
+    let task_persistence = state.task_persistence;
     tokio::spawn(async move {
         let _ = process_message_stream(
             components.as_ref(),
@@ -102,21 +101,19 @@ pub async fn start_task(
             &context,
             Some(&scope_clone),
         );
-        let mut tasks = load_tasks(&state_spawn.workspace);
-        let updated = tasks
-            .iter_mut()
-            .find(|task| task.id == task_id_clone)
-            .map(|task| {
+        if let Ok(Some(updated)) = task_repository::patch_task(
+            &state_spawn.workspace,
+            task_persistence,
+            &task_id_clone,
+            |task| {
                 task.status = TaskStatus::InProgress;
                 task.updated_at = chrono::Utc::now().to_rfc3339();
-                task.id.clone()
-            });
-        if let Some(id) = updated {
-            save_tasks(&state_spawn.workspace, &tasks);
+            },
+        ) {
             emit_event(
                 &state_spawn.event_bus,
                 WorkspaceEvent::TaskUpdated {
-                    id,
+                    id: updated.id.clone(),
                     status: status_label(TaskStatus::InProgress).to_string(),
                 },
             );

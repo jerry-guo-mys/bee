@@ -19,6 +19,7 @@ import {
   Users,
   UserCheck,
   FileText,
+  GitBranch,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -30,6 +31,7 @@ const workbenchNav: NavItem[] = [
 ];
 
 const adminNav: NavItem[] = [
+  { name: '流程模板', href: '/admin/workflow-templates', icon: GitBranch },
   { name: 'Agent 管理', href: '/agents', icon: Bot },
   { name: '工具策略', href: '/tool-policies', icon: Shield },
   { name: '监控日志', href: '/monitoring', icon: BarChart3 },

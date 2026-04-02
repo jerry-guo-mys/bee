@@ -17,6 +17,8 @@ import type {
   TracesRecentResponse,
   WorkflowRunResult,
   WorkflowTemplateSummary,
+  AdminWorkflowTemplatesListResponse,
+  AdminWorkflowTemplateCreateResponse,
   // SaaS Admin types
   Tenant,
   TenantDetail,
@@ -217,6 +219,62 @@ export async function startWorkflow(body: StartWorkflowBody): Promise<WorkflowRu
     body: JSON.stringify(payload),
   })
   return handleResponse<WorkflowRunResult>(res)
+}
+
+export async function getAdminWorkflowTemplates(): Promise<AdminWorkflowTemplatesListResponse> {
+  const res = await fetch(buildUrl('/api/admin/workflow-templates', managementScopeQuery()))
+  return handleResponse<AdminWorkflowTemplatesListResponse>(res)
+}
+
+export async function createAdminWorkflowTemplate(body: {
+  slug: string
+  name: string
+  description?: string
+  definition: unknown
+}): Promise<AdminWorkflowTemplateCreateResponse> {
+  const s = loadAdminScope()
+  const res = await fetch(buildUrl('/api/admin/workflow-templates'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...scopeBody(s),
+      tenant_id: s.tenant_id,
+      slug: body.slug,
+      name: body.name,
+      description: body.description,
+      definition: body.definition,
+    }),
+  })
+  return handleResponse<AdminWorkflowTemplateCreateResponse>(res)
+}
+
+export async function addAdminWorkflowTemplateVersion(
+  templateId: string,
+  definition: unknown
+): Promise<{ version: number }> {
+  const s = loadAdminScope()
+  const res = await fetch(buildUrl(`/api/admin/workflow-templates/${encodeURIComponent(templateId)}/versions`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...scopeBody(s),
+      definition,
+    }),
+  })
+  return handleResponse<{ version: number }>(res)
+}
+
+export async function publishAdminWorkflowTemplate(templateId: string, version: number): Promise<void> {
+  const s = loadAdminScope()
+  const res = await fetch(buildUrl(`/api/admin/workflow-templates/${encodeURIComponent(templateId)}/publish`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...scopeBody(s),
+      version,
+    }),
+  })
+  if (!res.ok) throw new Error(await res.text())
 }
 
 // ==================== SaaS Admin APIs (Phase 1+2) ====================

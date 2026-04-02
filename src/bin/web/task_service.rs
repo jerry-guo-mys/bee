@@ -37,6 +37,8 @@ pub struct Task {
     #[serde(default)]
     pub workflow_run_id: Option<String>,
     #[serde(default)]
+    pub workflow_template_version: Option<i32>,
+    #[serde(default)]
     pub internal_group: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -61,6 +63,8 @@ pub struct CreateTaskRequest {
     pub workflow_template_id: Option<String>,
     #[serde(default)]
     pub workflow_run_id: Option<String>,
+    #[serde(default)]
+    pub workflow_template_version: Option<i32>,
     #[serde(default)]
     pub internal_group: bool,
 }
@@ -126,6 +130,7 @@ pub fn build_task(
         coordinator_id: normalize_optional_text(req.coordinator_id.as_deref()),
         workflow_template_id,
         workflow_run_id,
+        workflow_template_version: req.workflow_template_version,
         internal_group,
         created_at: now.clone(),
         updated_at: now,

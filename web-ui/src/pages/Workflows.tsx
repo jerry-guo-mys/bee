@@ -239,9 +239,17 @@ export default function WorkflowsPage() {
                       {tpl.name}
                     </div>
                     <div className="text-xs text-surface-500 mt-1 line-clamp-2">{tpl.description}</div>
-                    <Badge variant="default" className="mt-2">
-                      {tpl.team_hint}
-                    </Badge>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <Badge variant="default">{tpl.team_hint || '—'}</Badge>
+                      {tpl.version != null && tpl.version > 0 && (
+                        <Badge variant="info">v{tpl.version}</Badge>
+                      )}
+                      {tpl.source === 'tenant' && (
+                        <Badge variant="success" className="text-xs">
+                          租户
+                        </Badge>
+                      )}
+                    </div>
                   </button>
                 ))}
               </div>

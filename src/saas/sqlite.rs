@@ -210,6 +210,30 @@ const SAAS_SCHEMA_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_saas_conversations_org ON saas_conversations(organization_id)",
     "CREATE INDEX IF NOT EXISTS idx_saas_messages_conversation ON saas_conversation_messages(conversation_id)",
     "CREATE INDEX IF NOT EXISTS idx_saas_tasks_org ON saas_tasks(organization_id)",
+    "CREATE TABLE IF NOT EXISTS saas_workflow_templates (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (tenant_id) REFERENCES saas_tenants(id) ON DELETE CASCADE,
+        UNIQUE (tenant_id, slug)
+    )",
+    "CREATE TABLE IF NOT EXISTS saas_workflow_template_versions (
+        id TEXT PRIMARY KEY,
+        template_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        definition_json TEXT NOT NULL,
+        published_at TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES saas_workflow_templates(id) ON DELETE CASCADE,
+        UNIQUE (template_id, version)
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_saas_wf_templates_tenant ON saas_workflow_templates(tenant_id)",
+    "CREATE INDEX IF NOT EXISTS idx_saas_wf_versions_template ON saas_workflow_template_versions(template_id)",
 ];
 
 pub struct SaasSqliteStore {
@@ -251,6 +275,29 @@ impl SaasSqliteStore {
             "saas_agent_instances",
             "knowledge_base_ids_override_json",
             "TEXT",
+        )?;
+        // Workbench / TaskRepository（M3）：与 API Task 对齐的扩展列
+        ensure_column(&self.conn, "saas_tasks", "workflow_run_id", "TEXT")?;
+        ensure_column(&self.conn, "saas_tasks", "workflow_template_id", "TEXT")?;
+        ensure_column(
+            &self.conn,
+            "saas_tasks",
+            "workflow_template_version",
+            "INTEGER",
+        )?;
+        ensure_column(
+            &self.conn,
+            "saas_tasks",
+            "assignee_ids_json",
+            "TEXT",
+        )?;
+        ensure_column(&self.conn, "saas_tasks", "group_id", "TEXT")?;
+        ensure_column(&self.conn, "saas_tasks", "coordinator_id", "TEXT")?;
+        ensure_column(
+            &self.conn,
+            "saas_tasks",
+            "internal_group",
+            "INTEGER NOT NULL DEFAULT 0",
         )?;
         Ok(())
     }
@@ -594,6 +641,259 @@ impl SaasSqliteStore {
         })?;
         logs.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(|e| anyhow::anyhow!(e))
     }
+
+    // ==================== 工作流模板（工作台 M2） ====================
+
+    /// 按团队 + Agent 模板解析一个活跃实例 ID（用于任务 assignee）
+    pub fn find_agent_instance_for_team_template(
+        &self,
+        team_id: &str,
+        agent_template_id: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id FROM saas_agent_instances WHERE team_id = ? AND template_id = ? AND status = 'active' LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map([team_id, agent_template_id], |row| row.get::<_, String>(0))?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// 某租户下所有已发布版本（每模板取最高已发布 version）
+    pub fn list_published_workflow_templates(
+        &self,
+        tenant_id: &str,
+    ) -> anyhow::Result<Vec<(crate::saas::WorkflowTemplateRecord, i32, String)>> {
+        let mut stmt = self.conn.prepare(
+            r"
+            SELECT t.id, t.tenant_id, t.slug, t.name, t.description, t.status, t.created_at, t.updated_at,
+                   v.version, v.definition_json
+            FROM saas_workflow_templates t
+            INNER JOIN saas_workflow_template_versions v ON v.template_id = t.id
+            WHERE t.tenant_id = ?1
+              AND t.status != 'archived'
+              AND v.published_at IS NOT NULL
+              AND v.version = (
+                SELECT MAX(v2.version) FROM saas_workflow_template_versions v2
+                WHERE v2.template_id = t.id AND v2.published_at IS NOT NULL
+              )
+            ORDER BY t.slug
+            ",
+        )?;
+        let rows = stmt.query_map([tenant_id], |row| {
+            Ok((
+                crate::saas::WorkflowTemplateRecord {
+                    id: row.get(0)?,
+                    tenant_id: row.get(1)?,
+                    slug: row.get(2)?,
+                    name: row.get(3)?,
+                    description: row.get(4)?,
+                    status: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                },
+                row.get::<_, i64>(8)? as i32,
+                row.get::<_, String>(9)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    /// 管理端：含 draft、未发布版本
+    pub fn list_workflow_templates_for_tenant(
+        &self,
+        tenant_id: &str,
+    ) -> anyhow::Result<Vec<crate::saas::WorkflowTemplateRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, tenant_id, slug, name, description, status, created_at, updated_at
+             FROM saas_workflow_templates WHERE tenant_id = ?1 ORDER BY slug",
+        )?;
+        let rows = stmt.query_map([tenant_id], |row| {
+            Ok(crate::saas::WorkflowTemplateRecord {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                slug: row.get(2)?,
+                name: row.get(3)?,
+                description: row.get(4)?,
+                status: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    pub fn list_workflow_template_versions(
+        &self,
+        template_id: &str,
+    ) -> anyhow::Result<Vec<crate::saas::WorkflowTemplateVersionRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, template_id, version, definition_json, published_at, created_at
+             FROM saas_workflow_template_versions WHERE template_id = ?1 ORDER BY version",
+        )?;
+        let rows = stmt.query_map([template_id], |row| {
+            Ok(crate::saas::WorkflowTemplateVersionRecord {
+                id: row.get(0)?,
+                template_id: row.get(1)?,
+                version: row.get::<_, i64>(2)? as i32,
+                definition_json: row.get(3)?,
+                published_at: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    /// 解析用于启动 run：指定 slug + 可选版本；无版本则取最新已发布
+    pub fn resolve_published_workflow_for_start(
+        &self,
+        tenant_id: &str,
+        slug: &str,
+        version: Option<i32>,
+    ) -> anyhow::Result<Option<(String, i32, crate::saas::WorkflowDefinitionJson)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.id FROM saas_workflow_templates t WHERE t.tenant_id = ?1 AND t.slug = ?2 LIMIT 1",
+        )?;
+        let template_uuid: String = match stmt.query_row([tenant_id, slug], |row| row.get(0)) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+
+        let (ver, def_str): (i32, String) = if let Some(v) = version {
+            match self.conn.query_row(
+                "SELECT version, definition_json FROM saas_workflow_template_versions
+                 WHERE template_id = ?1 AND version = ?2 AND published_at IS NOT NULL",
+                rusqlite::params![&template_uuid, v],
+                |row| Ok((row.get::<_, i64>(0)? as i32, row.get::<_, String>(1)?)),
+            ) {
+                Ok(x) => x,
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    anyhow::bail!("workflow version {v} not found or not published")
+                }
+                Err(e) => return Err(e.into()),
+            }
+        } else {
+            match self.conn.query_row(
+                "SELECT version, definition_json FROM saas_workflow_template_versions
+                 WHERE template_id = ?1 AND published_at IS NOT NULL
+                 ORDER BY version DESC LIMIT 1",
+                [&template_uuid],
+                |row| Ok((row.get::<_, i64>(0)? as i32, row.get::<_, String>(1)?)),
+            ) {
+                Ok(x) => x,
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    anyhow::bail!("no published workflow version for this template")
+                }
+                Err(e) => return Err(e.into()),
+            }
+        };
+
+        let def = crate::saas::WorkflowDefinitionJson::parse(&def_str)?;
+        Ok(Some((template_uuid, ver, def)))
+    }
+
+    pub fn create_workflow_template(
+        &self,
+        record: &crate::saas::WorkflowTemplateRecord,
+        definition: &crate::saas::WorkflowDefinitionJson,
+    ) -> anyhow::Result<()> {
+        let def_str = serde_json::to_string(definition)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let ver_id = uuid::Uuid::new_v4().to_string();
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO saas_workflow_templates (id, tenant_id, slug, name, description, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                &record.id,
+                &record.tenant_id,
+                &record.slug,
+                &record.name,
+                record.description.as_deref().unwrap_or(""),
+                &record.status,
+                &record.created_at,
+                &record.updated_at,
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO saas_workflow_template_versions (id, template_id, version, definition_json, published_at, created_at)
+             VALUES (?1, ?2, 1, ?3, NULL, ?4)",
+            rusqlite::params![&ver_id, &record.id, &def_str, &now],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn add_workflow_template_version(
+        &self,
+        template_id: &str,
+        definition: &crate::saas::WorkflowDefinitionJson,
+    ) -> anyhow::Result<i32> {
+        let next_v: i32 = self.conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM saas_workflow_template_versions WHERE template_id = ?1",
+            [template_id],
+            |row| row.get::<_, i64>(0),
+        )? as i32;
+        let def_str = serde_json::to_string(definition)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let ver_id = uuid::Uuid::new_v4().to_string();
+        self.conn.execute(
+            "INSERT INTO saas_workflow_template_versions (id, template_id, version, definition_json, published_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+            rusqlite::params![&ver_id, template_id, next_v, &def_str, &now],
+        )?;
+        self.conn.execute(
+            "UPDATE saas_workflow_templates SET updated_at = ?1 WHERE id = ?2",
+            [&now, template_id],
+        )?;
+        Ok(next_v)
+    }
+
+    pub fn publish_workflow_template_version(
+        &self,
+        template_id: &str,
+        version: i32,
+    ) -> anyhow::Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let n = self.conn.execute(
+            "UPDATE saas_workflow_template_versions SET published_at = ?1
+             WHERE template_id = ?2 AND version = ?3 AND published_at IS NULL",
+            rusqlite::params![&now, template_id, version],
+        )?;
+        if n == 0 {
+            anyhow::bail!("version not found or already published");
+        }
+        self.conn.execute(
+            "UPDATE saas_workflow_templates SET status = 'published', updated_at = ?1 WHERE id = ?2",
+            [&now, template_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_workflow_template_by_id(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<Option<crate::saas::WorkflowTemplateRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, tenant_id, slug, name, description, status, created_at, updated_at
+             FROM saas_workflow_templates WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map([id], |row| {
+            Ok(crate::saas::WorkflowTemplateRecord {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                slug: row.get(2)?,
+                name: row.get(3)?,
+                description: row.get(4)?,
+                status: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+        Ok(rows.next().transpose()?)
+    }
 }
 
 pub fn init_saas_sqlite(db_path: impl AsRef<Path>) -> anyhow::Result<SaasSqliteStore> {
@@ -638,6 +938,52 @@ mod tests {
             )
             .unwrap();
 
-        assert!(count >= 10, "expected SaaS tables to be created");
+        assert!(count >= 12, "expected SaaS tables to be created");
+    }
+
+    #[test]
+    fn test_workflow_template_create_publish() {
+        let conn = Connection::open_in_memory().unwrap();
+        let store = SaasSqliteStore::from_connection(conn).unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let tid = "t1";
+        store
+            .create_tenant(&crate::saas::Tenant {
+                id: tid.to_string(),
+                name: "T".to_string(),
+                status: crate::saas::TenantStatus::Active,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+        let def = crate::saas::WorkflowDefinitionJson {
+            steps: vec![crate::saas::WorkflowDefinitionStep {
+                key: None,
+                title: "一步".to_string(),
+                task_kind: None,
+                default_agent_template_id: None,
+                instructions: None,
+            }],
+            team_filter: None,
+        };
+        let rec = crate::saas::WorkflowTemplateRecord {
+            id: "wf1".to_string(),
+            tenant_id: tid.to_string(),
+            slug: "my_flow".to_string(),
+            name: "My".to_string(),
+            description: None,
+            status: "draft".to_string(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        store.create_workflow_template(&rec, &def).unwrap();
+        store.publish_workflow_template_version("wf1", 1).unwrap();
+        let resolved = store
+            .resolve_published_workflow_for_start(tid, "my_flow", None)
+            .unwrap();
+        assert!(resolved.is_some());
+        let (_, ver, d) = resolved.unwrap();
+        assert_eq!(ver, 1);
+        assert_eq!(d.steps.len(), 1);
     }
 }

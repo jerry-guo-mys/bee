@@ -11,6 +11,7 @@ import Organizations from '@/pages/Organizations';
 import Teams from '@/pages/Teams';
 import Members from '@/pages/Members';
 import AuditLogs from '@/pages/AuditLogs';
+import WorkflowTemplatesSettings from '@/pages/WorkflowTemplatesSettings';
 
 const router = createBrowserRouter([
   {
@@ -64,6 +65,10 @@ const router = createBrowserRouter([
       {
         path: 'audit-logs',
         element: <AuditLogs />,
+      },
+      {
+        path: 'admin/workflow-templates',
+        element: <WorkflowTemplatesSettings />,
       },
       {
         path: 'settings',
