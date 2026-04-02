@@ -5,9 +5,7 @@
 use std::sync::Arc;
 
 use crate::domain::event::{DomainEventPublisher, InMemoryEventPublisher};
-use crate::domain::team::{
-    Team, TeamCode, TeamError, TeamEvent, TeamId, TeamName, TeamRepository,
-};
+use crate::domain::team::{Team, TeamCode, TeamError, TeamEvent, TeamId, TeamName, TeamRepository};
 use crate::domain::tenant::{OrganizationId, TenantId};
 
 /// Team 领域服务
@@ -124,10 +122,8 @@ where
         self.team_repo.save(&team).await?;
 
         // 发布 TeamUpdated 事件
-        let updated_event = TeamEvent::Updated(crate::domain::team::TeamUpdated::new(
-            id.clone(),
-            name,
-        ));
+        let updated_event =
+            TeamEvent::Updated(crate::domain::team::TeamUpdated::new(id.clone(), name));
         self.event_publisher.publish(updated_event).await;
 
         Ok(())
@@ -282,10 +278,7 @@ where
     ///
     /// # Returns
     /// * `Result<Vec<Team>, TeamError>` - 团队列表
-    pub async fn get_teams_by_tenant(
-        &self,
-        tenant_id: &TenantId,
-    ) -> Result<Vec<Team>, TeamError> {
+    pub async fn get_teams_by_tenant(&self, tenant_id: &TenantId) -> Result<Vec<Team>, TeamError> {
         self.team_repo.find_by_tenant(tenant_id).await
     }
 
@@ -320,8 +313,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::team::InMemoryTeamRepository;
     use crate::domain::event::DomainEvent;
+    use crate::domain::team::InMemoryTeamRepository;
 
     fn create_service() -> (
         TeamDomainService<InMemoryTeamRepository, InMemoryEventPublisher>,
@@ -405,14 +398,7 @@ mod tests {
         let tenant_id = TenantId::generate();
         let org_id = OrganizationId::generate();
         let result = service
-            .create_team(
-                tenant_id,
-                org_id,
-                "".to_string(),
-                None,
-                None,
-                None,
-            )
+            .create_team(tenant_id, org_id, "".to_string(), None, None, None)
             .await;
 
         assert!(matches!(result, Err(TeamError::InvalidName(_))));
@@ -532,14 +518,7 @@ mod tests {
             .await
             .unwrap();
         let team2 = service
-            .create_team(
-                tenant_id,
-                org_id,
-                "Team 2".to_string(),
-                None,
-                None,
-                None,
-            )
+            .create_team(tenant_id, org_id, "Team 2".to_string(), None, None, None)
             .await
             .unwrap();
 

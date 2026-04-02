@@ -20,10 +20,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/organizations/:organization_id", get(get_organization))
         // 团队路由
-        .route(
-            "/organizations/:organization_id/teams",
-            post(create_team),
-        )
+        .route("/organizations/:organization_id/teams", post(create_team))
         // 成员路由
         .route(
             "/organizations/:organization_id/members",

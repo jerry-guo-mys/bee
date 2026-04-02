@@ -6,18 +6,18 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use super::message::{ClientInfo, GatewayMessage, MessageType, MemberDto};
+use super::message::{ClientInfo, GatewayMessage, MemberDto, MessageType};
 use crate::application::commands::{
-    CreateTenantCommand, CreateOrganizationCommand, CreateTeamCommand,
-    InviteMemberCommand, AcceptInviteCommand, SuspendMemberCommand,
-    handler::{InMemoryCommandBus, CommandBus},
+    handler::{CommandBus, InMemoryCommandBus},
+    AcceptInviteCommand, CreateOrganizationCommand, CreateTeamCommand, CreateTenantCommand,
+    InviteMemberCommand, SuspendMemberCommand,
 };
 use crate::application::queries::{
-    GetTenantQuery, ListMembersQuery, GetOrganizationQuery,
     handler::{InMemoryQueryBus, QueryBus},
+    GetOrganizationQuery, GetTenantQuery, ListMembersQuery,
 };
 use crate::domain::common::MembershipRole;
-use crate::domain::tenant::{TenantId, OrganizationId, TeamId, UserId, MembershipId};
+use crate::domain::tenant::{MembershipId, OrganizationId, TeamId, TenantId, UserId};
 
 /// Gateway CQRS 集成服务
 pub struct GatewayCqrsService {
@@ -87,18 +87,16 @@ impl GatewayCqrsService {
         };
 
         match self.command_bus.dispatch(command).await {
-            Ok(tenant) => {
-                self.send_message(MessageType::OperationResult {
-                    success: true,
-                    message: format!("Tenant created: {}", tenant.name()),
-                    data: Some(serde_json::json!({
-                        "tenant_id": tenant.id().to_string(),
-                        "name": tenant.name().as_str(),
-                        "slug": tenant.slug().as_str(),
-                        "status": tenant.status().to_string(),
-                    })),
-                })
-            }
+            Ok(tenant) => self.send_message(MessageType::OperationResult {
+                success: true,
+                message: format!("Tenant created: {}", tenant.name()),
+                data: Some(serde_json::json!({
+                    "tenant_id": tenant.id().to_string(),
+                    "name": tenant.name().as_str(),
+                    "slug": tenant.slug().as_str(),
+                    "status": tenant.status().to_string(),
+                })),
+            }),
             Err(e) => self.send_message(MessageType::OperationResult {
                 success: false,
                 message: format!("Failed to create tenant: {}", e),
@@ -249,7 +247,9 @@ impl GatewayCqrsService {
         email: String,
         role: String,
     ) -> Result<(), String> {
-        let role = self.parse_membership_role(&role).unwrap_or(MembershipRole::Member);
+        let role = self
+            .parse_membership_role(&role)
+            .unwrap_or(MembershipRole::Member);
         let team_id = team_id.map(|id| TeamId::new(id));
         let user_id = UserId::new(self.client_info.client_id.clone());
 

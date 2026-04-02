@@ -118,7 +118,11 @@ mod tests {
         // 创建两个成员
         let org_id = crate::domain::tenant::OrganizationId::generate();
         for i in 0..3 {
-            let email = crate::domain::member::value_object::UserEmail::new(format!("test{}@example.com", i)).unwrap();
+            let email = crate::domain::member::value_object::UserEmail::new(format!(
+                "test{}@example.com",
+                i
+            ))
+            .unwrap();
             let membership = service
                 .invite_member(
                     crate::domain::tenant::TenantId::generate(),
@@ -165,7 +169,9 @@ mod tests {
 
         // 创建成员
         let org_id = crate::domain::tenant::OrganizationId::generate();
-        let email1 = crate::domain::member::value_object::UserEmail::new("active@example.com".to_string()).unwrap();
+        let email1 =
+            crate::domain::member::value_object::UserEmail::new("active@example.com".to_string())
+                .unwrap();
         let membership1 = service
             .invite_member(
                 crate::domain::tenant::TenantId::generate(),
@@ -182,7 +188,9 @@ mod tests {
             .await
             .unwrap();
 
-        let email2 = crate::domain::member::value_object::UserEmail::new("pending@example.com".to_string()).unwrap();
+        let email2 =
+            crate::domain::member::value_object::UserEmail::new("pending@example.com".to_string())
+                .unwrap();
         let _membership2 = service
             .invite_member(
                 crate::domain::tenant::TenantId::generate(),
@@ -221,7 +229,11 @@ mod tests {
         // 创建 5 个成员
         let org_id = crate::domain::tenant::OrganizationId::generate();
         for i in 0..5 {
-            let email = crate::domain::member::value_object::UserEmail::new(format!("test{}@example.com", i)).unwrap();
+            let email = crate::domain::member::value_object::UserEmail::new(format!(
+                "test{}@example.com",
+                i
+            ))
+            .unwrap();
             let membership = service
                 .invite_member(
                     crate::domain::tenant::TenantId::generate(),

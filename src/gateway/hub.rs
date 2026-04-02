@@ -15,15 +15,15 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
+use super::cqrs_integration::GatewayCqrsService;
 use super::intent::IntentRecognizer;
 use super::message::{ClientInfo, GatewayMessage, HistoryMessage, MessageType};
 use super::runtime::{AgentRuntime, RuntimeConfig};
 use super::session_store::{create_session_store, SessionStore};
 use super::spoke::SpokeAdapter;
 use super::task_queue::{TaskNotification, TaskQueue};
-use super::cqrs_integration::GatewayCqrsService;
-use crate::application::queries::handler::InMemoryQueryBus;
 use crate::application::commands::handler::InMemoryCommandBus;
+use crate::application::queries::handler::InMemoryQueryBus;
 use crate::llm::{create_embedder_from_config, EmbeddingProvider};
 use crate::memory::{UserMemoryConfig, UserMemoryManager};
 
@@ -130,9 +130,7 @@ impl Hub {
                 match TaskQueue::with_persistence(db_path).await {
                     Ok(q) => q,
                     Err(e) => {
-                        tracing::warn!(
-                            "Failed to create persistent task queue: {}", e
-                        );
+                        tracing::warn!("Failed to create persistent task queue: {}", e);
                         TaskQueue::new()
                     }
                 }
@@ -540,7 +538,6 @@ async fn handle_connection(
                     }
 
                     // ========== 多租户管理消息 ==========
-
                     MessageType::CreateTenant { name, slug } => {
                         if let Some(ref info) = client_info {
                             let tx_for_service = tx.clone();
@@ -577,7 +574,11 @@ async fn handle_connection(
                         }
                     }
 
-                    MessageType::CreateOrganization { tenant_id, name, slug } => {
+                    MessageType::CreateOrganization {
+                        tenant_id,
+                        name,
+                        slug,
+                    } => {
                         if let Some(ref info) = client_info {
                             let tx_for_service = tx.clone();
                             let info_clone = info.clone();
@@ -590,12 +591,19 @@ async fn handle_connection(
                                     tx_for_service,
                                     info_clone,
                                 );
-                                let _ = cmd_service.handle_create_organization(tenant_id, name, slug).await;
+                                let _ = cmd_service
+                                    .handle_create_organization(tenant_id, name, slug)
+                                    .await;
                             });
                         }
                     }
 
-                    MessageType::CreateTeam { tenant_id, organization_id, name, code } => {
+                    MessageType::CreateTeam {
+                        tenant_id,
+                        organization_id,
+                        name,
+                        code,
+                    } => {
                         if let Some(ref info) = client_info {
                             let tx_for_service = tx.clone();
                             let info_clone = info.clone();
@@ -608,12 +616,20 @@ async fn handle_connection(
                                     tx_for_service,
                                     info_clone,
                                 );
-                                let _ = cmd_service.handle_create_team(tenant_id, organization_id, name, code).await;
+                                let _ = cmd_service
+                                    .handle_create_team(tenant_id, organization_id, name, code)
+                                    .await;
                             });
                         }
                     }
 
-                    MessageType::InviteMember { tenant_id, organization_id, team_id, user_email, role } => {
+                    MessageType::InviteMember {
+                        tenant_id,
+                        organization_id,
+                        team_id,
+                        user_email,
+                        role,
+                    } => {
                         if let Some(ref info) = client_info {
                             let tx_for_service = tx.clone();
                             let info_clone = info.clone();
@@ -626,7 +642,15 @@ async fn handle_connection(
                                     tx_for_service,
                                     info_clone,
                                 );
-                                let _ = cmd_service.handle_invite_member(tenant_id, organization_id, team_id, user_email, role).await;
+                                let _ = cmd_service
+                                    .handle_invite_member(
+                                        tenant_id,
+                                        organization_id,
+                                        team_id,
+                                        user_email,
+                                        role,
+                                    )
+                                    .await;
                             });
                         }
                     }
@@ -649,7 +673,10 @@ async fn handle_connection(
                         }
                     }
 
-                    MessageType::SuspendMember { membership_id, reason } => {
+                    MessageType::SuspendMember {
+                        membership_id,
+                        reason,
+                    } => {
                         if let Some(ref info) = client_info {
                             let tx_for_service = tx.clone();
                             let info_clone = info.clone();
@@ -662,12 +689,18 @@ async fn handle_connection(
                                     tx_for_service,
                                     info_clone,
                                 );
-                                let _ = cmd_service.handle_suspend_member(membership_id, reason).await;
+                                let _ = cmd_service
+                                    .handle_suspend_member(membership_id, reason)
+                                    .await;
                             });
                         }
                     }
 
-                    MessageType::ListMembers { tenant_id, organization_id, team_id } => {
+                    MessageType::ListMembers {
+                        tenant_id,
+                        organization_id,
+                        team_id,
+                    } => {
                         if let Some(ref info) = client_info {
                             let tx_for_service = tx.clone();
                             let info_clone = info.clone();
@@ -680,7 +713,9 @@ async fn handle_connection(
                                     tx_for_service,
                                     info_clone,
                                 );
-                                let _ = cmd_service.handle_list_members(tenant_id, organization_id, team_id).await;
+                                let _ = cmd_service
+                                    .handle_list_members(tenant_id, organization_id, team_id)
+                                    .await;
                             });
                         }
                     }

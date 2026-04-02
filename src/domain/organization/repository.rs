@@ -104,10 +104,7 @@ impl OrganizationRepository for InMemoryOrganizationRepository {
         Ok(data.get(id.as_str()).cloned())
     }
 
-    async fn find_by_tenant(
-        &self,
-        tenant_id: &TenantId,
-    ) -> Result<Vec<Organization>, Self::Error> {
+    async fn find_by_tenant(&self, tenant_id: &TenantId) -> Result<Vec<Organization>, Self::Error> {
         let data = self.data.read().await;
         Ok(data
             .values()
@@ -168,18 +165,12 @@ mod tests {
         let repo = InMemoryOrganizationRepository::new();
         let tenant_id = TenantId::generate();
 
-        let org1 = Organization::create(
-            tenant_id.clone(),
-            "Org 1".to_string(),
-            "org-1".to_string(),
-        )
-        .unwrap();
-        let org2 = Organization::create(
-            tenant_id.clone(),
-            "Org 2".to_string(),
-            "org-2".to_string(),
-        )
-        .unwrap();
+        let org1 =
+            Organization::create(tenant_id.clone(), "Org 1".to_string(), "org-1".to_string())
+                .unwrap();
+        let org2 =
+            Organization::create(tenant_id.clone(), "Org 2".to_string(), "org-2".to_string())
+                .unwrap();
 
         repo.save(&org1).await.unwrap();
         repo.save(&org2).await.unwrap();

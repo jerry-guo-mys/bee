@@ -5,7 +5,7 @@
 use crate::domain::common::now;
 use chrono::{DateTime, Utc};
 
-use super::value_object::{TeamError, TeamId, TeamName, TeamCode};
+use super::value_object::{TeamCode, TeamError, TeamId, TeamName};
 use crate::domain::tenant::{OrganizationId, TenantId};
 
 /// 团队聚合根

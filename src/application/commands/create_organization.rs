@@ -1,8 +1,8 @@
 //! 创建组织命令
 
 use super::handler::{CommandHandler, CqrsCommand};
-use crate::domain::service::OrganizationDomainService;
 use crate::domain::organization::Organization;
+use crate::domain::service::OrganizationDomainService;
 use crate::domain::tenant::UserId;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -28,7 +28,9 @@ pub struct CreateOrganizationHandler<OR, EP> {
 
 impl<OR, EP> CreateOrganizationHandler<OR, EP>
 where
-    OR: crate::domain::organization::OrganizationRepository<Error = crate::domain::organization::OrganizationError> + 'static,
+    OR: crate::domain::organization::OrganizationRepository<
+            Error = crate::domain::organization::OrganizationError,
+        > + 'static,
     EP: crate::domain::event::DomainEventPublisher + 'static,
 {
     pub fn new(org_service: Arc<OrganizationDomainService<OR, EP>>) -> Self {
@@ -39,7 +41,9 @@ where
 #[async_trait]
 impl<OR, EP> CommandHandler<CreateOrganizationCommand> for CreateOrganizationHandler<OR, EP>
 where
-    OR: crate::domain::organization::OrganizationRepository<Error = crate::domain::organization::OrganizationError> + 'static,
+    OR: crate::domain::organization::OrganizationRepository<
+            Error = crate::domain::organization::OrganizationError,
+        > + 'static,
     EP: crate::domain::event::DomainEventPublisher + 'static,
 {
     type Error = anyhow::Error;
@@ -81,7 +85,10 @@ mod tests {
     async fn test_create_organization_handler_success() {
         let repo = Arc::new(InMemoryOrganizationRepository::new());
         let publisher = Arc::new(InMemoryEventPublisher::new());
-        let service = Arc::new(OrganizationDomainService::new(repo.clone(), publisher.clone()));
+        let service = Arc::new(OrganizationDomainService::new(
+            repo.clone(),
+            publisher.clone(),
+        ));
         let handler = CreateOrganizationHandler::new(service);
 
         let command = CreateOrganizationCommand {

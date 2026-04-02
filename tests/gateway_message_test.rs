@@ -2,7 +2,7 @@
 
 #![cfg(feature = "gateway")]
 
-use bee::gateway::{ClientInfo, GatewayMessage, MessageType, MemberDto, SpokeType};
+use bee::gateway::{ClientInfo, GatewayMessage, MemberDto, MessageType, SpokeType};
 
 /// 测试 WebSocket 消息序列化
 #[test]
@@ -128,7 +128,12 @@ fn test_error_message_serialization() {
 /// 测试 Ping/Pong 消息序列化
 #[test]
 fn test_ping_pong_serialization() {
-    let ping = GatewayMessage::new(None, MessageType::Ping { timestamp: 1234567890 });
+    let ping = GatewayMessage::new(
+        None,
+        MessageType::Ping {
+            timestamp: 1234567890,
+        },
+    );
     let pong = GatewayMessage::pong(1234567890);
 
     let ping_json = serde_json::to_string(&ping).unwrap();

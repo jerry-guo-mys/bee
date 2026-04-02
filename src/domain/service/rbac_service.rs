@@ -332,7 +332,9 @@ where
             .find_by_id(target_membership_id)
             .await
             .map_err(|e| RbacError::RepositoryError(e.to_string()))?
-            .ok_or(RbacError::MembershipNotFound(target_membership_id.to_string()))?;
+            .ok_or(RbacError::MembershipNotFound(
+                target_membership_id.to_string(),
+            ))?;
 
         // 获取管理者的 membership
         let manager_memberships = self
@@ -412,15 +414,8 @@ mod tests {
         status: MembershipStatus,
     ) -> Membership {
         let email = UserEmail::new("test@example.com".to_string()).unwrap();
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            role,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, role).unwrap();
 
         if status == MembershipStatus::Active {
             membership.accept_invite(UserId::generate()).unwrap();
@@ -437,15 +432,8 @@ mod tests {
         user_id: UserId,
     ) -> Membership {
         let email = UserEmail::new("test@example.com".to_string()).unwrap();
-        let mut membership = Membership::invite(
-            tenant_id,
-            org_id,
-            None,
-            None,
-            email,
-            role,
-        )
-        .unwrap();
+        let mut membership =
+            Membership::invite(tenant_id, org_id, None, None, email, role).unwrap();
 
         if status == MembershipStatus::Active {
             membership.accept_invite(user_id).unwrap();

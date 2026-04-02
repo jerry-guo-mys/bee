@@ -5,18 +5,16 @@
 use std::sync::Arc;
 
 use bee::application::commands::{
-    AcceptInviteCommand, AcceptInviteHandler, CommandHandler,
-    SuspendMemberCommand, SuspendMemberHandler,
+    AcceptInviteCommand, AcceptInviteHandler, CommandHandler, SuspendMemberCommand,
+    SuspendMemberHandler,
 };
-use bee::application::queries::{
-    ListMembersQuery, ListMembersHandler, QueryHandler,
-};
+use bee::application::queries::{ListMembersHandler, ListMembersQuery, QueryHandler};
 use bee::domain::common::{MembershipRole, MembershipStatus};
 use bee::domain::event::InMemoryEventPublisher;
+use bee::domain::member::value_object::UserEmail;
 use bee::domain::member::{
     InMemoryMembershipRepository, MemberDomainService, MembershipRepository,
 };
-use bee::domain::member::value_object::UserEmail;
 use bee::domain::tenant::{OrganizationId, TenantId, UserId};
 
 /// 创建测试用的服务组合
@@ -56,7 +54,8 @@ async fn test_member_lifecycle_invite_and_accept() {
     let (member_service, _repo, _publisher) = create_test_services();
 
     // 邀请成员
-    let membership = create_test_member(&member_service, "test@example.com", MembershipRole::Member).await;
+    let membership =
+        create_test_member(&member_service, "test@example.com", MembershipRole::Member).await;
 
     // 验证初始状态为 Pending
     assert_eq!(membership.status(), &MembershipStatus::Pending);
@@ -83,7 +82,12 @@ async fn test_member_lifecycle_suspend() {
     let (member_service, _repo, _publisher) = create_test_services();
 
     // 邀请并接受
-    let membership = create_test_member(&member_service, "suspend@example.com", MembershipRole::Member).await;
+    let membership = create_test_member(
+        &member_service,
+        "suspend@example.com",
+        MembershipRole::Member,
+    )
+    .await;
     member_service
         .accept_invite(membership.id(), UserId::generate())
         .await
@@ -109,17 +113,19 @@ async fn test_member_lifecycle_remove() {
     let (member_service, _repo, _publisher) = create_test_services();
 
     // 邀请并接受
-    let membership = create_test_member(&member_service, "remove@example.com", MembershipRole::Member).await;
+    let membership = create_test_member(
+        &member_service,
+        "remove@example.com",
+        MembershipRole::Member,
+    )
+    .await;
     member_service
         .accept_invite(membership.id(), UserId::generate())
         .await
         .unwrap();
 
     // 移除成员
-    member_service
-        .remove_member(membership.id())
-        .await
-        .unwrap();
+    member_service.remove_member(membership.id()).await.unwrap();
 
     // 验证状态变为 Removed
     let removed = member_service
@@ -135,7 +141,12 @@ async fn test_member_lifecycle_role_change() {
     let (member_service, _repo, _publisher) = create_test_services();
 
     // 邀请并接受（初始为 Member）
-    let membership = create_test_member(&member_service, "rolechange@example.com", MembershipRole::Member).await;
+    let membership = create_test_member(
+        &member_service,
+        "rolechange@example.com",
+        MembershipRole::Member,
+    )
+    .await;
     member_service
         .accept_invite(membership.id(), UserId::generate())
         .await
@@ -227,7 +238,12 @@ async fn test_member_lifecycle_command_handlers() {
     let suspend_handler = SuspendMemberHandler::new(member_service.clone());
 
     // 邀请成员
-    let membership = create_test_member(&member_service, "command@example.com", MembershipRole::Member).await;
+    let membership = create_test_member(
+        &member_service,
+        "command@example.com",
+        MembershipRole::Member,
+    )
+    .await;
 
     // 使用命令处理器接受邀请
     let accept_command = AcceptInviteCommand {
@@ -269,7 +285,12 @@ async fn test_member_lifecycle_cannot_accept_non_pending_invite() {
     let accept_handler = AcceptInviteHandler::new(member_service.clone());
 
     // 邀请并接受
-    let membership = create_test_member(&member_service, "nonpending@example.com", MembershipRole::Member).await;
+    let membership = create_test_member(
+        &member_service,
+        "nonpending@example.com",
+        MembershipRole::Member,
+    )
+    .await;
     member_service
         .accept_invite(membership.id(), UserId::generate())
         .await
@@ -282,7 +303,10 @@ async fn test_member_lifecycle_cannot_accept_non_pending_invite() {
     };
     let result = accept_handler.handle(accept_command).await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("只有待处理的邀请才能被接受"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("只有待处理的邀请才能被接受"));
 }
 
 #[tokio::test]
@@ -291,7 +315,12 @@ async fn test_member_lifecycle_cannot_suspend_non_active_member() {
     let suspend_handler = SuspendMemberHandler::new(member_service.clone());
 
     // 只邀请不接受（Pending 状态）
-    let membership = create_test_member(&member_service, "nonactive@example.com", MembershipRole::Member).await;
+    let membership = create_test_member(
+        &member_service,
+        "nonactive@example.com",
+        MembershipRole::Member,
+    )
+    .await;
 
     // 暂停 Pending 状态的成员应该失败
     let suspend_command = SuspendMemberCommand {
@@ -308,7 +337,12 @@ async fn test_member_lifecycle_events_published() {
     let (member_service, _repo, publisher) = create_test_services();
 
     // 邀请成员
-    let membership = create_test_member(&member_service, "events@example.com", MembershipRole::Member).await;
+    let membership = create_test_member(
+        &member_service,
+        "events@example.com",
+        MembershipRole::Member,
+    )
+    .await;
 
     // 验证 Invited 事件已发布
     let events = publisher.get_events().await;
@@ -322,7 +356,9 @@ async fn test_member_lifecycle_events_published() {
 
     // 验证 InvitationAccepted 事件已发布
     let events = publisher.get_events().await;
-    assert!(events.iter().any(|e| e.event_type() == "member.invitation_accepted"));
+    assert!(events
+        .iter()
+        .any(|e| e.event_type() == "member.invitation_accepted"));
 
     // 暂停成员
     member_service

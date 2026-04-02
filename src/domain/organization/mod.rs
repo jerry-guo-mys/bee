@@ -9,12 +9,8 @@ pub mod repository;
 pub mod value_object;
 
 // 重新导出常用类型
-pub use entity::Organization;
-pub use event::{
-    OrganizationCreated, OrganizationDeleted, OrganizationEvent, OrganizationUpdated,
-};
-pub use repository::{InMemoryOrganizationRepository, OrganizationRepository};
 pub use crate::domain::service::OrganizationDomainService;
-pub use value_object::{
-    OrganizationError, OrganizationId, OrganizationName, OrganizationSlug,
-};
+pub use entity::Organization;
+pub use event::{OrganizationCreated, OrganizationDeleted, OrganizationEvent, OrganizationUpdated};
+pub use repository::{InMemoryOrganizationRepository, OrganizationRepository};
+pub use value_object::{OrganizationError, OrganizationId, OrganizationName, OrganizationSlug};

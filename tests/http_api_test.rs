@@ -2,12 +2,12 @@
 
 #![cfg(feature = "gateway")]
 
-use bee::application::commands::handler::InMemoryCommandBus;
-use bee::application::queries::handler::InMemoryQueryBus;
-use bee::interfaces::http::{AppState, create_router};
-use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
+use bee::application::commands::handler::InMemoryCommandBus;
+use bee::application::queries::handler::InMemoryQueryBus;
+use bee::interfaces::http::{create_router, AppState};
+use std::sync::Arc;
 use tower::Service;
 
 /// 创建测试应用状态
@@ -58,9 +58,7 @@ async fn test_get_tenant_not_found() {
     let response: axum::http::Response<Body> = app.call(request).await.unwrap();
 
     // 由于查询总线是空的，应该返回 500 或 404
-    assert!(
-        response.status().is_server_error() || response.status() == StatusCode::NOT_FOUND
-    );
+    assert!(response.status().is_server_error() || response.status() == StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -71,9 +69,7 @@ async fn test_create_organization_requires_tenant() {
         .method(Method::POST)
         .uri("/tenants/tenant-123/organizations")
         .header("content-type", "application/json")
-        .body(Body::from(
-            r#"{"name": "Test Org", "slug": "test-org"}"#,
-        ))
+        .body(Body::from(r#"{"name": "Test Org", "slug": "test-org"}"#))
         .unwrap();
 
     let response: axum::http::Response<Body> = app.call(request).await.unwrap();

@@ -42,8 +42,7 @@ impl TeamRow {
         let id = TeamId::new(self.id.to_string());
         let tenant_id = TenantId::new(self.tenant_id.to_string());
         let organization_id = OrganizationId::new(self.organization_id.to_string());
-        let name =
-            TeamName::new(self.name).map_err(|e| TeamError::InvalidName(e.to_string()))?;
+        let name = TeamName::new(self.name).map_err(|e| TeamError::InvalidName(e.to_string()))?;
         let code = self
             .code
             .map(|c| TeamCode::new(c).map_err(|e| TeamError::InvalidCode(e.to_string())))
@@ -150,18 +149,17 @@ impl super::TeamRepository for PostgresTeamRepository {
     }
 
     async fn find_by_tenant(&self, tenant_id: &TenantId) -> Result<Vec<Team>, Self::Error> {
-        let teams = sqlx::query_as::<_, TeamRow>(
-            "SELECT * FROM teams WHERE tenant_id = $1 ORDER BY name",
-        )
-        .bind(
-            tenant_id
-                .as_str()
-                .parse::<uuid::Uuid>()
-                .map_err(|e| TeamError::DatabaseError(format!("Invalid UUID: {}", e)))?,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| TeamError::DatabaseError(e.to_string()))?;
+        let teams =
+            sqlx::query_as::<_, TeamRow>("SELECT * FROM teams WHERE tenant_id = $1 ORDER BY name")
+                .bind(
+                    tenant_id
+                        .as_str()
+                        .parse::<uuid::Uuid>()
+                        .map_err(|e| TeamError::DatabaseError(format!("Invalid UUID: {}", e)))?,
+                )
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| TeamError::DatabaseError(e.to_string()))?;
 
         teams.into_iter().map(|row| row.into_team()).collect()
     }
@@ -384,8 +382,7 @@ mod tests {
         repo.save(&team).await.unwrap();
 
         // 修改并保存
-        team.update_name("Updated Team".to_string())
-            .unwrap();
+        team.update_name("Updated Team".to_string()).unwrap();
         repo.save(&team).await.unwrap();
 
         // 验证更新

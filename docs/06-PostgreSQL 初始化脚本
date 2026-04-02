@@ -1,0 +1,824 @@
+-- =========================================================
+-- AI Media Harness - PostgreSQL Init Script
+-- 场景：自媒体内容多 Agent 协作平台
+-- =========================================================
+
+-- 可选：单独 schema
+CREATE SCHEMA IF NOT EXISTS ai_media_harness;
+
+SET search_path TO ai_media_harness;
+
+-- =========================================================
+-- 1. 配置层
+-- =========================================================
+
+-- ---------------------------------------------------------
+-- 1.1 内容团队表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_team (
+    id BIGINT PRIMARY KEY,
+    team_code VARCHAR(64) NOT NULL UNIQUE,
+    team_name VARCHAR(128) NOT NULL,
+    scenario_type VARCHAR(64) NOT NULL DEFAULT 'media_content',
+    description TEXT,
+    default_collaboration_mode VARCHAR(64) NOT NULL DEFAULT 'hybrid',
+    owner_id VARCHAR(64),
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+    deleted_flag SMALLINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_team_owner_id ON content_team(owner_id);
+CREATE INDEX IF NOT EXISTS idx_content_team_status ON content_team(status);
+
+
+-- ---------------------------------------------------------
+-- 1.2 内容 Agent 主表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_agent (
+    id BIGINT PRIMARY KEY,
+    agent_code VARCHAR(64) NOT NULL UNIQUE,
+    agent_name VARCHAR(128) NOT NULL,
+    role_type VARCHAR(64) NOT NULL,
+    scenario_type VARCHAR(64) NOT NULL DEFAULT 'media_content',
+    description TEXT,
+    current_version_no INT NOT NULL DEFAULT 1,
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+    owner_id VARCHAR(64),
+    deleted_flag SMALLINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_agent_role_type ON content_agent(role_type);
+CREATE INDEX IF NOT EXISTS idx_content_agent_status ON content_agent(status);
+
+
+-- ---------------------------------------------------------
+-- 1.3 内容 Agent 版本表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_agent_version (
+    id BIGINT PRIMARY KEY,
+    agent_id BIGINT NOT NULL,
+    version_no INT NOT NULL,
+    version_status VARCHAR(32) NOT NULL DEFAULT 'PUBLISHED',
+    role_definition TEXT,
+    responsibility TEXT,
+    non_responsibility TEXT,
+    input_definition JSONB,
+    output_definition JSONB,
+    system_prompt TEXT,
+    role_prompt TEXT,
+    task_template TEXT,
+    constraint_prompt TEXT,
+    output_schema JSONB,
+    style_config JSONB,
+    strategy_config JSONB,
+    tool_binding_config JSONB,
+    knowledge_binding_config JSONB,
+    model_routing_config JSONB,
+    max_retry_count INT NOT NULL DEFAULT 2,
+    max_step_count INT NOT NULL DEFAULT 5,
+    remark VARCHAR(500),
+    created_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_content_agent_version UNIQUE (agent_id, version_no),
+    CONSTRAINT fk_content_agent_version_agent
+        FOREIGN KEY (agent_id) REFERENCES content_agent(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_agent_version_agent_id
+    ON content_agent_version(agent_id);
+
+
+-- ---------------------------------------------------------
+-- 1.4 团队-Agent 关系表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_team_agent_rel (
+    id BIGINT PRIMARY KEY,
+    team_id BIGINT NOT NULL,
+    agent_id BIGINT NOT NULL,
+    team_role VARCHAR(64) NOT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_required SMALLINT NOT NULL DEFAULT 1,
+    is_default SMALLINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_content_team_agent_rel UNIQUE (team_id, agent_id),
+    CONSTRAINT fk_content_team_agent_rel_team
+        FOREIGN KEY (team_id) REFERENCES content_team(id),
+    CONSTRAINT fk_content_team_agent_rel_agent
+        FOREIGN KEY (agent_id) REFERENCES content_agent(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_team_agent_rel_agent_id
+    ON content_team_agent_rel(agent_id);
+
+
+-- ---------------------------------------------------------
+-- 1.5 内容流程主表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_workflow (
+    id BIGINT PRIMARY KEY,
+    workflow_code VARCHAR(64) NOT NULL UNIQUE,
+    workflow_name VARCHAR(128) NOT NULL,
+    description TEXT,
+    team_id BIGINT NOT NULL,
+    scenario_type VARCHAR(64) NOT NULL DEFAULT 'media_content',
+    current_version_no INT NOT NULL DEFAULT 1,
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+    owner_id VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_workflow_team
+        FOREIGN KEY (team_id) REFERENCES content_team(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_workflow_team_id
+    ON content_workflow(team_id);
+CREATE INDEX IF NOT EXISTS idx_content_workflow_status
+    ON content_workflow(status);
+
+
+-- ---------------------------------------------------------
+-- 1.6 内容流程版本表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_workflow_version (
+    id BIGINT PRIMARY KEY,
+    workflow_id BIGINT NOT NULL,
+    version_no INT NOT NULL,
+    version_status VARCHAR(32) NOT NULL DEFAULT 'PUBLISHED',
+    graph_definition JSONB,
+    start_node_code VARCHAR(64) NOT NULL,
+    end_node_config JSONB,
+    default_retry_policy JSONB,
+    default_timeout_policy JSONB,
+    remark VARCHAR(500),
+    created_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_content_workflow_version UNIQUE (workflow_id, version_no),
+    CONSTRAINT fk_content_workflow_version_workflow
+        FOREIGN KEY (workflow_id) REFERENCES content_workflow(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_workflow_version_workflow_id
+    ON content_workflow_version(workflow_id);
+
+
+-- ---------------------------------------------------------
+-- 1.7 内容流程节点表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_workflow_node (
+    id BIGINT PRIMARY KEY,
+    workflow_id BIGINT NOT NULL,
+    workflow_version_no INT NOT NULL,
+    node_code VARCHAR(64) NOT NULL,
+    node_name VARCHAR(128) NOT NULL,
+    node_type VARCHAR(64) NOT NULL,
+    agent_id BIGINT,
+    agent_version_no INT,
+    execution_mode VARCHAR(32) NOT NULL DEFAULT 'SYNC',
+    input_mapping JSONB,
+    output_mapping JSONB,
+    retry_policy JSONB,
+    timeout_policy JSONB,
+    validator_config JSONB,
+    human_approval_config JSONB,
+    extra_config JSONB,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_content_workflow_node UNIQUE (workflow_id, workflow_version_no, node_code),
+    CONSTRAINT fk_content_workflow_node_workflow
+        FOREIGN KEY (workflow_id) REFERENCES content_workflow(id),
+    CONSTRAINT fk_content_workflow_node_agent
+        FOREIGN KEY (agent_id) REFERENCES content_agent(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_workflow_node_agent_id
+    ON content_workflow_node(agent_id);
+
+
+-- ---------------------------------------------------------
+-- 1.8 内容流程边表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_workflow_edge (
+    id BIGINT PRIMARY KEY,
+    workflow_id BIGINT NOT NULL,
+    workflow_version_no INT NOT NULL,
+    from_node_code VARCHAR(64) NOT NULL,
+    to_node_code VARCHAR(64) NOT NULL,
+    condition_type VARCHAR(64) NOT NULL DEFAULT 'ALWAYS',
+    condition_expr TEXT,
+    priority INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_workflow_edge_workflow
+        FOREIGN KEY (workflow_id) REFERENCES content_workflow(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_workflow_edge_from
+    ON content_workflow_edge(workflow_id, workflow_version_no, from_node_code);
+CREATE INDEX IF NOT EXISTS idx_content_workflow_edge_to
+    ON content_workflow_edge(workflow_id, workflow_version_no, to_node_code);
+
+
+-- =========================================================
+-- 2. 运行层
+-- =========================================================
+
+-- ---------------------------------------------------------
+-- 2.1 内容任务表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_task (
+    id BIGINT PRIMARY KEY,
+    task_no VARCHAR(64) NOT NULL UNIQUE,
+    task_title VARCHAR(256) NOT NULL,
+    task_type VARCHAR(64) NOT NULL DEFAULT 'CONTENT_PRODUCTION',
+    business_scenario VARCHAR(64) NOT NULL DEFAULT 'media_content',
+    content_topic VARCHAR(500),
+    target_platform VARCHAR(64) NOT NULL,
+    content_type VARCHAR(64) NOT NULL,
+    input_payload JSONB,
+    team_id BIGINT NOT NULL,
+    workflow_id BIGINT NOT NULL,
+    workflow_version_no INT NOT NULL,
+    current_status VARCHAR(32) NOT NULL,
+    current_node_code VARCHAR(64),
+    risk_level VARCHAR(32) NOT NULL DEFAULT 'LOW',
+    need_human_flag SMALLINT NOT NULL DEFAULT 0,
+    trigger_type VARCHAR(32) NOT NULL DEFAULT 'MANUAL',
+    triggered_by VARCHAR(64),
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    fail_reason VARCHAR(500),
+    ext_info JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_task_team
+        FOREIGN KEY (team_id) REFERENCES content_team(id),
+    CONSTRAINT fk_content_task_workflow
+        FOREIGN KEY (workflow_id) REFERENCES content_workflow(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_task_team_id
+    ON content_task(team_id);
+CREATE INDEX IF NOT EXISTS idx_content_task_workflow_id
+    ON content_task(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_content_task_status
+    ON content_task(current_status);
+CREATE INDEX IF NOT EXISTS idx_content_task_platform_status
+    ON content_task(target_platform, current_status);
+CREATE INDEX IF NOT EXISTS idx_content_task_created_at
+    ON content_task(created_at);
+
+
+-- ---------------------------------------------------------
+-- 2.2 内容任务步骤表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_task_step (
+    id BIGINT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    node_code VARCHAR(64) NOT NULL,
+    node_name VARCHAR(128) NOT NULL,
+    node_type VARCHAR(64) NOT NULL,
+    agent_id BIGINT,
+    agent_version_no INT,
+    step_status VARCHAR(32) NOT NULL,
+    execution_seq INT NOT NULL DEFAULT 0,
+    retry_count INT NOT NULL DEFAULT 0,
+    parent_step_id BIGINT,
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    duration_ms BIGINT,
+    fail_reason VARCHAR(500),
+    score NUMERIC(10,2),
+    need_human_flag SMALLINT NOT NULL DEFAULT 0,
+    ext_info JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_task_step_task
+        FOREIGN KEY (task_id) REFERENCES content_task(id),
+    CONSTRAINT fk_content_task_step_agent
+        FOREIGN KEY (agent_id) REFERENCES content_agent(id),
+    CONSTRAINT fk_content_task_step_parent
+        FOREIGN KEY (parent_step_id) REFERENCES content_task_step(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_task_step_task_id
+    ON content_task_step(task_id);
+CREATE INDEX IF NOT EXISTS idx_content_task_step_task_node
+    ON content_task_step(task_id, node_code);
+CREATE INDEX IF NOT EXISTS idx_content_task_step_task_status
+    ON content_task_step(task_id, step_status);
+CREATE INDEX IF NOT EXISTS idx_content_task_step_agent_id
+    ON content_task_step(agent_id);
+
+
+-- ---------------------------------------------------------
+-- 2.3 内容任务记忆表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_task_memory (
+    id BIGINT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    step_id BIGINT,
+    memory_key VARCHAR(128) NOT NULL,
+    memory_type VARCHAR(64) NOT NULL,
+    memory_value TEXT,
+    memory_structured JSONB,
+    version_no INT NOT NULL DEFAULT 1,
+    is_latest SMALLINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_task_memory_task
+        FOREIGN KEY (task_id) REFERENCES content_task(id),
+    CONSTRAINT fk_content_task_memory_step
+        FOREIGN KEY (step_id) REFERENCES content_task_step(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_task_memory_task_id
+    ON content_task_memory(task_id);
+CREATE INDEX IF NOT EXISTS idx_content_task_memory_task_key
+    ON content_task_memory(task_id, memory_key);
+CREATE INDEX IF NOT EXISTS idx_content_task_memory_task_latest
+    ON content_task_memory(task_id, is_latest);
+
+
+-- =========================================================
+-- 3. 内容层
+-- =========================================================
+
+-- ---------------------------------------------------------
+-- 3.1 内容稿件版本表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_draft_version (
+    id BIGINT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    step_id BIGINT,
+    platform_code VARCHAR(64) NOT NULL,
+    content_type VARCHAR(64) NOT NULL,
+    version_no INT NOT NULL,
+    version_stage VARCHAR(64) NOT NULL,
+    title VARCHAR(500),
+    hook_text VARCHAR(1000),
+    content_body TEXT NOT NULL,
+    content_structured JSONB,
+    summary VARCHAR(1000),
+    word_count INT,
+    is_final SMALLINT NOT NULL DEFAULT 0,
+    source_from VARCHAR(64) NOT NULL,
+    created_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_content_draft_version UNIQUE (task_id, platform_code, version_no),
+    CONSTRAINT fk_content_draft_version_task
+        FOREIGN KEY (task_id) REFERENCES content_task(id),
+    CONSTRAINT fk_content_draft_version_step
+        FOREIGN KEY (step_id) REFERENCES content_task_step(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_draft_version_task_id
+    ON content_draft_version(task_id);
+CREATE INDEX IF NOT EXISTS idx_content_draft_version_step_id
+    ON content_draft_version(step_id);
+CREATE INDEX IF NOT EXISTS idx_content_draft_version_final
+    ON content_draft_version(task_id, is_final);
+
+
+-- ---------------------------------------------------------
+-- 3.2 内容发布记录表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_publish_record (
+    id BIGINT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    draft_version_id BIGINT NOT NULL,
+    platform_code VARCHAR(64) NOT NULL,
+    publish_status VARCHAR(32) NOT NULL,
+    publish_time TIMESTAMP,
+    external_content_id VARCHAR(128),
+    publish_url VARCHAR(1000),
+    publish_payload JSONB,
+    publish_response JSONB,
+    fail_reason VARCHAR(500),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_publish_record_task
+        FOREIGN KEY (task_id) REFERENCES content_task(id),
+    CONSTRAINT fk_content_publish_record_draft
+        FOREIGN KEY (draft_version_id) REFERENCES content_draft_version(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_publish_record_task_id
+    ON content_publish_record(task_id);
+CREATE INDEX IF NOT EXISTS idx_content_publish_record_platform_status
+    ON content_publish_record(platform_code, publish_status);
+CREATE INDEX IF NOT EXISTS idx_content_publish_record_publish_time
+    ON content_publish_record(publish_time);
+
+
+-- ---------------------------------------------------------
+-- 3.3 平台素材表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_platform_asset (
+    id BIGINT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    platform_code VARCHAR(64) NOT NULL,
+    asset_type VARCHAR(64) NOT NULL,
+    asset_title VARCHAR(256),
+    asset_content TEXT NOT NULL,
+    asset_structured JSONB,
+    is_selected SMALLINT NOT NULL DEFAULT 0,
+    created_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_platform_asset_task
+        FOREIGN KEY (task_id) REFERENCES content_task(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_platform_asset_task_platform
+    ON content_platform_asset(task_id, platform_code);
+
+
+-- =========================================================
+-- 4. 人工介入层
+-- =========================================================
+
+-- ---------------------------------------------------------
+-- 4.1 内容审批记录表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_approval_record (
+    id BIGINT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    step_id BIGINT,
+    draft_version_id BIGINT,
+    approval_type VARCHAR(64) NOT NULL,
+    approver_id VARCHAR(64) NOT NULL,
+    action VARCHAR(32) NOT NULL,
+    comment_text TEXT,
+    reroute_node_code VARCHAR(64),
+    before_content TEXT,
+    after_content TEXT,
+    status VARCHAR(32) NOT NULL DEFAULT 'FINISHED',
+    approved_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_approval_record_task
+        FOREIGN KEY (task_id) REFERENCES content_task(id),
+    CONSTRAINT fk_content_approval_record_step
+        FOREIGN KEY (step_id) REFERENCES content_task_step(id),
+    CONSTRAINT fk_content_approval_record_draft
+        FOREIGN KEY (draft_version_id) REFERENCES content_draft_version(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_approval_record_task_id
+    ON content_approval_record(task_id);
+CREATE INDEX IF NOT EXISTS idx_content_approval_record_step_id
+    ON content_approval_record(step_id);
+CREATE INDEX IF NOT EXISTS idx_content_approval_record_approver_id
+    ON content_approval_record(approver_id);
+
+
+-- ---------------------------------------------------------
+-- 4.2 人工修改记录表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_manual_edit_record (
+    id BIGINT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    step_id BIGINT,
+    draft_version_id BIGINT NOT NULL,
+    editor_id VARCHAR(64) NOT NULL,
+    before_content TEXT NOT NULL,
+    after_content TEXT NOT NULL,
+    diff_summary TEXT,
+    edit_reason VARCHAR(500),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_manual_edit_record_task
+        FOREIGN KEY (task_id) REFERENCES content_task(id),
+    CONSTRAINT fk_content_manual_edit_record_step
+        FOREIGN KEY (step_id) REFERENCES content_task_step(id),
+    CONSTRAINT fk_content_manual_edit_record_draft
+        FOREIGN KEY (draft_version_id) REFERENCES content_draft_version(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_manual_edit_record_task_id
+    ON content_manual_edit_record(task_id);
+CREATE INDEX IF NOT EXISTS idx_content_manual_edit_record_draft_version_id
+    ON content_manual_edit_record(draft_version_id);
+CREATE INDEX IF NOT EXISTS idx_content_manual_edit_record_editor_id
+    ON content_manual_edit_record(editor_id);
+
+
+-- ---------------------------------------------------------
+-- 4.3 人工反馈记录表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_feedback_record (
+    id BIGINT PRIMARY KEY,
+    target_type VARCHAR(32) NOT NULL,
+    target_id BIGINT NOT NULL,
+    feedback_type VARCHAR(64) NOT NULL,
+    feedback_level VARCHAR(32) NOT NULL DEFAULT 'INFO',
+    content_text TEXT NOT NULL,
+    tags JSONB,
+    created_by VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_feedback_record_target
+    ON content_feedback_record(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_content_feedback_record_feedback_type
+    ON content_feedback_record(feedback_type);
+CREATE INDEX IF NOT EXISTS idx_content_feedback_record_created_by
+    ON content_feedback_record(created_by);
+
+
+-- =========================================================
+-- 5. 复盘层
+-- =========================================================
+
+-- ---------------------------------------------------------
+-- 5.1 内容表现指标表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_performance_metric (
+    id BIGINT PRIMARY KEY,
+    publish_record_id BIGINT NOT NULL,
+    task_id BIGINT NOT NULL,
+    platform_code VARCHAR(64) NOT NULL,
+    stat_date DATE NOT NULL,
+    exposure_count BIGINT NOT NULL DEFAULT 0,
+    click_count BIGINT NOT NULL DEFAULT 0,
+    like_count BIGINT NOT NULL DEFAULT 0,
+    comment_count BIGINT NOT NULL DEFAULT 0,
+    share_count BIGINT NOT NULL DEFAULT 0,
+    favorite_count BIGINT NOT NULL DEFAULT 0,
+    read_count BIGINT NOT NULL DEFAULT 0,
+    play_count BIGINT NOT NULL DEFAULT 0,
+    watch_time_seconds BIGINT NOT NULL DEFAULT 0,
+    avg_watch_time_seconds BIGINT NOT NULL DEFAULT 0,
+    completion_rate NUMERIC(10,4),
+    click_through_rate NUMERIC(10,4),
+    engagement_rate NUMERIC(10,4),
+    conversion_count BIGINT NOT NULL DEFAULT 0,
+    raw_metric_payload JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_content_performance_metric UNIQUE (publish_record_id, stat_date),
+    CONSTRAINT fk_content_performance_metric_publish
+        FOREIGN KEY (publish_record_id) REFERENCES content_publish_record(id),
+    CONSTRAINT fk_content_performance_metric_task
+        FOREIGN KEY (task_id) REFERENCES content_task(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_performance_metric_task_id
+    ON content_performance_metric(task_id);
+CREATE INDEX IF NOT EXISTS idx_content_performance_metric_platform_stat_date
+    ON content_performance_metric(platform_code, stat_date);
+
+
+-- ---------------------------------------------------------
+-- 5.2 内容评估主表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_eval_record (
+    id BIGINT PRIMARY KEY,
+    target_type VARCHAR(32) NOT NULL,
+    target_id BIGINT NOT NULL,
+    eval_type VARCHAR(64) NOT NULL,
+    overall_score NUMERIC(10,2),
+    result_level VARCHAR(32) NOT NULL,
+    summary_text TEXT,
+    detail_json JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_eval_record_target
+    ON content_eval_record(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_content_eval_record_eval_type
+    ON content_eval_record(eval_type);
+CREATE INDEX IF NOT EXISTS idx_content_eval_record_result_level
+    ON content_eval_record(result_level);
+
+
+-- ---------------------------------------------------------
+-- 5.3 内容评估维度表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_eval_dimension (
+    id BIGINT PRIMARY KEY,
+    eval_record_id BIGINT NOT NULL,
+    dimension_code VARCHAR(64) NOT NULL,
+    dimension_name VARCHAR(128) NOT NULL,
+    score NUMERIC(10,2),
+    comment_text TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_eval_dimension_record
+        FOREIGN KEY (eval_record_id) REFERENCES content_eval_record(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_eval_dimension_eval_record_id
+    ON content_eval_dimension(eval_record_id);
+
+
+-- =========================================================
+-- 6. 成长层
+-- =========================================================
+
+-- ---------------------------------------------------------
+-- 6.1 Agent 画像表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_agent_profile (
+    id BIGINT PRIMARY KEY,
+    agent_id BIGINT NOT NULL,
+    profile_date DATE NOT NULL,
+    profile_period VARCHAR(32) NOT NULL DEFAULT 'DAY',
+    total_tasks INT NOT NULL DEFAULT 0,
+    success_rate NUMERIC(10,4),
+    first_pass_rate NUMERIC(10,4),
+    avg_score NUMERIC(10,2),
+    avg_duration_ms BIGINT,
+    strengths_json JSONB,
+    weaknesses_json JSONB,
+    common_fail_patterns JSONB,
+    recommended_improvements JSONB,
+    summary_text TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_content_agent_profile UNIQUE (agent_id, profile_date, profile_period),
+    CONSTRAINT fk_content_agent_profile_agent
+        FOREIGN KEY (agent_id) REFERENCES content_agent(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_agent_profile_date
+    ON content_agent_profile(profile_date);
+
+
+-- ---------------------------------------------------------
+-- 6.2 Team 画像表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_team_profile (
+    id BIGINT PRIMARY KEY,
+    team_id BIGINT NOT NULL,
+    profile_date DATE NOT NULL,
+    profile_period VARCHAR(32) NOT NULL DEFAULT 'DAY',
+    total_tasks INT NOT NULL DEFAULT 0,
+    task_success_rate NUMERIC(10,4),
+    avg_score NUMERIC(10,2),
+    human_intervention_rate NUMERIC(10,4),
+    bottlenecks_json JSONB,
+    collaboration_issues_json JSONB,
+    summary_text TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_content_team_profile UNIQUE (team_id, profile_date, profile_period),
+    CONSTRAINT fk_content_team_profile_team
+        FOREIGN KEY (team_id) REFERENCES content_team(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_team_profile_date
+    ON content_team_profile(profile_date);
+
+
+-- ---------------------------------------------------------
+-- 6.3 优化建议表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_optimization_suggestion (
+    id BIGINT PRIMARY KEY,
+    target_type VARCHAR(32) NOT NULL,
+    target_id BIGINT NOT NULL,
+    suggestion_type VARCHAR(64) NOT NULL,
+    priority_level VARCHAR(32) NOT NULL DEFAULT 'MEDIUM',
+    suggestion_content TEXT NOT NULL,
+    basis_summary TEXT,
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_optimization_suggestion_target
+    ON content_optimization_suggestion(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_content_optimization_suggestion_status
+    ON content_optimization_suggestion(status);
+CREATE INDEX IF NOT EXISTS idx_content_optimization_suggestion_priority
+    ON content_optimization_suggestion(priority_level);
+
+
+-- =========================================================
+-- 7. 日志与回放层
+-- =========================================================
+
+-- ---------------------------------------------------------
+-- 7.1 内容 Trace 日志表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_trace_log (
+    id BIGINT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    step_id BIGINT,
+    event_type VARCHAR(64) NOT NULL,
+    event_name VARCHAR(128) NOT NULL,
+    event_payload JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_trace_log_task
+        FOREIGN KEY (task_id) REFERENCES content_task(id),
+    CONSTRAINT fk_content_trace_log_step
+        FOREIGN KEY (step_id) REFERENCES content_task_step(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_trace_log_task_created
+    ON content_trace_log(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_content_trace_log_step_created
+    ON content_trace_log(step_id, created_at);
+
+
+-- ---------------------------------------------------------
+-- 7.2 大模型调用日志表
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_llm_call_log (
+    id BIGINT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    step_id BIGINT,
+    agent_id BIGINT,
+    model_provider VARCHAR(64) NOT NULL,
+    model_name VARCHAR(128) NOT NULL,
+    prompt_snapshot TEXT,
+    response_snapshot TEXT,
+    input_tokens INT NOT NULL DEFAULT 0,
+    output_tokens INT NOT NULL DEFAULT 0,
+    total_tokens INT NOT NULL DEFAULT 0,
+    estimated_cost NUMERIC(18,6),
+    call_status VARCHAR(32) NOT NULL,
+    duration_ms BIGINT,
+    error_message VARCHAR(1000),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_content_llm_call_log_task
+        FOREIGN KEY (task_id) REFERENCES content_task(id),
+    CONSTRAINT fk_content_llm_call_log_step
+        FOREIGN KEY (step_id) REFERENCES content_task_step(id),
+    CONSTRAINT fk_content_llm_call_log_agent
+        FOREIGN KEY (agent_id) REFERENCES content_agent(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_llm_call_log_task_step
+    ON content_llm_call_log(task_id, step_id);
+CREATE INDEX IF NOT EXISTS idx_content_llm_call_log_model_created
+    ON content_llm_call_log(model_name, created_at);
+
+
+-- =========================================================
+-- 8. updated_at 自动维护触发器
+-- =========================================================
+
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = 'trg_content_team_updated_at'
+    ) THEN
+        CREATE TRIGGER trg_content_team_updated_at
+        BEFORE UPDATE ON content_team
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = 'trg_content_agent_updated_at'
+    ) THEN
+        CREATE TRIGGER trg_content_agent_updated_at
+        BEFORE UPDATE ON content_agent
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = 'trg_content_workflow_updated_at'
+    ) THEN
+        CREATE TRIGGER trg_content_workflow_updated_at
+        BEFORE UPDATE ON content_workflow
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = 'trg_content_task_updated_at'
+    ) THEN
+        CREATE TRIGGER trg_content_task_updated_at
+        BEFORE UPDATE ON content_task
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = 'trg_content_task_step_updated_at'
+    ) THEN
+        CREATE TRIGGER trg_content_task_step_updated_at
+        BEFORE UPDATE ON content_task_step
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = 'trg_content_publish_record_updated_at'
+    ) THEN
+        CREATE TRIGGER trg_content_publish_record_updated_at
+        BEFORE UPDATE ON content_publish_record
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = 'trg_content_performance_metric_updated_at'
+    ) THEN
+        CREATE TRIGGER trg_content_performance_metric_updated_at
+        BEFORE UPDATE ON content_performance_metric
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+    END IF;
+END$$;

@@ -9,8 +9,8 @@ pub mod repository;
 pub mod value_object;
 
 // 重新导出常用类型
+pub use crate::domain::service::TeamDomainService;
 pub use entity::Team;
 pub use event::{TeamCreated, TeamDeleted, TeamEvent, TeamUpdated};
 pub use repository::{InMemoryTeamRepository, TeamRepository};
-pub use crate::domain::service::TeamDomainService;
 pub use value_object::{TeamCode, TeamError, TeamId, TeamName};

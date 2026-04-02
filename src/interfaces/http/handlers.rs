@@ -13,16 +13,14 @@ use std::sync::Arc;
 use crate::application::commands::handler::InMemoryCommandBus;
 use crate::application::queries::handler::InMemoryQueryBus;
 
-use crate::application::{CommandBus, QueryBus};
 use crate::application::commands::{
-    CreateTenantCommand, CreateOrganizationCommand, CreateTeamCommand,
-    InviteMemberCommand, AcceptInviteCommand, SuspendMemberCommand,
+    AcceptInviteCommand, CreateOrganizationCommand, CreateTeamCommand, CreateTenantCommand,
+    InviteMemberCommand, SuspendMemberCommand,
 };
-use crate::application::queries::{
-    GetTenantQuery, ListMembersQuery, GetOrganizationQuery,
-};
+use crate::application::queries::{GetOrganizationQuery, GetTenantQuery, ListMembersQuery};
+use crate::application::{CommandBus, QueryBus};
 use crate::domain::common::MembershipRole;
-use crate::domain::tenant::{TenantId, OrganizationId, TeamId, UserId, MembershipId};
+use crate::domain::tenant::{MembershipId, OrganizationId, TeamId, TenantId, UserId};
 
 /// 应用状态（共享依赖）
 #[derive(Clone)]
@@ -284,7 +282,10 @@ pub async fn invite_member(
     let user_id = "system".to_string();
     let tenant_id = "TODO".to_string(); // TODO: 从认证上下文获取
 
-    let role = req.role.parse::<MembershipRole>().unwrap_or(MembershipRole::Member);
+    let role = req
+        .role
+        .parse::<MembershipRole>()
+        .unwrap_or(MembershipRole::Member);
     let team_id = req.team_id.as_ref().map(|id| TeamId::new(id.clone()));
 
     let command = InviteMemberCommand {
@@ -300,7 +301,10 @@ pub async fn invite_member(
     match state.command_bus.dispatch(command).await {
         Ok(membership) => Ok(Json(MemberResponse {
             id: membership.id().to_string(),
-            user_id: membership.user_id().map(|u| u.to_string()).unwrap_or_default(),
+            user_id: membership
+                .user_id()
+                .map(|u| u.to_string())
+                .unwrap_or_default(),
             display_name: None,
             email: membership.email().as_str().to_string(),
             role: membership.role().to_string(),

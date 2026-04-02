@@ -38,10 +38,6 @@ pub use repository::{
     AgentRepository, AuditRepository, ConversationRepository, OrgRepository, TaskRepository,
 };
 pub use sqlite::{init_saas_sqlite, SaasSqliteStore};
-pub use workflow_template::{
-    ResolvedWorkflowStep, ResolvedWorkflowTemplate, WorkflowDefinitionJson, WorkflowDefinitionStep,
-    WorkflowTeamFilter, WorkflowTemplateRecord, WorkflowTemplateVersionRecord,
-};
 pub use sqlite_seed_repository::SaasSeedRepository;
 pub use sqlite_template_repository::SaasTemplateRepository;
 pub use template_catalog::{load_platform_agent_templates, TemplateAssistantEntry};
@@ -52,4 +48,8 @@ pub use template_instantiation_service::{
 pub use tool_policy_service::{
     default_low_risk_tools, list_tool_policies, resolve_effective_tool_allowlist,
     upsert_tool_policy, ToolPolicyInput, ToolPolicyScope,
+};
+pub use workflow_template::{
+    ResolvedWorkflowStep, ResolvedWorkflowTemplate, WorkflowDefinitionJson, WorkflowDefinitionStep,
+    WorkflowTeamFilter, WorkflowTemplateRecord, WorkflowTemplateVersionRecord,
 };

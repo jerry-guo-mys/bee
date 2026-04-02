@@ -90,8 +90,8 @@ use task_service::{
 };
 use workflow_product_service::{
     build_task_board, merged_workflow_templates_for_tenant, resolve_workflow_template_for_start,
-    start_workflow_run, TaskBoardColumn,
-    WorkflowRunResult as ProductWorkflowRunResult, WorkflowStartRequest, WorkflowTemplateSummary,
+    start_workflow_run, TaskBoardColumn, WorkflowRunResult as ProductWorkflowRunResult,
+    WorkflowStartRequest, WorkflowTemplateSummary,
 };
 
 const DEFAULT_MAX_TURNS: usize = 20;
@@ -518,7 +518,10 @@ fn code_review_close_guard(existing: &Task, req: &UpdateTaskRequest) -> Result<(
         return Ok(());
     }
     let merged_execution = req.execution.as_ref().or(existing.execution.as_ref());
-    let merged_report = req.review_report.as_ref().or(existing.review_report.as_ref());
+    let merged_report = req
+        .review_report
+        .as_ref()
+        .or(existing.review_report.as_ref());
 
     if env_flag("REQUIRE_HUMAN_APPROVAL")
         && json_get_non_empty_string(merged_execution, "human_approval_user_id").is_none()
@@ -1255,11 +1258,17 @@ fn router_admin_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
             "/api/teams/:team_id/agent-instances/bootstrap",
             post(api_team_agent_instances_bootstrap),
         )
-        .route("/api/projects", get(api_projects_list).post(api_projects_create))
+        .route(
+            "/api/projects",
+            get(api_projects_list).post(api_projects_create),
+        )
         .route("/api/tasks", get(api_tasks_list).post(api_tasks_create))
         .route("/api/tasks/:id", axum::routing::patch(api_tasks_update))
         .route("/api/tasks/:id/ci-status", post(api_tasks_ci_status))
-        .route("/api/tasks/:id/spawn-children", post(api_tasks_spawn_children))
+        .route(
+            "/api/tasks/:id/spawn-children",
+            post(api_tasks_spawn_children),
+        )
         .route("/api/tasks/:id/start", post(api_tasks_start))
         .route("/api/tools", get(api_tools_list))
         .route(
@@ -1482,7 +1491,9 @@ async fn serve_highlight_js() -> Response {
             header::CONTENT_TYPE,
             "application/javascript; charset=utf-8",
         )
-        .body(Body::from(include_str!("../../../static/js/highlight.min.js")))
+        .body(Body::from(include_str!(
+            "../../../static/js/highlight.min.js"
+        )))
         .unwrap()
 }
 
@@ -2201,7 +2212,10 @@ async fn api_workflows_start(
 
     let template_key = req.template_id.trim().to_string();
     if template_key.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "template_id is required".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "template_id is required".to_string(),
+        ));
     }
     let resolved = resolve_workflow_template_for_start(
         &state.workspace,
@@ -2390,7 +2404,11 @@ async fn api_admin_workflow_templates_create(
         AccessRequirement::OrgAdmin,
     )?;
     let slug = body.slug.trim().to_string();
-    if slug.is_empty() || !slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if slug.is_empty()
+        || !slug
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return Err((
             StatusCode::BAD_REQUEST,
             "slug must be non-empty alphanumeric/underscore/dash".to_string(),
@@ -2425,9 +2443,11 @@ async fn api_admin_workflow_templates_create(
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     let _ = write_audit_log(
         &state.workspace,
-        body
-            .scope
-            .to_audit_actor(tenant_id.clone(), body.scope.management_organization_id(), body.scope.team_id.clone()),
+        body.scope.to_audit_actor(
+            tenant_id.clone(),
+            body.scope.management_organization_id(),
+            body.scope.team_id.clone(),
+        ),
         "workflow_template.create",
         "workflow_template",
         id.clone(),
@@ -2467,16 +2487,21 @@ async fn api_admin_workflow_template_add_version(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "template not found".to_string()))?;
     if meta.tenant_id != tenant_id {
-        return Err((StatusCode::FORBIDDEN, "template tenant mismatch".to_string()));
+        return Err((
+            StatusCode::FORBIDDEN,
+            "template tenant mismatch".to_string(),
+        ));
     }
     let version = store
         .add_workflow_template_version(&template_id, &body.definition)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     let _ = write_audit_log(
         &state.workspace,
-        body
-            .scope
-            .to_audit_actor(tenant_id.clone(), body.scope.management_organization_id(), body.scope.team_id.clone()),
+        body.scope.to_audit_actor(
+            tenant_id.clone(),
+            body.scope.management_organization_id(),
+            body.scope.team_id.clone(),
+        ),
         "workflow_template.version.create",
         "workflow_template",
         template_id.clone(),
@@ -2507,16 +2532,21 @@ async fn api_admin_workflow_template_publish(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "template not found".to_string()))?;
     if meta.tenant_id != tenant_id {
-        return Err((StatusCode::FORBIDDEN, "template tenant mismatch".to_string()));
+        return Err((
+            StatusCode::FORBIDDEN,
+            "template tenant mismatch".to_string(),
+        ));
     }
     store
         .publish_workflow_template_version(&template_id, body.version)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     let _ = write_audit_log(
         &state.workspace,
-        body
-            .scope
-            .to_audit_actor(tenant_id.clone(), body.scope.management_organization_id(), body.scope.team_id.clone()),
+        body.scope.to_audit_actor(
+            tenant_id.clone(),
+            body.scope.management_organization_id(),
+            body.scope.team_id.clone(),
+        ),
         "workflow_template.publish",
         "workflow_template",
         template_id.clone(),
@@ -2538,7 +2568,10 @@ async fn api_projects_list(
         .organization_id
         .clone()
         .or_else(|| query.scope.management_organization_id());
-    let team_id = query.team_id.clone().or_else(|| query.scope.team_id.clone());
+    let team_id = query
+        .team_id
+        .clone()
+        .or_else(|| query.scope.team_id.clone());
     require_management_access(
         &state.workspace,
         &query
@@ -2625,11 +2658,19 @@ async fn api_projects_create(
     let id = uuid::Uuid::new_v4().to_string();
     let description = req.description.and_then(|d| {
         let d = d.trim().to_string();
-        if d.is_empty() { None } else { Some(d) }
+        if d.is_empty() {
+            None
+        } else {
+            Some(d)
+        }
     });
     let workflow_run_id = req.workflow_run_id.and_then(|v| {
         let v = v.trim().to_string();
-        if v.is_empty() { None } else { Some(v) }
+        if v.is_empty() {
+            None
+        } else {
+            Some(v)
+        }
     });
     store
         .connection()
@@ -2735,7 +2776,10 @@ async fn api_tasks_spawn_children(
         || parent.organization_id.as_deref() != organization_id.as_deref()
         || (team_id.is_some() && parent.team_id.as_deref() != team_id.as_deref())
     {
-        return Err((StatusCode::FORBIDDEN, "parent task scope mismatch".to_string()));
+        return Err((
+            StatusCode::FORBIDDEN,
+            "parent task scope mismatch".to_string(),
+        ));
     }
     require_management_access(
         &state.workspace,
@@ -2749,7 +2793,10 @@ async fn api_tasks_spawn_children(
     )?;
     let idempotency_key = req.idempotency_key.trim().to_string();
     if idempotency_key.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "idempotency_key is required".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "idempotency_key is required".to_string(),
+        ));
     }
     if req.children.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "children is required".to_string()));
@@ -2780,7 +2827,10 @@ async fn api_tasks_spawn_children(
     for child in &req.children {
         let title = child.title.trim().to_string();
         if title.is_empty() {
-            return Err((StatusCode::BAD_REQUEST, "child title is required".to_string()));
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "child title is required".to_string(),
+            ));
         }
         let task = build_task(
             &CreateTaskRequest {
@@ -2971,14 +3021,12 @@ async fn api_tasks_update(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?;
     code_review_close_guard(&existing, &req).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
-    let task = task_repository::patch_task(
-        &state.workspace,
-        state.task_persistence,
-        &task_id,
-        |task| apply_task_update(task, req),
-    )
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?;
+    let task =
+        task_repository::patch_task(&state.workspace, state.task_persistence, &task_id, |task| {
+            apply_task_update(task, req)
+        })
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?;
     emit_event(
         &state.event_bus,
         WorkspaceEvent::TaskUpdated {
@@ -3018,11 +3066,8 @@ async fn api_tasks_ci_status(
             AccessRequirement::OrgAdmin
         },
     )?;
-    let task = task_repository::patch_task(
-        &state.workspace,
-        state.task_persistence,
-        &task_id,
-        |task| {
+    let task =
+        task_repository::patch_task(&state.workspace, state.task_persistence, &task_id, |task| {
             let mut execution = task
                 .execution
                 .clone()
@@ -3031,7 +3076,10 @@ async fn api_tasks_ci_status(
                 execution = serde_json::json!({});
             }
             if let Some(obj) = execution.as_object_mut() {
-                obj.insert("ci_status".to_string(), serde_json::Value::String(ci_status.clone()));
+                obj.insert(
+                    "ci_status".to_string(),
+                    serde_json::Value::String(ci_status.clone()),
+                );
                 if let Some(correlation_id) = req
                     .correlation_id
                     .as_ref()
@@ -3057,10 +3105,9 @@ async fn api_tasks_ci_status(
             }
             task.execution = Some(execution);
             task.updated_at = chrono::Utc::now().to_rfc3339();
-        },
-    )
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?;
+        })
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?;
     let _ = write_audit_log(
         &state.workspace,
         req.scope

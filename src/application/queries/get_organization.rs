@@ -24,7 +24,9 @@ pub struct GetOrganizationHandler<OR> {
 
 impl<OR> GetOrganizationHandler<OR>
 where
-    OR: crate::domain::organization::OrganizationRepository<Error = crate::domain::organization::OrganizationError> + 'static,
+    OR: crate::domain::organization::OrganizationRepository<
+            Error = crate::domain::organization::OrganizationError,
+        > + 'static,
 {
     pub fn new(org_repo: Arc<OR>) -> Self {
         Self { org_repo }
@@ -34,7 +36,9 @@ where
 #[async_trait]
 impl<OR> QueryHandler<GetOrganizationQuery> for GetOrganizationHandler<OR>
 where
-    OR: crate::domain::organization::OrganizationRepository<Error = crate::domain::organization::OrganizationError> + 'static,
+    OR: crate::domain::organization::OrganizationRepository<
+            Error = crate::domain::organization::OrganizationError,
+        > + 'static,
 {
     type Error = anyhow::Error;
 
@@ -42,7 +46,8 @@ where
         &self,
         query: GetOrganizationQuery,
     ) -> Result<<GetOrganizationQuery as CqrsQuery>::Response, Self::Error> {
-        let organization_id = crate::domain::organization::OrganizationId::new(query.organization_id);
+        let organization_id =
+            crate::domain::organization::OrganizationId::new(query.organization_id);
 
         let org = self
             .org_repo

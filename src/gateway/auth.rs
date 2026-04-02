@@ -2,7 +2,7 @@
 //!
 //! 提供基于 JWT 的用户认证和租户上下文提取
 
-use jsonwebtoken::{decode, Validation, Algorithm, DecodingKey};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 
 /// JWT Claims 结构
@@ -44,11 +44,7 @@ impl JwtAuthenticator {
     pub fn verify(&self, token: &str) -> Result<JwtClaims, JwtAuthError> {
         let decoding_key = DecodingKey::from_secret(self.secret.as_bytes());
 
-        let token_data = decode::<JwtClaims>(
-            token,
-            &decoding_key,
-            &self.validation,
-        )?;
+        let token_data = decode::<JwtClaims>(token, &decoding_key, &self.validation)?;
 
         Ok(token_data.claims)
     }
@@ -131,15 +127,24 @@ pub fn extract_client_metadata(auth_ctx: &AuthContext) -> Option<serde_json::Val
     let mut map = serde_json::Map::new();
 
     if let Some(ref tenant_id) = auth_ctx.tenant_id {
-        map.insert("tenant_id".to_string(), serde_json::Value::String(tenant_id.clone()));
+        map.insert(
+            "tenant_id".to_string(),
+            serde_json::Value::String(tenant_id.clone()),
+        );
     }
 
     if let Some(ref org_id) = auth_ctx.organization_id {
-        map.insert("organization_id".to_string(), serde_json::Value::String(org_id.clone()));
+        map.insert(
+            "organization_id".to_string(),
+            serde_json::Value::String(org_id.clone()),
+        );
     }
 
     if let Some(ref team_id) = auth_ctx.team_id {
-        map.insert("team_id".to_string(), serde_json::Value::String(team_id.clone()));
+        map.insert(
+            "team_id".to_string(),
+            serde_json::Value::String(team_id.clone()),
+        );
     }
 
     if let Some(ref role) = auth_ctx.role {
@@ -156,7 +161,7 @@ pub fn extract_client_metadata(auth_ctx: &AuthContext) -> Option<serde_json::Val
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Utc, Duration};
+    use chrono::{Duration, Utc};
 
     fn create_test_token(secret: &str, tenant_id: Option<&str>) -> String {
         use jsonwebtoken::{encode, EncodingKey, Header};

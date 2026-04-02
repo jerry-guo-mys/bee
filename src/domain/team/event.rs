@@ -6,8 +6,8 @@ use crate::domain::common::now;
 use chrono::{DateTime, Utc};
 
 use super::value_object::TeamId;
-use crate::domain::tenant::{OrganizationId, TenantId};
 use crate::domain::tenant::event::DomainEvent;
+use crate::domain::tenant::{OrganizationId, TenantId};
 
 /// Team 事件枚举
 #[derive(Debug, Clone)]
@@ -60,10 +60,7 @@ impl TeamEvent {
                 )
             }
             TeamEvent::Updated(e) => {
-                format!(
-                    r#"{{"team_id":"{}","name":"{}"}}"#,
-                    e.team_id, e.name
-                )
+                format!(r#"{{"team_id":"{}","name":"{}"}}"#, e.team_id, e.name)
             }
             TeamEvent::Deleted(e) => {
                 format!(r#"{{"team_id":"{}"}}"#, e.team_id)
@@ -110,10 +107,7 @@ impl DomainEvent for TeamEvent {
                 )
             }
             TeamEvent::Updated(e) => {
-                format!(
-                    r#"{{"team_id":"{}","name":"{}"}}"#,
-                    e.team_id, e.name
-                )
+                format!(r#"{{"team_id":"{}","name":"{}"}}"#, e.team_id, e.name)
             }
             TeamEvent::Deleted(e) => {
                 format!(r#"{{"team_id":"{}"}}"#, e.team_id)

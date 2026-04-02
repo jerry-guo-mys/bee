@@ -165,7 +165,9 @@ fn parse_assignee_ids(json: Option<String>, fallback_agent: Option<String>) -> V
 
 fn json_to_string(value: &Option<Value>) -> Result<Option<String>, String> {
     match value {
-        Some(v) => serde_json::to_string(v).map(Some).map_err(|e| e.to_string()),
+        Some(v) => serde_json::to_string(v)
+            .map(Some)
+            .map_err(|e| e.to_string()),
         None => Ok(None),
     }
 }
@@ -185,9 +187,7 @@ fn task_from_row(row: &Row) -> rusqlite::Result<Task> {
         .get::<_, Option<i64>>("workflow_template_version")?
         .and_then(|v| i32::try_from(v).ok());
 
-    let internal_group: i64 = row
-        .get::<_, Option<i64>>("internal_group")?
-        .unwrap_or(0);
+    let internal_group: i64 = row.get::<_, Option<i64>>("internal_group")?.unwrap_or(0);
 
     Ok(Task {
         id: row.get("id")?,
@@ -331,16 +331,12 @@ fn filter_tasks(
     task_kind: Option<&str>,
 ) -> Vec<Task> {
     tasks.retain(|task| status.is_none_or(|s| task.status == s));
-    tasks.retain(|task| {
-        tenant_id.is_none_or(|tid| task.tenant_id.as_deref() == Some(tid))
-    });
+    tasks.retain(|task| tenant_id.is_none_or(|tid| task.tenant_id.as_deref() == Some(tid)));
     tasks.retain(|task| {
         organization_id.is_none_or(|oid| task.organization_id.as_deref() == Some(oid))
     });
     tasks.retain(|task| team_id.is_none_or(|tm| task.team_id.as_deref() == Some(tm)));
-    tasks.retain(|task| {
-        workflow_run_id.is_none_or(|w| task.workflow_run_id.as_deref() == Some(w))
-    });
+    tasks.retain(|task| workflow_run_id.is_none_or(|w| task.workflow_run_id.as_deref() == Some(w)));
     tasks.retain(|task| project_id.is_none_or(|p| task.project_id.as_deref() == Some(p)));
     tasks.retain(|task| task_kind.is_none_or(|k| task.task_kind.as_deref() == Some(k)));
     tasks
@@ -426,7 +422,11 @@ pub fn upsert_task(workspace: &Path, mode: TaskPersistenceMode, task: &Task) -> 
 }
 
 /// 追加多条（工作流批量创建）
-pub fn append_tasks(workspace: &Path, mode: TaskPersistenceMode, new_tasks: &[Task]) -> Result<(), String> {
+pub fn append_tasks(
+    workspace: &Path,
+    mode: TaskPersistenceMode,
+    new_tasks: &[Task],
+) -> Result<(), String> {
     if new_tasks.is_empty() {
         return Ok(());
     }
@@ -496,8 +496,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::TaskRepository;
+    use super::*;
 
     #[test]
     fn task_status_db_roundtrip() {
@@ -547,7 +547,9 @@ mod tests {
             task_kind: Some("implement".to_string()),
             artifacts: Some(serde_json::json!([{"name":"spec","uri":"x"}])),
             execution: Some(serde_json::json!({"linked_pr_url":"https://example/pr/1"})),
-            review_report: Some(serde_json::json!({"blocking":[],"non_blocking":[],"wont_fix":[],"backlog":[]})),
+            review_report: Some(
+                serde_json::json!({"blocking":[],"non_blocking":[],"wont_fix":[],"backlog":[]}),
+            ),
             created_at: "2020-01-01T00:00:00Z".to_string(),
             updated_at: "2020-01-01T00:00:00Z".to_string(),
         };
@@ -555,7 +557,10 @@ mod tests {
         let got = get_task(&dir, mode, "t1").unwrap().unwrap();
         assert_eq!(got.title, task.title);
         assert_eq!(got.assignee_ids, task.assignee_ids);
-        assert_eq!(got.workflow_template_version, task.workflow_template_version);
+        assert_eq!(
+            got.workflow_template_version,
+            task.workflow_template_version
+        );
         assert_eq!(got.task_kind.as_deref(), Some("implement"));
         assert!(got.artifacts.is_some());
         assert_eq!(got.status, TaskStatus::Todo);
@@ -563,7 +568,8 @@ mod tests {
 
     #[test]
     fn workspace_task_repo_implements_trait() {
-        let dir = std::env::temp_dir().join(format!("bee_task_repo_trait_{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("bee_task_repo_trait_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(dir.join(".bee")).unwrap();
         let store = SaasSqliteStore::new(super::saas_db_path(&dir)).unwrap();
         let c = store.connection();
@@ -630,7 +636,8 @@ mod tests {
 
     #[test]
     fn sql_task_survives_db_reopen() {
-        let dir = std::env::temp_dir().join(format!("bee_task_repo_reopen_{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("bee_task_repo_reopen_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(dir.join(".bee")).unwrap();
         {
             let store = SaasSqliteStore::new(super::saas_db_path(&dir)).unwrap();

@@ -163,12 +163,8 @@ pub enum MessageType {
     },
 
     // ========== 多租户管理消息 ==========
-
     /// 创建租户
-    CreateTenant {
-        name: String,
-        slug: String,
-    },
+    CreateTenant { name: String, slug: String },
 
     /// 租户创建结果
     TenantCreated {
@@ -178,9 +174,7 @@ pub enum MessageType {
     },
 
     /// 获取租户
-    GetTenant {
-        tenant_id: String,
-    },
+    GetTenant { tenant_id: String },
 
     /// 租户响应
     Tenant {
@@ -205,9 +199,7 @@ pub enum MessageType {
     },
 
     /// 获取组织
-    GetOrganization {
-        organization_id: String,
-    },
+    GetOrganization { organization_id: String },
 
     /// 组织响应
     Organization {
@@ -249,9 +241,7 @@ pub enum MessageType {
     },
 
     /// 接受邀请
-    AcceptInvite {
-        membership_id: String,
-    },
+    AcceptInvite { membership_id: String },
 
     /// 邀请接受结果
     InviteAccepted {
@@ -279,9 +269,7 @@ pub enum MessageType {
     },
 
     /// 成员列表响应
-    MembersList {
-        members: Vec<MemberDto>,
-    },
+    MembersList { members: Vec<MemberDto> },
 
     /// 通用操作结果
     OperationResult {

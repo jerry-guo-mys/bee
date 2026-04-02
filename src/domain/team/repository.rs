@@ -34,10 +34,7 @@ pub trait TeamRepository: Send + Sync {
     async fn find_by_tenant(&self, tenant_id: &TenantId) -> Result<Vec<Team>, Self::Error>;
 
     /// 根据父团队 ID 查找子团队
-    async fn find_by_parent(
-        &self,
-        parent_team_id: &TeamId,
-    ) -> Result<Vec<Team>, Self::Error>;
+    async fn find_by_parent(&self, parent_team_id: &TeamId) -> Result<Vec<Team>, Self::Error>;
 
     /// 根据代码查找团队
     async fn find_by_code(
@@ -106,10 +103,7 @@ impl TeamRepository for InMemoryTeamRepository {
             .collect())
     }
 
-    async fn find_by_parent(
-        &self,
-        parent_team_id: &TeamId,
-    ) -> Result<Vec<Team>, Self::Error> {
+    async fn find_by_parent(&self, parent_team_id: &TeamId) -> Result<Vec<Team>, Self::Error> {
         let data = self.data.read().await;
         Ok(data
             .values()
@@ -124,10 +118,13 @@ impl TeamRepository for InMemoryTeamRepository {
         code: &str,
     ) -> Result<Option<Team>, Self::Error> {
         let data = self.data.read().await;
-        Ok(data.values().find(|team| {
-            team.organization_id() == organization_id
-                && team.code().map(|c| c.as_str()) == Some(code)
-        }).cloned())
+        Ok(data
+            .values()
+            .find(|team| {
+                team.organization_id() == organization_id
+                    && team.code().map(|c| c.as_str()) == Some(code)
+            })
+            .cloned())
     }
 
     async fn delete(&self, id: &TeamId) -> Result<(), Self::Error> {

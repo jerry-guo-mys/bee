@@ -105,17 +105,14 @@ impl super::OrganizationRepository for PostgresOrganizationRepository {
     }
 
     async fn find_by_id(&self, id: &OrganizationId) -> Result<Option<Organization>, Self::Error> {
-        let org = sqlx::query_as::<_, OrganizationRow>(
-            "SELECT * FROM organizations WHERE id = $1",
-        )
-        .bind(
-            id.as_str()
-                .parse::<uuid::Uuid>()
-                .map_err(|e| OrganizationError::DatabaseError(format!("Invalid UUID: {}", e)))?,
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| OrganizationError::DatabaseError(e.to_string()))?;
+        let org =
+            sqlx::query_as::<_, OrganizationRow>("SELECT * FROM organizations WHERE id = $1")
+                .bind(id.as_str().parse::<uuid::Uuid>().map_err(|e| {
+                    OrganizationError::DatabaseError(format!("Invalid UUID: {}", e))
+                })?)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| OrganizationError::DatabaseError(e.to_string()))?;
 
         match org {
             Some(row) => row.into_organization().map(Some),
@@ -123,10 +120,7 @@ impl super::OrganizationRepository for PostgresOrganizationRepository {
         }
     }
 
-    async fn find_by_tenant(
-        &self,
-        tenant_id: &TenantId,
-    ) -> Result<Vec<Organization>, Self::Error> {
+    async fn find_by_tenant(&self, tenant_id: &TenantId) -> Result<Vec<Organization>, Self::Error> {
         let orgs = sqlx::query_as::<_, OrganizationRow>(
             "SELECT * FROM organizations WHERE tenant_id = $1 ORDER BY name",
         )
@@ -140,7 +134,9 @@ impl super::OrganizationRepository for PostgresOrganizationRepository {
         .await
         .map_err(|e| OrganizationError::DatabaseError(e.to_string()))?;
 
-        orgs.into_iter().map(|row| row.into_organization()).collect()
+        orgs.into_iter()
+            .map(|row| row.into_organization())
+            .collect()
     }
 
     async fn find_by_slug(
@@ -169,15 +165,14 @@ impl super::OrganizationRepository for PostgresOrganizationRepository {
     }
 
     async fn delete(&self, id: &OrganizationId) -> Result<(), Self::Error> {
-        let result = sqlx::query("DELETE FROM organizations WHERE id = $1")
-            .bind(
-                id.as_str()
-                    .parse::<uuid::Uuid>()
-                    .map_err(|e| OrganizationError::DatabaseError(format!("Invalid UUID: {}", e)))?,
-            )
-            .execute(&self.pool)
-            .await
-            .map_err(|e| OrganizationError::DatabaseError(e.to_string()))?;
+        let result =
+            sqlx::query("DELETE FROM organizations WHERE id = $1")
+                .bind(id.as_str().parse::<uuid::Uuid>().map_err(|e| {
+                    OrganizationError::DatabaseError(format!("Invalid UUID: {}", e))
+                })?)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| OrganizationError::DatabaseError(e.to_string()))?;
 
         if result.rows_affected() == 0 {
             return Err(OrganizationError::NotFound(id.to_string()));
@@ -250,18 +245,12 @@ mod tests {
         let repo = PostgresOrganizationRepository::new(&conn);
 
         let tenant_id = TenantId::generate();
-        let org1 = Organization::create(
-            tenant_id.clone(),
-            "Org 1".to_string(),
-            "org-1".to_string(),
-        )
-        .unwrap();
-        let org2 = Organization::create(
-            tenant_id.clone(),
-            "Org 2".to_string(),
-            "org-2".to_string(),
-        )
-        .unwrap();
+        let org1 =
+            Organization::create(tenant_id.clone(), "Org 1".to_string(), "org-1".to_string())
+                .unwrap();
+        let org2 =
+            Organization::create(tenant_id.clone(), "Org 2".to_string(), "org-2".to_string())
+                .unwrap();
 
         repo.save(&org1).await.unwrap();
         repo.save(&org2).await.unwrap();
@@ -312,8 +301,7 @@ mod tests {
         repo.save(&org).await.unwrap();
 
         // 修改并保存
-        org.update_name("Updated Organization".to_string())
-            .unwrap();
+        org.update_name("Updated Organization".to_string()).unwrap();
         repo.save(&org).await.unwrap();
 
         // 验证更新

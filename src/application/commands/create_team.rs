@@ -52,7 +52,9 @@ where
     ) -> Result<<CreateTeamCommand as CqrsCommand>::Response, Self::Error> {
         let tenant_id = crate::domain::tenant::TenantId::new(command.tenant_id);
         let organization_id = crate::domain::tenant::OrganizationId::new(command.organization_id);
-        let parent_team_id = command.parent_team_id.map(|id| crate::domain::team::TeamId::new(id));
+        let parent_team_id = command
+            .parent_team_id
+            .map(|id| crate::domain::team::TeamId::new(id));
 
         tracing::info!(
             target: "audit",
@@ -67,7 +69,14 @@ where
 
         let team = self
             .team_service
-            .create_team(tenant_id, organization_id, command.name, command.code, None, parent_team_id)
+            .create_team(
+                tenant_id,
+                organization_id,
+                command.name,
+                command.code,
+                None,
+                parent_team_id,
+            )
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create team: {}", e))?;
 

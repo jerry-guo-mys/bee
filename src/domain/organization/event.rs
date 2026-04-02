@@ -6,8 +6,8 @@ use crate::domain::common::now;
 use chrono::{DateTime, Utc};
 
 use super::value_object::OrganizationId;
-use crate::domain::tenant::TenantId;
 use crate::domain::tenant::event::DomainEvent;
+use crate::domain::tenant::TenantId;
 
 /// Organization 事件枚举
 #[derive(Debug, Clone)]

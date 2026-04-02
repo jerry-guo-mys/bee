@@ -82,7 +82,9 @@ mod tests {
         let handler = SuspendMemberHandler::new(service.clone());
 
         // 先创建一个成员
-        let email = crate::domain::member::value_object::UserEmail::new("test@example.com".to_string()).unwrap();
+        let email =
+            crate::domain::member::value_object::UserEmail::new("test@example.com".to_string())
+                .unwrap();
         let membership = service
             .invite_member(
                 crate::domain::tenant::TenantId::generate(),
@@ -112,8 +114,15 @@ mod tests {
         assert!(result.is_ok());
 
         // 验证成员已被暂停
-        let updated = service.get_member_by_id(membership.id()).await.unwrap().unwrap();
-        assert_eq!(updated.status(), &crate::domain::common::MembershipStatus::Suspended);
+        let updated = service
+            .get_member_by_id(membership.id())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            updated.status(),
+            &crate::domain::common::MembershipStatus::Suspended
+        );
     }
 
     #[tokio::test]

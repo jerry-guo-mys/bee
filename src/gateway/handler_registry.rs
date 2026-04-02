@@ -6,28 +6,23 @@ use std::sync::Arc;
 
 use crate::application::commands::{
     handler::{CommandBus, InMemoryCommandBus},
-    CreateTenantCommand, CreateTenantHandler,
-    CreateOrganizationCommand, CreateOrganizationHandler,
-    CreateTeamCommand, CreateTeamHandler,
-    InviteMemberCommand, InviteMemberHandler,
-    AcceptInviteCommand, AcceptInviteHandler,
-    SuspendMemberCommand, SuspendMemberHandler,
+    AcceptInviteCommand, AcceptInviteHandler, CreateOrganizationCommand, CreateOrganizationHandler,
+    CreateTeamCommand, CreateTeamHandler, CreateTenantCommand, CreateTenantHandler,
+    InviteMemberCommand, InviteMemberHandler, SuspendMemberCommand, SuspendMemberHandler,
 };
 use crate::application::queries::{
-    handler::{QueryBus, InMemoryQueryBus},
-    GetTenantQuery, GetTenantHandler,
-    GetOrganizationQuery, GetOrganizationHandler,
-    ListMembersQuery, ListMembersHandler,
-    ListTeamsQuery, ListTeamsHandler,
+    handler::{InMemoryQueryBus, QueryBus},
+    GetOrganizationHandler, GetOrganizationQuery, GetTenantHandler, GetTenantQuery,
+    ListMembersHandler, ListMembersQuery, ListTeamsHandler, ListTeamsQuery,
 };
-use crate::domain::tenant::InMemoryTenantRepository;
-use crate::domain::organization::InMemoryOrganizationRepository;
-use crate::domain::team::InMemoryTeamRepository;
-use crate::domain::member::InMemoryMembershipRepository;
 use crate::domain::event::InMemoryEventPublisher;
+use crate::domain::member::InMemoryMembershipRepository;
+use crate::domain::organization::InMemoryOrganizationRepository;
 use crate::domain::service::{
-    TenantDomainService, OrganizationDomainService, TeamDomainService, MemberDomainService,
+    MemberDomainService, OrganizationDomainService, TeamDomainService, TenantDomainService,
 };
+use crate::domain::team::InMemoryTeamRepository;
+use crate::domain::tenant::InMemoryTenantRepository;
 
 /// 注册所有命令和查询处理器
 pub fn register_all_handlers(
@@ -77,9 +72,8 @@ pub fn register_all_handlers(
     );
 
     // 成员命令 - InviteMemberHandler 没有泛型参数
-    command_bus.register_handler::<InviteMemberHandler, InviteMemberCommand>(
-        InviteMemberHandler::new(),
-    );
+    command_bus
+        .register_handler::<InviteMemberHandler, InviteMemberCommand>(InviteMemberHandler::new());
 
     // 成员命令 - AcceptInviteHandler 和 SuspendMemberHandler 有泛型参数
     command_bus.register_handler::<AcceptInviteHandler<_, _>, AcceptInviteCommand>(
@@ -92,9 +86,9 @@ pub fn register_all_handlers(
     // ========== 注册查询处理器 ==========
 
     // 租户查询
-    query_bus.register_handler::<GetTenantHandler<_, _>, GetTenantQuery>(
-        GetTenantHandler::new(tenant_service.clone()),
-    );
+    query_bus.register_handler::<GetTenantHandler<_, _>, GetTenantQuery>(GetTenantHandler::new(
+        tenant_service.clone(),
+    ));
 
     // 组织查询
     query_bus.register_handler::<GetOrganizationHandler<_>, GetOrganizationQuery>(
@@ -107,9 +101,9 @@ pub fn register_all_handlers(
     );
 
     // 团队查询 - ListTeamsHandler 只有一个泛型参数
-    query_bus.register_handler::<ListTeamsHandler<_>, ListTeamsQuery>(
-        ListTeamsHandler::new(team_repo.clone()),
-    );
+    query_bus.register_handler::<ListTeamsHandler<_>, ListTeamsQuery>(ListTeamsHandler::new(
+        team_repo.clone(),
+    ));
 
     tracing::info!("All CQRS handlers registered successfully");
 }

@@ -5,9 +5,7 @@
 use crate::domain::common::now;
 use chrono::{DateTime, Utc};
 
-use super::value_object::{
-    OrganizationError, OrganizationId, OrganizationName, OrganizationSlug,
-};
+use super::value_object::{OrganizationError, OrganizationId, OrganizationName, OrganizationSlug};
 use crate::domain::tenant::TenantId;
 
 /// 组织聚合根
@@ -192,11 +190,7 @@ mod tests {
 
     #[test]
     fn test_organization_create_invalid_name() {
-        let result = Organization::create(
-            TenantId::generate(),
-            "".to_string(),
-            "test".to_string(),
-        );
+        let result = Organization::create(TenantId::generate(), "".to_string(), "test".to_string());
         assert!(matches!(result, Err(OrganizationError::InvalidName(_))));
     }
 

@@ -79,7 +79,9 @@ mod tests {
         let handler = AcceptInviteHandler::new(service.clone());
 
         // 先创建一个邀请
-        let email = crate::domain::member::value_object::UserEmail::new("test@example.com".to_string()).unwrap();
+        let email =
+            crate::domain::member::value_object::UserEmail::new("test@example.com".to_string())
+                .unwrap();
         let membership = service
             .invite_member(
                 crate::domain::tenant::TenantId::generate(),
@@ -102,8 +104,15 @@ mod tests {
         assert!(result.is_ok());
 
         // 验证成员状态已变为 Active
-        let updated = service.get_member_by_id(membership.id()).await.unwrap().unwrap();
-        assert_eq!(updated.status(), &crate::domain::common::MembershipStatus::Active);
+        let updated = service
+            .get_member_by_id(membership.id())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            updated.status(),
+            &crate::domain::common::MembershipStatus::Active
+        );
     }
 
     #[tokio::test]
@@ -131,7 +140,9 @@ mod tests {
         let handler = AcceptInviteHandler::new(service.clone());
 
         // 先创建一个邀请并接受
-        let email = crate::domain::member::value_object::UserEmail::new("test@example.com".to_string()).unwrap();
+        let email =
+            crate::domain::member::value_object::UserEmail::new("test@example.com".to_string())
+                .unwrap();
         let membership = service
             .invite_member(
                 crate::domain::tenant::TenantId::generate(),
@@ -158,6 +169,9 @@ mod tests {
 
         let result = handler.handle(command).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("只有待处理的邀请才能被接受"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("只有待处理的邀请才能被接受"));
     }
 }

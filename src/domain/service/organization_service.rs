@@ -77,12 +77,7 @@ where
 
         // 发布 OrganizationCreated 事件
         let created_event = OrganizationEvent::Created(
-            crate::domain::organization::OrganizationCreated::new(
-                org_id,
-                tenant_id,
-                name,
-                slug,
-            ),
+            crate::domain::organization::OrganizationCreated::new(org_id, tenant_id, name, slug),
         );
         self.event_publisher.publish(created_event).await;
 
@@ -113,11 +108,9 @@ where
         self.org_repo.save(&org).await?;
 
         // 发布 OrganizationUpdated 事件
-        let updated_event =
-            OrganizationEvent::Updated(crate::domain::organization::OrganizationUpdated::new(
-                id.clone(),
-                name,
-            ));
+        let updated_event = OrganizationEvent::Updated(
+            crate::domain::organization::OrganizationUpdated::new(id.clone(), name),
+        );
         self.event_publisher.publish(updated_event).await;
 
         Ok(())
@@ -139,10 +132,9 @@ where
             .ok_or(OrganizationError::NotFound("Organization not found".into()))?;
 
         // 发布 OrganizationDeleted 事件
-        let deleted_event =
-            OrganizationEvent::Deleted(crate::domain::organization::OrganizationDeleted::new(
-                id.clone(),
-            ));
+        let deleted_event = OrganizationEvent::Deleted(
+            crate::domain::organization::OrganizationDeleted::new(id.clone()),
+        );
         self.event_publisher.publish(deleted_event).await;
 
         // 物理删除
@@ -219,7 +211,11 @@ mod tests {
 
         let tenant_id = TenantId::generate();
         let org = service
-            .create_organization(tenant_id.clone(), "Test Organization".to_string(), "test-org".to_string())
+            .create_organization(
+                tenant_id.clone(),
+                "Test Organization".to_string(),
+                "test-org".to_string(),
+            )
             .await
             .unwrap();
 
@@ -241,13 +237,21 @@ mod tests {
 
         // 创建第一个组织
         service
-            .create_organization(tenant_id.clone(), "Org 1".to_string(), "test-slug".to_string())
+            .create_organization(
+                tenant_id.clone(),
+                "Org 1".to_string(),
+                "test-slug".to_string(),
+            )
             .await
             .unwrap();
 
         // 尝试创建重复 slug 的组织
         let result = service
-            .create_organization(tenant_id.clone(), "Org 2".to_string(), "test-slug".to_string())
+            .create_organization(
+                tenant_id.clone(),
+                "Org 2".to_string(),
+                "test-slug".to_string(),
+            )
             .await;
 
         assert!(matches!(result, Err(OrganizationError::AlreadyExists(_))));
@@ -271,7 +275,11 @@ mod tests {
 
         let tenant_id = TenantId::generate();
         let org = service
-            .create_organization(tenant_id.clone(), "Test Organization".to_string(), "test-org".to_string())
+            .create_organization(
+                tenant_id.clone(),
+                "Test Organization".to_string(),
+                "test-org".to_string(),
+            )
             .await
             .unwrap();
 
@@ -282,7 +290,11 @@ mod tests {
             .unwrap();
 
         // 验证更新
-        let updated = service.get_organization_by_id(org.id()).await.unwrap().unwrap();
+        let updated = service
+            .get_organization_by_id(org.id())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(updated.name().as_str(), "Updated Organization");
 
         // 验证事件已发布
@@ -297,7 +309,11 @@ mod tests {
 
         let tenant_id = TenantId::generate();
         let org = service
-            .create_organization(tenant_id.clone(), "Test Organization".to_string(), "test-org".to_string())
+            .create_organization(
+                tenant_id.clone(),
+                "Test Organization".to_string(),
+                "test-org".to_string(),
+            )
             .await
             .unwrap();
         let org_id = org.id().clone();
@@ -340,12 +356,18 @@ mod tests {
             .await
             .unwrap();
 
-        let orgs = service.get_organizations_by_tenant(&tenant_id).await.unwrap();
+        let orgs = service
+            .get_organizations_by_tenant(&tenant_id)
+            .await
+            .unwrap();
         assert_eq!(orgs.len(), 2);
 
         // 不同租户应该返回空
         let other_tenant = TenantId::generate();
-        let orgs = service.get_organizations_by_tenant(&other_tenant).await.unwrap();
+        let orgs = service
+            .get_organizations_by_tenant(&other_tenant)
+            .await
+            .unwrap();
         assert_eq!(orgs.len(), 0);
     }
 
@@ -355,11 +377,18 @@ mod tests {
 
         let tenant_id = TenantId::generate();
         service
-            .create_organization(tenant_id.clone(), "Test Organization".to_string(), "test-org".to_string())
+            .create_organization(
+                tenant_id.clone(),
+                "Test Organization".to_string(),
+                "test-org".to_string(),
+            )
             .await
             .unwrap();
 
-        let org = service.get_organization_by_slug(&tenant_id, "test-org").await.unwrap();
+        let org = service
+            .get_organization_by_slug(&tenant_id, "test-org")
+            .await
+            .unwrap();
         assert!(org.is_some());
         assert_eq!(org.unwrap().slug().as_str(), "test-org");
     }

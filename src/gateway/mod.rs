@@ -45,12 +45,14 @@ mod session_store;
 mod spoke;
 mod task_queue;
 
-pub use auth::{AuthContext, JwtAuthenticator, JwtClaims, JwtAuthError, extract_client_metadata};
+pub use auth::{extract_client_metadata, AuthContext, JwtAuthError, JwtAuthenticator, JwtClaims};
 pub use cqrs_integration::GatewayCqrsService;
 pub use handler_registry::register_all_handlers;
 pub use hub::{Hub, HubConfig};
 pub use intent::{Intent, IntentRecognizer};
-pub use message::{ClientInfo, GatewayMessage, HistoryMessage, MessageType, MemberDto, SessionStatus, SpokeType};
+pub use message::{
+    ClientInfo, GatewayMessage, HistoryMessage, MemberDto, MessageType, SessionStatus, SpokeType,
+};
 #[cfg(feature = "async-sqlite")]
 pub use persistent_session::PersistentSessionManager;
 pub use runtime::{AgentRuntime, RuntimeConfig};

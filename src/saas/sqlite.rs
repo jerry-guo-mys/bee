@@ -4,6 +4,7 @@
 
 use std::path::Path;
 
+use anyhow::Context;
 use rusqlite::Connection;
 
 const SAAS_SCHEMA_STATEMENTS: &[&str] = &[
@@ -285,9 +286,20 @@ pub struct SaasSqliteStore {
 
 impl SaasSqliteStore {
     pub fn new(db_path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let conn = Connection::open(db_path)?;
+        let db_path = db_path.as_ref();
+        if let Some(parent) = db_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("create SaaS database parent directory {}", parent.display())
+                })?;
+            }
+        }
+        let conn = Connection::open(db_path)
+            .with_context(|| format!("open SQLite database {}", db_path.display()))?;
         let store = Self { conn };
-        store.init_schema()?;
+        store
+            .init_schema()
+            .with_context(|| format!("init SaaS schema {}", db_path.display()))?;
         Ok(store)
     }
 
@@ -328,12 +340,7 @@ impl SaasSqliteStore {
             "workflow_template_version",
             "INTEGER",
         )?;
-        ensure_column(
-            &self.conn,
-            "saas_tasks",
-            "assignee_ids_json",
-            "TEXT",
-        )?;
+        ensure_column(&self.conn, "saas_tasks", "assignee_ids_json", "TEXT")?;
         ensure_column(&self.conn, "saas_tasks", "group_id", "TEXT")?;
         ensure_column(&self.conn, "saas_tasks", "coordinator_id", "TEXT")?;
         ensure_column(
@@ -370,12 +377,14 @@ impl SaasSqliteStore {
                 updated_at: row.get(4)?,
             })
         })?;
-        tenants.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(|e| anyhow::anyhow!(e))
+        tenants
+            .collect::<Result<Vec<_>, rusqlite::Error>>()
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
     pub fn get_tenant(&self, id: &str) -> anyhow::Result<Option<crate::saas::Tenant>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, status, created_at, updated_at FROM saas_tenants WHERE id = ?"
+            "SELECT id, name, status, created_at, updated_at FROM saas_tenants WHERE id = ?",
         )?;
         let mut rows = stmt.query_map([id], |row| {
             Ok(crate::saas::Tenant {
@@ -407,7 +416,11 @@ impl SaasSqliteStore {
         Ok(())
     }
 
-    pub fn update_tenant_status(&self, id: &str, status: &crate::saas::TenantStatus) -> anyhow::Result<()> {
+    pub fn update_tenant_status(
+        &self,
+        id: &str,
+        status: &crate::saas::TenantStatus,
+    ) -> anyhow::Result<()> {
         self.conn.execute(
             "UPDATE saas_tenants SET status = ?, updated_at = datetime('now') WHERE id = ?",
             [&status.to_string(), id],
@@ -417,7 +430,10 @@ impl SaasSqliteStore {
 
     // ==================== Organization 相关方法 ====================
 
-    pub fn list_organizations(&self, tenant_id: Option<&str>) -> anyhow::Result<Vec<crate::saas::Organization>> {
+    pub fn list_organizations(
+        &self,
+        tenant_id: Option<&str>,
+    ) -> anyhow::Result<Vec<crate::saas::Organization>> {
         let sql = match tenant_id {
             Some(tid) => format!(
                 "SELECT id, tenant_id, name, slug, industry, description, created_at, updated_at FROM saas_organizations WHERE tenant_id = '{}' ORDER BY created_at DESC",
@@ -438,7 +454,8 @@ impl SaasSqliteStore {
                 updated_at: row.get(7)?,
             })
         })?;
-        orgs.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(|e| anyhow::anyhow!(e))
+        orgs.collect::<Result<Vec<_>, rusqlite::Error>>()
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
     pub fn get_organization(&self, id: &str) -> anyhow::Result<Option<crate::saas::Organization>> {
@@ -483,7 +500,10 @@ impl SaasSqliteStore {
 
     // ==================== Team 相关方法 ====================
 
-    pub fn list_teams(&self, organization_id: Option<&str>) -> anyhow::Result<Vec<crate::saas::Team>> {
+    pub fn list_teams(
+        &self,
+        organization_id: Option<&str>,
+    ) -> anyhow::Result<Vec<crate::saas::Team>> {
         let sql = match organization_id {
             Some(org_id) => format!(
                 "SELECT id, tenant_id, organization_id, name, code, description, parent_team_id, created_at, updated_at FROM saas_teams WHERE organization_id = '{}' ORDER BY created_at DESC",
@@ -505,7 +525,9 @@ impl SaasSqliteStore {
                 updated_at: row.get(8)?,
             })
         })?;
-        teams.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(|e| anyhow::anyhow!(e))
+        teams
+            .collect::<Result<Vec<_>, rusqlite::Error>>()
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
     pub fn get_team(&self, id: &str) -> anyhow::Result<Option<crate::saas::Team>> {
@@ -552,7 +574,11 @@ impl SaasSqliteStore {
 
     // ==================== Membership 相关方法 ====================
 
-    pub fn list_memberships(&self, tenant_id: Option<&str>, organization_id: Option<&str>) -> anyhow::Result<Vec<crate::saas::Membership>> {
+    pub fn list_memberships(
+        &self,
+        tenant_id: Option<&str>,
+        organization_id: Option<&str>,
+    ) -> anyhow::Result<Vec<crate::saas::Membership>> {
         let mut conditions = Vec::new();
         let mut params: Vec<&str> = Vec::new();
 
@@ -589,7 +615,9 @@ impl SaasSqliteStore {
                 updated_at: row.get(7)?,
             })
         })?;
-        memberships.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(|e| anyhow::anyhow!(e))
+        memberships
+            .collect::<Result<Vec<_>, rusqlite::Error>>()
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
     pub fn get_membership(&self, id: &str) -> anyhow::Result<Option<crate::saas::Membership>> {
@@ -632,7 +660,11 @@ impl SaasSqliteStore {
         Ok(())
     }
 
-    pub fn update_membership_role(&self, id: &str, role: &crate::saas::MembershipRole) -> anyhow::Result<()> {
+    pub fn update_membership_role(
+        &self,
+        id: &str,
+        role: &crate::saas::MembershipRole,
+    ) -> anyhow::Result<()> {
         self.conn.execute(
             "UPDATE saas_memberships SET role = ?, updated_at = datetime('now') WHERE id = ?",
             [&role.to_string(), id],
@@ -688,7 +720,8 @@ impl SaasSqliteStore {
                 created_at: row.get(9)?,
             })
         })?;
-        logs.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(|e| anyhow::anyhow!(e))
+        logs.collect::<Result<Vec<_>, rusqlite::Error>>()
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
     // ==================== 工作流模板（工作台 M2） ====================
@@ -702,7 +735,8 @@ impl SaasSqliteStore {
         let mut stmt = self.conn.prepare(
             "SELECT id FROM saas_agent_instances WHERE team_id = ? AND template_id = ? AND status = 'active' LIMIT 1",
         )?;
-        let mut rows = stmt.query_map([team_id, agent_template_id], |row| row.get::<_, String>(0))?;
+        let mut rows =
+            stmt.query_map([team_id, agent_template_id], |row| row.get::<_, String>(0))?;
         Ok(rows.next().transpose()?)
     }
 

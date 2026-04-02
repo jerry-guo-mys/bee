@@ -119,7 +119,10 @@ pub fn saas_db_path(workspace: &Path) -> std::path::PathBuf {
 }
 
 /// 合并内置 + 租户已发布模板（同 slug 时租户覆盖内置）
-pub fn merged_workflow_templates_for_tenant(tenant_id: &str, workspace: &Path) -> Vec<WorkflowTemplateSummary> {
+pub fn merged_workflow_templates_for_tenant(
+    tenant_id: &str,
+    workspace: &Path,
+) -> Vec<WorkflowTemplateSummary> {
     let mut map: BTreeMap<String, WorkflowTemplateSummary> = builtin_workflow_templates()
         .into_iter()
         .map(|s| (s.id.clone(), s))
@@ -204,7 +207,8 @@ pub fn resolve_workflow_template_for_start(
             Err(e) => return Err(e.to_string()),
         }
     }
-    resolve_builtin_workflow_template(key).ok_or_else(|| format!("workflow template not found: {key}"))
+    resolve_builtin_workflow_template(key)
+        .ok_or_else(|| format!("workflow template not found: {key}"))
 }
 
 pub fn start_workflow_run(
@@ -223,7 +227,8 @@ pub fn start_workflow_run(
             req.team_id.as_deref(),
             step.default_agent_template_id.as_deref(),
         ) {
-            if let Ok(Some(instance_id)) = s.find_agent_instance_for_team_template(team_id, tpl_id) {
+            if let Ok(Some(instance_id)) = s.find_agent_instance_for_team_template(team_id, tpl_id)
+            {
                 assignee_ids.push(instance_id);
             }
         }

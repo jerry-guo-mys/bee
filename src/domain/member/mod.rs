@@ -12,10 +12,10 @@ pub mod repository;
 pub mod value_object;
 
 // 重新导出主要类型
+pub use crate::domain::service::MemberDomainService;
 pub use entity::{MemberDomainError, Membership};
 pub use event::MemberEvent;
 #[cfg(feature = "postgres")]
 pub use repository::PostgresMembershipRepository;
 pub use repository::{InMemoryMembershipRepository, MembershipFilter, MembershipRepository};
-pub use crate::domain::service::MemberDomainService;
 pub use value_object::{ToolId, ToolPolicy, ToolRiskLevel, UserEmail};
