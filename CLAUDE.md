@@ -146,3 +146,4 @@ cargo fmt -- --check               # Check formatting (CI)
 | `DASHSCOPE_API_KEY` | Qwen API Key |
 | `MOONSHOT_API_KEY` | Kimi API Key |
 | `ZHIPU_API_KEY` | GLM API Key |
+| `TASK_PERSISTENCE` / `BEE_TASK_PERSISTENCE` | 任务存储：`json`（默认）\|`sql`\|`dual_write`；见 `task_repository` |

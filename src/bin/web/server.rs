@@ -82,7 +82,7 @@ use session_store::{
     load_session_from_disk, save_group_session, save_groups_to_disk, save_session_to_disk,
     session_key, session_path, GroupChatMessage, GroupInfo, SessionSnapshot, WebSessionScope,
 };
-use task_repository::TaskPersistenceMode;
+use task_repository::{TaskPersistenceMode, TaskRepository};
 use task_service::{
     apply_task_update, build_task, status_label, CreateTaskRequest, Task, TaskStatus,
     UpdateTaskRequest,
@@ -190,6 +190,12 @@ pub(crate) struct AppState {
     active_cancellations: Arc<RwLock<HashMap<String, CancellationToken>>>,
     /// 任务持久化：`TASK_PERSISTENCE` / `BEE_TASK_PERSISTENCE`（见 task_repository）
     task_persistence: task_repository::TaskPersistenceMode,
+}
+
+impl AppState {
+    pub(crate) fn task_repo(&self) -> task_repository::WorkspaceTaskRepo {
+        task_repository::WorkspaceTaskRepo::new(self.workspace.clone(), self.task_persistence)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1961,15 +1967,16 @@ async fn api_task_board(
             AccessRequirement::OrgAdmin
         },
     )?;
-    let tasks = task_repository::list_tasks(
-        &state.workspace,
-        state.task_persistence,
-        None,
-        Some(tenant_id.as_str()),
-        organization_id.as_deref(),
-        team_id.as_deref(),
-    )
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let tasks = state
+        .task_repo()
+        .list_filtered(
+            None,
+            Some(tenant_id.as_str()),
+            organization_id.as_deref(),
+            team_id.as_deref(),
+            None,
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(build_task_board(
         &tasks,
         Some(tenant_id.as_str()),
@@ -2063,7 +2070,9 @@ async fn api_workflows_start(
             },
         );
     }
-    task_repository::append_tasks(&state.workspace, state.task_persistence, &workflow.tasks)
+    state
+        .task_repo()
+        .append(&workflow.tasks)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let _ = write_audit_log(
         &state.workspace,
@@ -2366,15 +2375,17 @@ async fn api_tasks_list(
     let tenant_filter = query.get("tenant_id").cloned();
     let org_filter = query.get("organization_id").cloned();
     let team_filter = query.get("team_id").cloned();
-    let list = task_repository::list_tasks(
-        &state.workspace,
-        state.task_persistence,
-        status_filter,
-        tenant_filter.as_deref(),
-        org_filter.as_deref(),
-        team_filter.as_deref(),
-    )
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let workflow_run_filter = query.get("workflow_run_id").cloned();
+    let list = state
+        .task_repo()
+        .list_filtered(
+            status_filter,
+            tenant_filter.as_deref(),
+            org_filter.as_deref(),
+            team_filter.as_deref(),
+            workflow_run_filter.as_deref(),
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(list))
 }
 
@@ -2440,7 +2451,9 @@ async fn api_tasks_create(
         req.workflow_run_id.clone(),
         req.internal_group || group_id.is_some(),
     );
-    task_repository::upsert_task(&state.workspace, state.task_persistence, &task)
+    state
+        .task_repo()
+        .upsert(&task)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     emit_event(
         &state.event_bus,

@@ -6,7 +6,7 @@ use futures_util::stream;
 use tokio::sync::mpsc;
 
 use super::session_store::{save_session_to_disk, WebSessionScope};
-use super::task_repository;
+use super::task_repository::{patch_task, TaskRepository};
 use super::task_service::{status_label, TaskStatus};
 use super::{
     emit_event, get_or_create_vector_for_assistant, resolve_allowed_tools_for_scope, AppState,
@@ -21,7 +21,9 @@ pub async fn start_task(
     state: Arc<AppState>,
     task_id: String,
 ) -> Result<Response, (StatusCode, String)> {
-    let task = task_repository::get_task(&state.workspace, state.task_persistence, &task_id)
+    let task = state
+        .task_repo()
+        .get_by_id(&task_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?;
     let coordinator_id = task
@@ -101,7 +103,7 @@ pub async fn start_task(
             &context,
             Some(&scope_clone),
         );
-        if let Ok(Some(updated)) = task_repository::patch_task(
+        if let Ok(Some(updated)) = patch_task(
             &state_spawn.workspace,
             task_persistence,
             &task_id_clone,

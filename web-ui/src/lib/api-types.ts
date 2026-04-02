@@ -59,6 +59,7 @@ export interface TracesRecentResponse {
 
 export type TaskStatus = 'todo' | 'in_progress' | 'done'
 
+/** 与 bee-web `Task` JSON 一致；列表接口支持 query：`status`、`tenant_id`、`organization_id`、`team_id`、`workflow_run_id` */
 export interface Task {
   id: string
   tenant_id?: string | null

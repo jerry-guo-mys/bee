@@ -99,9 +99,14 @@ export async function getTracesRecent(limit = 20): Promise<TracesRecentResponse>
   return handleResponse<TracesRecentResponse>(res)
 }
 
-export async function getTasks(params?: { status?: TaskStatus }): Promise<Task[]> {
+export async function getTasks(params?: {
+  status?: TaskStatus
+  /** 与后端 `GET /api/tasks?workflow_run_id=` 一致 */
+  workflow_run_id?: string
+}): Promise<Task[]> {
   const q: Record<string, string> = { ...managementScopeQuery() }
   if (params?.status) q.status = params.status
+  if (params?.workflow_run_id?.trim()) q.workflow_run_id = params.workflow_run_id.trim()
   const res = await fetch(buildUrl('/api/tasks', q))
   return handleResponse<Task[]>(res)
 }

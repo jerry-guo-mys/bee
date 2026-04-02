@@ -4,8 +4,10 @@
 //! - 未设置 / `json`：读写在 `tasks.json`（与历史行为一致）
 //! - `sql` / `sqlite`：以 SQLite `saas_tasks` 为准，不读 `tasks.json`
 //! - `dual_write` / `dual`：写入 SQL + 全量回写 `tasks.json`；读取来自 SQL
+//!
+//! **TaskRepository** trait：`WorkspaceTaskRepo` 为默认实现；`patch_task` 仍用模块级函数（闭包更新）。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Row};
 
@@ -50,6 +52,73 @@ pub fn task_status_from_db(s: &str) -> Option<TaskStatus> {
         "in_progress" => Some(TaskStatus::InProgress),
         "done" => Some(TaskStatus::Done),
         _ => None,
+    }
+}
+
+/// 工作台任务持久化契约（M3）；列表 / 读 / 写 / 批量追加。
+pub trait TaskRepository {
+    fn list_filtered(
+        &self,
+        status: Option<TaskStatus>,
+        tenant_id: Option<&str>,
+        organization_id: Option<&str>,
+        team_id: Option<&str>,
+        workflow_run_id: Option<&str>,
+    ) -> Result<Vec<Task>, String>;
+
+    fn get_by_id(&self, id: &str) -> Result<Option<Task>, String>;
+
+    fn upsert(&self, task: &Task) -> Result<(), String>;
+
+    fn append(&self, tasks: &[Task]) -> Result<(), String>;
+}
+
+/// 绑定 workspace + 持久化模式的默认 `TaskRepository` 实现。
+#[derive(Clone, Debug)]
+pub struct WorkspaceTaskRepo {
+    pub workspace: PathBuf,
+    pub mode: TaskPersistenceMode,
+}
+
+impl WorkspaceTaskRepo {
+    pub fn new(workspace: impl Into<PathBuf>, mode: TaskPersistenceMode) -> Self {
+        Self {
+            workspace: workspace.into(),
+            mode,
+        }
+    }
+}
+
+impl TaskRepository for WorkspaceTaskRepo {
+    fn list_filtered(
+        &self,
+        status: Option<TaskStatus>,
+        tenant_id: Option<&str>,
+        organization_id: Option<&str>,
+        team_id: Option<&str>,
+        workflow_run_id: Option<&str>,
+    ) -> Result<Vec<Task>, String> {
+        list_tasks(
+            &self.workspace,
+            self.mode,
+            status,
+            tenant_id,
+            organization_id,
+            team_id,
+            workflow_run_id,
+        )
+    }
+
+    fn get_by_id(&self, id: &str) -> Result<Option<Task>, String> {
+        get_task(&self.workspace, self.mode, id)
+    }
+
+    fn upsert(&self, task: &Task) -> Result<(), String> {
+        upsert_task(&self.workspace, self.mode, task)
+    }
+
+    fn append(&self, tasks: &[Task]) -> Result<(), String> {
+        append_tasks(&self.workspace, self.mode, tasks)
     }
 }
 
@@ -214,6 +283,7 @@ fn filter_tasks(
     tenant_id: Option<&str>,
     organization_id: Option<&str>,
     team_id: Option<&str>,
+    workflow_run_id: Option<&str>,
 ) -> Vec<Task> {
     tasks.retain(|task| status.is_none_or(|s| task.status == s));
     tasks.retain(|task| {
@@ -223,6 +293,9 @@ fn filter_tasks(
         organization_id.is_none_or(|oid| task.organization_id.as_deref() == Some(oid))
     });
     tasks.retain(|task| team_id.is_none_or(|tm| task.team_id.as_deref() == Some(tm)));
+    tasks.retain(|task| {
+        workflow_run_id.is_none_or(|w| task.workflow_run_id.as_deref() == Some(w))
+    });
     tasks
 }
 
@@ -234,12 +307,20 @@ pub fn list_tasks(
     tenant_id: Option<&str>,
     organization_id: Option<&str>,
     team_id: Option<&str>,
+    workflow_run_id: Option<&str>,
 ) -> Result<Vec<Task>, String> {
     let tasks = match mode {
         TaskPersistenceMode::Json => load_tasks(workspace),
         TaskPersistenceMode::Sql | TaskPersistenceMode::DualWrite => list_tasks_sql(workspace)?,
     };
-    Ok(filter_tasks(tasks, status, tenant_id, organization_id, team_id))
+    Ok(filter_tasks(
+        tasks,
+        status,
+        tenant_id,
+        organization_id,
+        team_id,
+        workflow_run_id,
+    ))
 }
 
 pub fn get_task(
@@ -363,6 +444,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::TaskRepository;
 
     #[test]
     fn task_status_db_roundtrip() {
@@ -416,5 +498,95 @@ mod tests {
         assert_eq!(got.assignee_ids, task.assignee_ids);
         assert_eq!(got.workflow_template_version, task.workflow_template_version);
         assert_eq!(got.status, TaskStatus::Todo);
+    }
+
+    #[test]
+    fn workspace_task_repo_implements_trait() {
+        let dir = std::env::temp_dir().join(format!("bee_task_repo_trait_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join(".bee")).unwrap();
+        let store = SaasSqliteStore::new(super::saas_db_path(&dir)).unwrap();
+        let c = store.connection();
+        c.execute(
+            "INSERT OR IGNORE INTO saas_tenants (id, name, status, created_at, updated_at)
+             VALUES ('tenant-default', 'Default', 'active', '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT OR IGNORE INTO saas_organizations (id, tenant_id, name, created_at, updated_at)
+             VALUES ('org-default', 'tenant-default', 'Default', '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let repo = WorkspaceTaskRepo::new(&dir, TaskPersistenceMode::Sql);
+        let _: &dyn TaskRepository = &repo;
+        let task = Task {
+            id: "tr1".to_string(),
+            tenant_id: Some("tenant-default".to_string()),
+            organization_id: Some("org-default".to_string()),
+            team_id: None,
+            title: "t".to_string(),
+            description: None,
+            status: TaskStatus::Todo,
+            assignee_ids: vec![],
+            group_id: None,
+            coordinator_id: None,
+            workflow_template_id: None,
+            workflow_run_id: Some("run-xyz".to_string()),
+            workflow_template_version: None,
+            internal_group: false,
+            created_at: "2020-01-01T00:00:00Z".to_string(),
+            updated_at: "2020-01-01T00:00:00Z".to_string(),
+        };
+        TaskRepository::upsert(&repo, &task).unwrap();
+        let listed = repo
+            .list_filtered(None, None, None, None, Some("run-xyz"))
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "tr1");
+    }
+
+    #[test]
+    fn sql_task_survives_db_reopen() {
+        let dir = std::env::temp_dir().join(format!("bee_task_repo_reopen_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join(".bee")).unwrap();
+        {
+            let store = SaasSqliteStore::new(super::saas_db_path(&dir)).unwrap();
+            let c = store.connection();
+            c.execute(
+                "INSERT OR IGNORE INTO saas_tenants (id, name, status, created_at, updated_at)
+                 VALUES ('tenant-default', 'Default', 'active', '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT OR IGNORE INTO saas_organizations (id, tenant_id, name, created_at, updated_at)
+                 VALUES ('org-default', 'tenant-default', 'Default', '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        }
+        let mode = TaskPersistenceMode::Sql;
+        let task = Task {
+            id: "persist1".to_string(),
+            tenant_id: Some("tenant-default".to_string()),
+            organization_id: Some("org-default".to_string()),
+            team_id: None,
+            title: "after reopen".to_string(),
+            description: None,
+            status: TaskStatus::Todo,
+            assignee_ids: vec![],
+            group_id: None,
+            coordinator_id: None,
+            workflow_template_id: None,
+            workflow_run_id: None,
+            workflow_template_version: None,
+            internal_group: false,
+            created_at: "2020-01-01T00:00:00Z".to_string(),
+            updated_at: "2020-01-01T00:00:00Z".to_string(),
+        };
+        upsert_task(&dir, mode, &task).unwrap();
+        let got = get_task(&dir, mode, "persist1").unwrap().unwrap();
+        assert_eq!(got.title, "after reopen");
     }
 }
