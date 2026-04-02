@@ -219,8 +219,8 @@ const SAAS_SCHEMA_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_saas_conversations_org ON saas_conversations(organization_id)",
     "CREATE INDEX IF NOT EXISTS idx_saas_messages_conversation ON saas_conversation_messages(conversation_id)",
     "CREATE INDEX IF NOT EXISTS idx_saas_tasks_org ON saas_tasks(organization_id)",
-    "CREATE INDEX IF NOT EXISTS idx_saas_tasks_project ON saas_tasks(project_id)",
-    "CREATE INDEX IF NOT EXISTS idx_saas_tasks_parent ON saas_tasks(parent_task_id)",
+    // idx_saas_tasks_project / idx_saas_tasks_parent：旧库 saas_tasks 可能尚无 project_id、parent_task_id，
+    // 须在 init_schema 末尾 ensure_column 之后再建索引（见 init_schema 尾部）。
     "CREATE TABLE IF NOT EXISTS saas_workflow_templates (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
@@ -355,6 +355,14 @@ impl SaasSqliteStore {
         ensure_column(&self.conn, "saas_tasks", "artifacts_json", "TEXT")?;
         ensure_column(&self.conn, "saas_tasks", "execution_json", "TEXT")?;
         ensure_column(&self.conn, "saas_tasks", "review_report_json", "TEXT")?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_saas_tasks_project ON saas_tasks(project_id)",
+            [],
+        )?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_saas_tasks_parent ON saas_tasks(parent_task_id)",
+            [],
+        )?;
         Ok(())
     }
 
@@ -1022,6 +1030,67 @@ mod tests {
             .unwrap();
 
         assert!(count >= 12, "expected SaaS tables to be created");
+    }
+
+    /// 旧库仅有「无 project_id / parent_task_id」的 saas_tasks 时，init_schema 不得在建索引阶段失败。
+    #[test]
+    fn legacy_saas_tasks_without_project_columns_migrates() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("saas.db");
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                r"
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE saas_tenants (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE saas_organizations (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                slug TEXT,
+                industry TEXT,
+                description TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (tenant_id) REFERENCES saas_tenants(id)
+            );
+            CREATE TABLE saas_tasks (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                organization_id TEXT NOT NULL,
+                team_id TEXT,
+                workspace_id TEXT,
+                title TEXT NOT NULL,
+                description TEXT,
+                assignee_agent_id TEXT,
+                creator_user_id TEXT,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (tenant_id) REFERENCES saas_tenants(id),
+                FOREIGN KEY (organization_id) REFERENCES saas_organizations(id)
+            );
+            ",
+            )
+            .unwrap();
+        }
+
+        let store = SaasSqliteStore::new(&db_path).expect("migrate legacy saas_tasks");
+        let n: i64 = store
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('saas_tasks') WHERE name = 'project_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1);
     }
 
     #[test]
