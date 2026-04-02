@@ -3,6 +3,9 @@
 //! bee-web: `cargo run --bin bee-web --features web`
 //! bee-admin: `cargo run --bin bee-admin --features web`
 
+#[path = "handlers/admin.rs"]
+pub(crate) mod admin_handlers;
+
 #[path = "assistant_catalog.rs"]
 mod assistant_catalog;
 #[path = "dynamic_agent_catalog.rs"]
@@ -145,7 +148,7 @@ fn emit_event(bus: &broadcast::Sender<String>, ev: WorkspaceEvent) {
 /// 心跳时发给 Agent 的提示：根据长期记忆与当前状态检查待办或需跟进事项
 const HEARTBEAT_PROMPT: &str = "Heartbeat: 你正在后台自主运行。请根据长期记忆与当前状态，检查是否有待办或需跟进的事项；若有则输出一条简短建议，若无则仅回复 OK。可使用 cat/ls 查看 workspace 下 memory 或任务文件。";
 
-struct AppState {
+pub(crate) struct AppState {
     /// 应用配置（解决问题 1.2）
     config: AppConfig,
     /// 可运行时替换，以支持「多 LLM 后端切换」与配置热更新（白皮书 Phase 5）
@@ -694,7 +697,7 @@ fn create_llm_for_model(entry: &ModelEntry) -> Arc<dyn bee::llm::LlmClient> {
     ))
 }
 
-fn saas_db_path(workspace: &std::path::Path) -> PathBuf {
+pub(crate) fn saas_db_path(workspace: &std::path::Path) -> PathBuf {
     workspace.join(".bee").join("saas.db")
 }
 
@@ -1045,8 +1048,9 @@ async fn build_app_state() -> anyhow::Result<Arc<AppState>> {
 }
 
 /// 管理类 REST（供 web-ui / 运维）；不含对话与静态页
-fn router_admin_api() -> Router<Arc<AppState>> {
+fn router_admin_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
+        // 原有的管理 API
         .route("/api/assistants", get(api_assistants_list))
         .route("/api/agent-templates", get(api_agent_templates_list))
         .route("/api/agents", get(api_agents_list).post(api_agents_create))
@@ -1087,18 +1091,23 @@ fn router_admin_api() -> Router<Arc<AppState>> {
             "/api/skills/import-openclaw",
             post(api_skill_import_openclaw),
         )
-        .route("/api/memory/consolidate", post(api_memory_consolidate))
-        .route(
-            "/api/memory/consolidate-llm",
-            post(api_memory_consolidate_llm),
-        )
-        .route("/api/config/reload", post(api_config_reload))
+        // 新增管理 API (租户/组织/团队/成员管理)
+        .merge(admin_handlers::create_router(&state.workspace))
+        // 观测性 API
         .route("/api/health", get(|| async { "OK" }))
         .route("/api/metrics", get(api_metrics))
         .route("/api/metrics/prometheus", get(api_metrics_prometheus))
         .route("/api/events", get(api_events_sse))
         .route("/api/traces/recent", get(api_traces_recent))
         .route("/api/traces/:request_id", get(api_traces_get))
+        // 记忆管理 API
+        .route("/api/memory/consolidate", post(api_memory_consolidate))
+        .route(
+            "/api/memory/consolidate-llm",
+            post(api_memory_consolidate_llm),
+        )
+        .route("/api/config/reload", post(api_config_reload))
+        .with_state(state)
 }
 
 /// 对话、收件箱与静态资源（仅 bee-web）
@@ -1210,7 +1219,7 @@ pub async fn run_web_server() -> anyhow::Result<()> {
     let state = build_app_state().await?;
     let cfg = state.config.clone();
     let app = router_chat_and_static()
-        .merge(router_admin_api())
+        .merge(router_admin_api(state.clone()))
         .with_state(Arc::clone(&state));
 
     spawn_background_tasks(&state, &cfg);
@@ -1238,7 +1247,7 @@ pub async fn run_admin_server() -> anyhow::Result<()> {
 
     let state = build_app_state().await?;
     let cfg = state.config.clone();
-    let app = router_admin_api().with_state(Arc::clone(&state));
+    let app = router_admin_api(state.clone());
 
     spawn_background_tasks(&state, &cfg);
 
@@ -1250,7 +1259,8 @@ pub async fn run_admin_server() -> anyhow::Result<()> {
     tracing::info!("Bee Admin API: http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    let app_with_state = app.with_state(Arc::clone(&state));
+    axum::serve(listener, app_with_state).await?;
     Ok(())
 }
 

@@ -2,7 +2,10 @@
 //!
 //! 这些模型用于支撑多租户、组织、团队、Agent 模板/实例、会话与任务的产品化演进。
 
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
+use rusqlite::ToSql;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Tenant {
@@ -21,6 +24,38 @@ pub enum TenantStatus {
     Active,
     Suspended,
     Archived,
+}
+
+impl fmt::Display for TenantStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TenantStatus::Active => write!(f, "active"),
+            TenantStatus::Suspended => write!(f, "suspended"),
+            TenantStatus::Archived => write!(f, "archived"),
+        }
+    }
+}
+
+impl ToSql for TenantStatus {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(match self {
+            TenantStatus::Active => "active",
+            TenantStatus::Suspended => "suspended",
+            TenantStatus::Archived => "archived",
+        }))
+    }
+}
+
+impl FromSql for TenantStatus {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let str = value.as_str()?;
+        match str {
+            "active" => Ok(TenantStatus::Active),
+            "suspended" => Ok(TenantStatus::Suspended),
+            "archived" => Ok(TenantStatus::Archived),
+            _ => Err(FromSqlError::InvalidType),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -86,6 +121,41 @@ pub enum MembershipRole {
     OrgAdmin,
     TeamAdmin,
     Member,
+}
+
+impl fmt::Display for MembershipRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MembershipRole::PlatformAdmin => write!(f, "platform_admin"),
+            MembershipRole::OrgAdmin => write!(f, "org_admin"),
+            MembershipRole::TeamAdmin => write!(f, "team_admin"),
+            MembershipRole::Member => write!(f, "member"),
+        }
+    }
+}
+
+impl ToSql for MembershipRole {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(match self {
+            MembershipRole::PlatformAdmin => "platform_admin",
+            MembershipRole::OrgAdmin => "org_admin",
+            MembershipRole::TeamAdmin => "team_admin",
+            MembershipRole::Member => "member",
+        }))
+    }
+}
+
+impl FromSql for MembershipRole {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let str = value.as_str()?;
+        match str {
+            "platform_admin" => Ok(MembershipRole::PlatformAdmin),
+            "org_admin" => Ok(MembershipRole::OrgAdmin),
+            "team_admin" => Ok(MembershipRole::TeamAdmin),
+            "member" => Ok(MembershipRole::Member),
+            _ => Err(FromSqlError::InvalidType),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

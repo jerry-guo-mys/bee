@@ -17,7 +17,43 @@ import type {
   TracesRecentResponse,
   WorkflowRunResult,
   WorkflowTemplateSummary,
+  // SaaS Admin types
+  Tenant,
+  TenantDetail,
+  TenantListResponse,
+  CreateTenantBody,
+  Organization,
+  OrganizationListResponse,
+  CreateOrganizationBody,
+  Team,
+  TeamListResponse,
+  CreateTeamBody,
+  Member,
+  MemberListResponse,
+  GetMembersParams,
+  AuditLogParams,
+  TenantStatus,
 } from './api-types'
+
+// Re-export types for convenience
+export type {
+  Tenant,
+  TenantDetail,
+  TenantListResponse,
+  CreateTenantBody,
+  Organization,
+  OrganizationListResponse,
+  CreateOrganizationBody,
+  Team,
+  TeamListResponse,
+  CreateTeamBody,
+  Member,
+  MemberListResponse,
+  GetMembersParams,
+  AuditLogParams,
+  TenantStatus,
+  AuditLogRecord,
+}
 import { loadAdminScope, scopeToQueryParams, type AdminScope } from './scope-storage'
 
 const PREFIX = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -181,4 +217,103 @@ export async function startWorkflow(body: StartWorkflowBody): Promise<WorkflowRu
     body: JSON.stringify(payload),
   })
   return handleResponse<WorkflowRunResult>(res)
+}
+
+// ==================== SaaS Admin APIs (Phase 1+2) ====================
+
+// Tenant APIs
+export async function getTenants(params?: { status?: string }): Promise<TenantListResponse> {
+  const q: Record<string, string> = {}
+  if (params?.status) q.status = params.status
+  const res = await fetch(buildUrl('/api/admin/tenants', q))
+  return handleResponse<TenantListResponse>(res)
+}
+
+export async function getTenantDetail(id: string): Promise<TenantDetail> {
+  const res = await fetch(buildUrl(`/api/admin/tenants/${id}`))
+  return handleResponse<TenantDetail>(res)
+}
+
+export async function createTenant(body: CreateTenantBody): Promise<Tenant> {
+  const res = await fetch(buildUrl('/api/admin/tenants'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return handleResponse<Tenant>(res)
+}
+
+export async function suspendTenant(id: string): Promise<void> {
+  const res = await fetch(buildUrl(`/api/admin/tenants/${id}/suspend`), {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export async function restoreTenant(id: string): Promise<void> {
+  const res = await fetch(buildUrl(`/api/admin/tenants/${id}/restore`), {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export async function archiveTenant(id: string): Promise<void> {
+  const res = await fetch(buildUrl(`/api/admin/tenants/${id}/archive`), {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+// Organization APIs
+export async function getOrganizations(params?: { tenant_id?: string }): Promise<OrganizationListResponse> {
+  const q: Record<string, string> = {}
+  if (params?.tenant_id) q.tenant_id = params.tenant_id
+  const res = await fetch(buildUrl('/api/admin/organizations', q))
+  return handleResponse<OrganizationListResponse>(res)
+}
+
+export async function createOrganization(body: CreateOrganizationBody): Promise<Organization> {
+  const res = await fetch(buildUrl('/api/admin/organizations'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return handleResponse<Organization>(res)
+}
+
+// Team APIs
+export async function getTeams(params?: { organization_id?: string }): Promise<TeamListResponse> {
+  const q: Record<string, string> = {}
+  if (params?.organization_id) q.organization_id = params.organization_id
+  const res = await fetch(buildUrl('/api/admin/teams', q))
+  return handleResponse<TeamListResponse>(res)
+}
+
+export async function createTeam(body: CreateTeamBody): Promise<Team> {
+  const res = await fetch(buildUrl('/api/admin/teams'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return handleResponse<Team>(res)
+}
+
+// Member APIs
+export async function getMembers(params?: GetMembersParams): Promise<MemberListResponse> {
+  const q: Record<string, string> = { ...managementScopeQuery() }
+  if (params?.tenant_id) q.tenant_id = params.tenant_id
+  if (params?.organization_id) q.organization_id = params.organization_id
+  if (params?.role) q.role = params.role
+  const res = await fetch(buildUrl('/api/admin/members', q))
+  return handleResponse<MemberListResponse>(res)
+}
+
+// Audit Log APIs
+export async function getAuditLogsEnhanced(params?: AuditLogParams): Promise<AuditLogRecord[]> {
+  const q: Record<string, string> = { ...managementScopeQuery() }
+  if (params?.tenant_id) q.tenant_id = params.tenant_id
+  if (params?.organization_id) q.organization_id = params.organization_id
+  if (params?.limit) q.limit = String(params.limit)
+  const res = await fetch(buildUrl('/api/admin/audit-logs', q))
+  return handleResponse<AuditLogRecord[]>(res)
 }

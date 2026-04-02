@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Plus, Search, MoreVertical, Clock, ChevronRight, Workflow, User } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -6,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/utils';
 import { createTask, getTasks, getWorkflowTemplates, startWorkflow } from '@/lib/api';
-import { ADMIN_SCOPE_CHANGED_EVENT } from '@/lib/scope-storage';
+import { ADMIN_SCOPE_CHANGED_EVENT, loadAdminScope } from '@/lib/scope-storage';
 import type { Task, TaskStatus, WorkflowTemplateSummary } from '@/lib/api-types';
 
 /** Kanban column id for UI */
@@ -62,6 +63,9 @@ export default function WorkflowsPage() {
   const [wfSubmitting, setWfSubmitting] = useState(false);
   const [wfMessage, setWfMessage] = useState<string | null>(null);
   const [showWorkflowStart, setShowWorkflowStart] = useState(false);
+  const [scopeMissingTeam, setScopeMissingTeam] = useState(
+    () => !loadAdminScope().team_id.trim()
+  );
 
   const load = useCallback(async () => {
     try {
@@ -94,6 +98,7 @@ export default function WorkflowsPage() {
 
   useEffect(() => {
     const onScope = () => {
+      setScopeMissingTeam(!loadAdminScope().team_id.trim());
       load();
       loadTemplates();
     };
@@ -142,7 +147,7 @@ export default function WorkflowsPage() {
         title,
         description: wfDescription.trim() || undefined,
       });
-      setWfMessage(`已创建工作流 ${res.workflow_run_id}，生成 ${res.tasks.length} 个任务`);
+      setWfMessage(`已启动流程 ${res.workflow_run_id}，生成 ${res.tasks.length} 个任务`);
       setWfTitle('');
       setWfDescription('');
       await load();
@@ -161,10 +166,25 @@ export default function WorkflowsPage() {
 
   return (
     <div className="space-y-6">
+      {scopeMissingTeam && (
+        <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30">
+          <CardContent className="p-4 text-sm text-amber-900 dark:text-amber-100">
+            当前未选择 <strong>团队（team_id）</strong>，从模板<strong>启动流程</strong>时任务可能无法正确归属到团队 scope。请在{' '}
+            <Link to="/settings" className="underline font-medium hover:no-underline">
+              系统设置
+            </Link>{' '}
+            中填写并保存 <code className="text-xs px-1 rounded bg-amber-100/80 dark:bg-amber-900/40">team_id</code>
+            。
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-surface-100">任务/Workflow</h1>
-          <p className="text-surface-500 dark:text-surface-400 mt-1">数据来自 /api/tasks（看板按任务状态分列）</p>
+          <h1 className="text-2xl font-bold text-surface-900 dark:text-surface-100">工作台 · 流程与任务</h1>
+          <p className="text-surface-500 dark:text-surface-400 mt-1">
+            管理任务看板，并按模板一键生成多步任务（数据来自任务与流程 API）
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="outline" size="sm" onClick={() => setViewMode(viewMode === 'kanban' ? 'list' : 'kanban')}>
@@ -176,7 +196,7 @@ export default function WorkflowsPage() {
             onClick={() => setShowWorkflowStart((v) => !v)}
           >
             <Workflow className="w-5 h-5" />
-            从模板启动
+            从模板启动流程
           </Button>
           <Button type="button" onClick={() => setCreating((v) => !v)}>
             <Plus className="w-5 h-5" />
@@ -228,7 +248,7 @@ export default function WorkflowsPage() {
             )}
             <form onSubmit={handleStartWorkflow} className="space-y-3 max-w-xl">
               <div>
-                <label className="block text-xs font-medium text-surface-500 mb-1">工作流标题</label>
+                <label className="block text-xs font-medium text-surface-500 mb-1">流程标题</label>
                 <input
                   className="w-full px-3 py-2 rounded-lg border border-surface-200 dark:border-surface-600 bg-surface-50 dark:bg-surface-700 text-surface-900 dark:text-surface-100"
                   value={wfTitle}
@@ -245,7 +265,7 @@ export default function WorkflowsPage() {
                 />
               </div>
               <Button type="submit" disabled={wfSubmitting || !wfTemplateId || !wfTitle.trim()}>
-                {wfSubmitting ? '启动中…' : '启动工作流'}
+                {wfSubmitting ? '启动中…' : '启动流程'}
               </Button>
             </form>
             {wfMessage && (

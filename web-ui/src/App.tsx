@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import Dashboard from '@/pages/Dashboard';
 import Agents from '@/pages/Agents';
@@ -6,6 +6,11 @@ import Workflows from '@/pages/Workflows';
 import Monitoring from '@/pages/Monitoring';
 import Settings from '@/pages/Settings';
 import ToolPolicies from '@/pages/ToolPolicies';
+import Tenants from '@/pages/Tenants';
+import Organizations from '@/pages/Organizations';
+import Teams from '@/pages/Teams';
+import Members from '@/pages/Members';
+import AuditLogs from '@/pages/AuditLogs';
 
 const router = createBrowserRouter([
   {
@@ -21,16 +26,44 @@ const router = createBrowserRouter([
         element: <Agents />,
       },
       {
-        path: 'workflows',
+        path: 'workbench/runs',
         element: <Workflows />,
+      },
+      {
+        path: 'workbench',
+        element: <Navigate to="/workbench/runs" replace />,
+      },
+      {
+        path: 'workflows',
+        element: <Navigate to="/workbench/runs" replace />,
+      },
+      {
+        path: 'tool-policies',
+        element: <ToolPolicies />,
       },
       {
         path: 'monitoring',
         element: <Monitoring />,
       },
       {
-        path: 'tool-policies',
-        element: <ToolPolicies />,
+        path: 'tenants',
+        element: <Tenants />,
+      },
+      {
+        path: 'organizations',
+        element: <Organizations />,
+      },
+      {
+        path: 'teams',
+        element: <Teams />,
+      },
+      {
+        path: 'members',
+        element: <Members />,
+      },
+      {
+        path: 'audit-logs',
+        element: <AuditLogs />,
       },
       {
         path: 'settings',

@@ -30,8 +30,8 @@ pub use bootstrap_service::{
 pub use migration::{LegacyWorkspaceImporter, MigrationReport};
 pub use models::{
     AgentInstance, AgentTemplate, AuditLogRecord, CollaborationGroup, Conversation,
-    ConversationMessage, Membership, Organization, TaskRecord, Team, Tenant, ToolAccessPolicy,
-    UserAccount, Workspace,
+    ConversationMessage, Membership, MembershipRole, Organization, TaskRecord, Team, Tenant,
+    TenantStatus, ToolAccessPolicy, UserAccount, Workspace,
 };
 pub use repository::{
     AgentRepository, AuditRepository, ConversationRepository, OrgRepository, TaskRepository,

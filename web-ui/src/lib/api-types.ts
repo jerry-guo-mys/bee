@@ -168,3 +168,104 @@ export interface PutToolPolicyBody {
   allowed_tool_ids: string[]
   denied_tool_ids: string[]
 }
+
+// ==================== SaaS Admin Types (Phase 1+2) ====================
+
+export type TenantStatus = 'active' | 'suspended' | 'archived'
+
+export interface Tenant {
+  id: string
+  name: string
+  status: TenantStatus
+  organization_count: number
+  created_at: string
+}
+
+export interface TenantDetail extends Tenant {
+  updated_at: string
+  organizations: Organization[]
+}
+
+export interface TenantListResponse {
+  tenants: Tenant[]
+  total: number
+}
+
+export interface Organization {
+  id: string
+  tenant_id: string
+  name: string
+  slug: string
+  member_count: number
+  member_limit?: number | null
+  created_at: string
+}
+
+export interface OrganizationListResponse {
+  organizations: Organization[]
+  total: number
+}
+
+export interface Team {
+  id: string
+  organization_id: string
+  name: string
+  code?: string | null
+  description?: string | null
+  parent_team_id?: string | null
+  member_count: number
+  created_at: string
+}
+
+export interface TeamListResponse {
+  teams: Team[]
+  total: number
+}
+
+export interface Member {
+  id: string
+  tenant_id: string
+  organization_id: string
+  team_id?: string | null
+  user_id: string
+  email?: string | null
+  role: string
+  status: string
+  created_at: string
+}
+
+export interface MemberListResponse {
+  members: Member[]
+  total: number
+}
+
+// Request types
+export interface CreateTenantBody {
+  name: string
+}
+
+export interface CreateOrganizationBody {
+  tenant_id: string
+  name: string
+  slug?: string
+}
+
+export interface CreateTeamBody {
+  organization_id: string
+  name: string
+  code?: string
+  description?: string
+  parent_team_id?: string
+}
+
+export interface GetMembersParams {
+  tenant_id?: string
+  organization_id?: string
+  role?: string
+}
+
+export interface AuditLogParams {
+  tenant_id?: string
+  organization_id?: string
+  limit?: number
+}

@@ -258,6 +258,342 @@ impl SaasSqliteStore {
     pub fn connection(&self) -> &Connection {
         &self.conn
     }
+
+    // ==================== Tenant 相关方法 ====================
+
+    pub fn list_tenants(&self) -> anyhow::Result<Vec<crate::saas::Tenant>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, status, created_at, updated_at FROM saas_tenants ORDER BY created_at DESC"
+        )?;
+        let tenants = stmt.query_map([], |row| {
+            Ok(crate::saas::Tenant {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                status: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })?;
+        tenants.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(|e| anyhow::anyhow!(e))
+    }
+
+    pub fn get_tenant(&self, id: &str) -> anyhow::Result<Option<crate::saas::Tenant>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, status, created_at, updated_at FROM saas_tenants WHERE id = ?"
+        )?;
+        let mut rows = stmt.query_map([id], |row| {
+            Ok(crate::saas::Tenant {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                status: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })?;
+        if let Some(row) = rows.next() {
+            Ok(Some(row?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn create_tenant(&self, tenant: &crate::saas::Tenant) -> anyhow::Result<()> {
+        self.conn.execute(
+            "INSERT INTO saas_tenants (id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            [
+                &tenant.id,
+                &tenant.name,
+                &tenant.status.to_string(),
+                &tenant.created_at,
+                &tenant.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_tenant_status(&self, id: &str, status: &crate::saas::TenantStatus) -> anyhow::Result<()> {
+        self.conn.execute(
+            "UPDATE saas_tenants SET status = ?, updated_at = datetime('now') WHERE id = ?",
+            [&status.to_string(), id],
+        )?;
+        Ok(())
+    }
+
+    // ==================== Organization 相关方法 ====================
+
+    pub fn list_organizations(&self, tenant_id: Option<&str>) -> anyhow::Result<Vec<crate::saas::Organization>> {
+        let sql = match tenant_id {
+            Some(tid) => format!(
+                "SELECT id, tenant_id, name, slug, industry, description, created_at, updated_at FROM saas_organizations WHERE tenant_id = '{}' ORDER BY created_at DESC",
+                tid.replace('\'', "''")
+            ),
+            None => "SELECT id, tenant_id, name, slug, industry, description, created_at, updated_at FROM saas_organizations ORDER BY created_at DESC".to_string(),
+        };
+        let mut stmt = self.conn.prepare(&sql)?;
+        let orgs = stmt.query_map([], |row| {
+            Ok(crate::saas::Organization {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                name: row.get(2)?,
+                slug: row.get(3)?,
+                industry: row.get(4)?,
+                description: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+        orgs.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(|e| anyhow::anyhow!(e))
+    }
+
+    pub fn get_organization(&self, id: &str) -> anyhow::Result<Option<crate::saas::Organization>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, tenant_id, name, slug, industry, description, created_at, updated_at FROM saas_organizations WHERE id = ?"
+        )?;
+        let mut rows = stmt.query_map([id], |row| {
+            Ok(crate::saas::Organization {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                name: row.get(2)?,
+                slug: row.get(3)?,
+                industry: row.get(4)?,
+                description: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+        if let Some(row) = rows.next() {
+            Ok(Some(row?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn create_organization(&self, org: &crate::saas::Organization) -> anyhow::Result<()> {
+        self.conn.execute(
+            "INSERT INTO saas_organizations (id, tenant_id, name, slug, industry, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                &org.id,
+                &org.tenant_id,
+                &org.name,
+                org.slug.as_deref().unwrap_or(""),
+                org.industry.as_deref().unwrap_or(""),
+                org.description.as_deref().unwrap_or(""),
+                &org.created_at,
+                &org.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    // ==================== Team 相关方法 ====================
+
+    pub fn list_teams(&self, organization_id: Option<&str>) -> anyhow::Result<Vec<crate::saas::Team>> {
+        let sql = match organization_id {
+            Some(org_id) => format!(
+                "SELECT id, tenant_id, organization_id, name, code, description, parent_team_id, created_at, updated_at FROM saas_teams WHERE organization_id = '{}' ORDER BY created_at DESC",
+                org_id.replace('\'', "''")
+            ),
+            None => "SELECT id, tenant_id, organization_id, name, code, description, parent_team_id, created_at, updated_at FROM saas_teams ORDER BY created_at DESC".to_string(),
+        };
+        let mut stmt = self.conn.prepare(&sql)?;
+        let teams = stmt.query_map([], |row| {
+            Ok(crate::saas::Team {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                organization_id: row.get(2)?,
+                name: row.get(3)?,
+                code: row.get(4)?,
+                description: row.get(5)?,
+                parent_team_id: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?;
+        teams.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(|e| anyhow::anyhow!(e))
+    }
+
+    pub fn get_team(&self, id: &str) -> anyhow::Result<Option<crate::saas::Team>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, tenant_id, organization_id, name, code, description, parent_team_id, created_at, updated_at FROM saas_teams WHERE id = ?"
+        )?;
+        let mut rows = stmt.query_map([id], |row| {
+            Ok(crate::saas::Team {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                organization_id: row.get(2)?,
+                name: row.get(3)?,
+                code: row.get(4)?,
+                description: row.get(5)?,
+                parent_team_id: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?;
+        if let Some(row) = rows.next() {
+            Ok(Some(row?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn create_team(&self, team: &crate::saas::Team) -> anyhow::Result<()> {
+        self.conn.execute(
+            "INSERT INTO saas_teams (id, tenant_id, organization_id, name, code, description, parent_team_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                &team.id,
+                &team.tenant_id,
+                &team.organization_id,
+                &team.name,
+                team.code.as_deref().unwrap_or(""),
+                team.description.as_deref().unwrap_or(""),
+                team.parent_team_id.as_deref().unwrap_or(""),
+                &team.created_at,
+                &team.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    // ==================== Membership 相关方法 ====================
+
+    pub fn list_memberships(&self, tenant_id: Option<&str>, organization_id: Option<&str>) -> anyhow::Result<Vec<crate::saas::Membership>> {
+        let mut conditions = Vec::new();
+        let mut params: Vec<&str> = Vec::new();
+
+        if let Some(tid) = tenant_id {
+            conditions.push("tenant_id = ?");
+            params.push(tid);
+        }
+        if let Some(org_id) = organization_id {
+            conditions.push("organization_id = ?");
+            params.push(org_id);
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", conditions.join(" AND "))
+        };
+
+        let sql = format!(
+            "SELECT id, tenant_id, organization_id, user_id, team_id, role, created_at, updated_at FROM saas_memberships{} ORDER BY created_at DESC",
+            where_clause
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let memberships = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(crate::saas::Membership {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                organization_id: row.get(2)?,
+                user_id: row.get(3)?,
+                team_id: row.get(4)?,
+                role: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+        memberships.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(|e| anyhow::anyhow!(e))
+    }
+
+    pub fn get_membership(&self, id: &str) -> anyhow::Result<Option<crate::saas::Membership>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, tenant_id, organization_id, user_id, team_id, role, created_at, updated_at FROM saas_memberships WHERE id = ?"
+        )?;
+        let mut rows = stmt.query_map([id], |row| {
+            Ok(crate::saas::Membership {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                organization_id: row.get(2)?,
+                user_id: row.get(3)?,
+                team_id: row.get(4)?,
+                role: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+        if let Some(row) = rows.next() {
+            Ok(Some(row?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn create_membership(&self, membership: &crate::saas::Membership) -> anyhow::Result<()> {
+        self.conn.execute(
+            "INSERT INTO saas_memberships (id, tenant_id, organization_id, user_id, team_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                &membership.id,
+                &membership.tenant_id,
+                &membership.organization_id,
+                &membership.user_id,
+                membership.team_id.as_deref().unwrap_or(""),
+                &membership.role.to_string(),
+                &membership.created_at,
+                &membership.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_membership_role(&self, id: &str, role: &crate::saas::MembershipRole) -> anyhow::Result<()> {
+        self.conn.execute(
+            "UPDATE saas_memberships SET role = ?, updated_at = datetime('now') WHERE id = ?",
+            [&role.to_string(), id],
+        )?;
+        Ok(())
+    }
+
+    // ==================== Audit Log 相关方法 ====================
+
+    pub fn list_audit_logs(
+        &self,
+        tenant_id: Option<&str>,
+        organization_id: Option<&str>,
+        limit: i64,
+    ) -> anyhow::Result<Vec<crate::saas::AuditLogRecord>> {
+        let mut conditions = Vec::new();
+        let mut params: Vec<&str> = Vec::new();
+
+        if let Some(tid) = tenant_id {
+            conditions.push("tenant_id = ?");
+            params.push(tid);
+        }
+        if let Some(org_id) = organization_id {
+            conditions.push("organization_id = ?");
+            params.push(org_id);
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", conditions.join(" AND "))
+        };
+
+        let sql = format!(
+            "SELECT id, tenant_id, organization_id, team_id, user_id, action, resource_type, resource_id, detail_json, created_at FROM saas_audit_logs{} ORDER BY created_at DESC LIMIT ?",
+            where_clause
+        );
+        let limit_str = limit.to_string();
+        params.push(&limit_str);
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let logs = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(crate::saas::AuditLogRecord {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                organization_id: row.get(2)?,
+                team_id: row.get(3)?,
+                user_id: row.get(4)?,
+                action: row.get(5)?,
+                resource_type: row.get(6)?,
+                resource_id: row.get(7)?,
+                detail_json: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        })?;
+        logs.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(|e| anyhow::anyhow!(e))
+    }
 }
 
 pub fn init_saas_sqlite(db_path: impl AsRef<Path>) -> anyhow::Result<SaasSqliteStore> {

@@ -89,7 +89,7 @@ toml = "0.8"
 bytes = { version = "1.0", optional = true }
 
 # WhatsApp 集成 (bee-whatsapp，需公网 Webhook 域名)
-axum = { version = "0.7", optional = true }
+axum = { version = "0.7", features = ["macros"], optional = true }
 tower = { version = "0.4", optional = true }
 tower-http = { version = "0.5", features = ["trace"], optional = true }
 
